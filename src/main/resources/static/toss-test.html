@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Toss Payments 테스트</title>
+  <script src="https://js.tosspayments.com/v1/payment-widget"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif; margin: 24px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+    .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
+    .row > * { margin: 4px 0; }
+    label { font-weight:600; font-size:14px; }
+    input { padding: 10px 12px; border:1px solid #d1d5db; border-radius:8px; min-width: 200px; }
+    button { padding:10px 14px; border:0; border-radius:10px; cursor:pointer; }
+    button.primary { background:#111827; color:#fff; }
+    button.ghost { background:#fff; border:1px solid #d1d5db; }
+    .muted { color:#6b7280; font-size: 12px; }
+    pre { background:#0b1021; color:#d1e6ff; padding:12px; border-radius:10px; overflow:auto; }
+    .ok { color:#065f46; }
+    .fail { color:#991b1b; }
+  </style>
+</head>
+<body>
+  <h1>토스페이먼츠 테스트 페이지</h1>
+
+  <div class="card" id="statusBox" style="display:none;"></div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="orderNo">주문번호(orderNo)</label><br/>
+        <input id="orderNo" type="number" placeholder="예: 1001" />
+      </div>
+      <div>
+        <label for="customerKey">고객키(customerKey)</label><br/>
+        <input id="customerKey" type="text" placeholder="예: user-123 (선택)" />
+      </div>
+      <div style="align-self:end;">
+        <button class="primary" id="btnPay">결제하기</button>
+        <button class="ghost" id="btnClear">초기화</button>
+      </div>
+    </div>
+    <div class="muted">※ orderNo는 서버의 주문 PK(Long)입니다. 고객키는 없는 경우 자동 생성됩니다.</div>
+  </div>
+
+  <div class="card">
+    <div id="methods"></div>
+    <div id="agreement" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>로그</h3>
+    <pre id="log"></pre>
+  </div>
+
+<script>
+(function () {
+  const logEl = document.getElementById('log');
+  function log(...args) {
+    const line = args.map(v => (typeof v === 'string' ? v : JSON.stringify(v, null, 2))).join(' ');
+    logEl.textContent += line + "\\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function qs(name) {
+    return new URLSearchParams(location.search).get(name);
+  }
+  function stripQuery() {
+    history.replaceState(null, "", location.pathname);
+  }
+  function setStatus(html) {
+    const box = document.getElementById('statusBox');
+    box.innerHTML = html;
+    box.style.display = 'block';
+  }
+
+  // Fetch client key (fallback to manual input if endpoint is missing)
+  async function getClientKey() {
+    try {
+      const res = await fetch('/api/pay/toss/client-key');
+      if (!res.ok) throw new Error('client-key endpoint not found');
+      const text = (await res.text()).trim();
+      if (!text) throw new Error('empty client key');
+      return text;
+    } catch (e) {
+      log('⚠️ 클라이언트 키 API 실패. 직접 입력 모드.');
+      return prompt('Toss Client Key (test_ck_...) 를 입력하세요:') || '';
+    }
+  }
+
+  // Prepare on server: send orderNo → receive {orderId, amount, orderName}
+  async function prepare(orderNo) {
+    const res = await fetch('/api/pay/toss/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderNo: Number(orderNo) })
+    });
+    if (!res.ok) throw new Error('prepare 실패: ' + res.status);
+    return await res.json();
+  }
+
+  // Confirm on server
+  async function confirm(paymentKey, orderId, amount) {
+    const res = await fetch('/api/pay/toss/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentKey, orderId, amount: Number(amount) })
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error('confirm 실패: ' + res.status + ' ' + msg);
+    }
+    return await res.json();
+  }
+
+  // If redirected back with query params from Toss → auto confirm
+  async function maybeAutoConfirm() {
+    const paymentKey = qs('paymentKey');
+    const orderId = qs('orderId');
+    aconst amount = qs('amount');
+    const failCode = qs('code');
+    const failMsg = qs('message');
+
+    if (paymentKey && orderId && amount) {
+      log('성공 리다이렉트 수신:', { paymentKey, orderId, amount });
+      try {
+        const res = await confirm(paymentKey, orderId, amount);
+        log('✅ confirm 성공', res);
+        setStatus(`<div class="ok"><strong>결제 승인 완료</strong><br/>paymentKey=${paymentKey}<br/>orderId=${orderId}<br/>amount=${amount}</div>`);
+      } catch (e) {
+        log('❌ confirm 에러', e);
+        setStatus(`<div class="fail"><strong>confirm 에러</strong><br/>${e.message}</div>`);
+      } finally {
+        // Keep params for debugging; uncomment to strip
+        // stripQuery();
+      }
+      return true;
+    }
+
+    if (failCode || failMsg) {
+      setStatus(`<div class="fail"><strong>결제 실패</strong><br/>code=${failCode || ''}<br/>message=${failMsg || ''}<br/>orderId=${orderId || ''}</div>`);
+      return true;
+    }
+    return false;
+  }
+
+  // Main setup
+  let widget; // PaymentWidget instance (lazy init)
+  async function init() {
+    // Handle success/fail redirect first
+    const handled = await maybeAutoConfirm();
+    if (handled) log('리다이렉트 처리 완료.');
+
+    // Prefill inputs
+    const orderNoInput = document.getElementById('orderNo');
+    const customerKeyInput = document.getElementById('customerKey');
+    orderNoInput.value = qs('orderNo') || '';
+    customerKeyInput.value = qs('user') || '';
+
+    document.getElementById('btnClear').onclick = () => {
+      stripQuery();
+      orderNoInput.value = '';
+      logEl.textContent = '';
+      document.getElementById('statusBox').style.display = 'none';
+    };
+
+    document.getElementById('btnPay').onclick = async () => {
+      const orderNo = orderNoInput.value.trim();
+      let customerKey = customerKeyInput.value.trim();
+      if (!orderNo) return alert('orderNo를 입력하세요.');
+      if (!customerKey) customerKey = 'guest-' + Math.random().toString(36).slice(2);
+
+      try {
+        const clientKey = await getClientKey();
+        if (!clientKey) return alert('Client Key가 필요합니다.');
+
+        // 1) Prepare on server
+        const prep = await prepare(orderNo);
+        log('prepare 응답:', prep);
+
+        // 2) Create PaymentWidget lazily, render methods only once
+        if (!widget) {
+          widget = PaymentWidget(clientKey, customerKey);
+          widget.renderPaymentMethods('#methods', { value: prep.amount });
+          widget.renderAgreement('#agreement');
+        }
+
+        // 3) Request payment
+        const successUrl = location.origin + location.pathname; // same page to auto-confirm
+        const failUrl = successUrl; // same page; we show error using code/message
+        log('requestPayment:', { orderId: prep.orderId, orderName: prep.orderName, amount: prep.amount, successUrl, failUrl });
+
+        await widget.requestPayment({
+          orderId: prep.orderId,
+          orderName: prep.orderName,
+          amount: prep.amount,
+          successUrl,
+          failUrl
+        });
+      } catch (e) {
+        console.error(e);
+        log('❌ 에러', e);
+        alert('에러: ' + (e.message || e));
+      }
+    };
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
