@@ -16,6 +16,18 @@ import java.time.LocalDateTime;
 @Log4j2
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(Exception.class)
+    public ApiError handleAllExceptions(Exception e, HttpServletRequest req) {
+
+        return ApiError.builder()
+                .isSuccess(false)
+                .resCode(String.valueOf(HttpStatus.INTERNAL_SERVER_ERROR.value()))  // int → String
+                .message(e.getMessage())
+                .path(req.getRequestURI())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
     @ExceptionHandler(MemberService.MemberIdExistException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiError handleMemberIdExist(MemberService.MemberIdExistException ex,
