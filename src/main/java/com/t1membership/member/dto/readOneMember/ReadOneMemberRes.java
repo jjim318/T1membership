@@ -1,5 +1,7 @@
 package com.t1membership.member.dto.readOneMember;
 
+import com.t1membership.member.domain.MemberEntity;
+import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import lombok.*;
 
 @Getter
@@ -15,4 +17,10 @@ public class ReadOneMemberRes {
     private String memberEmail;
     private String memberPhone;
     private String memberAddress;
+
+    public static ReadOneMemberRes from(MemberEntity memberEntity) {
+        return ReadOneMemberRes.builder()
+                .memberId(memberEntity.getMemberEmail())
+                .build();
+    }
 }

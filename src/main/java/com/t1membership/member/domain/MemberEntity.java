@@ -1,6 +1,7 @@
 package com.t1membership.member.domain;
 
 import com.t1membership.coreDomain.BaseEntity;
+import com.t1membership.member.constant.MemberRole;
 import com.t1membership.order.domain.OrderEntity;
 import jakarta.persistence.*;
 import lombok.*;
@@ -35,6 +36,9 @@ public class MemberEntity extends BaseEntity {
     private String memberImage;
     @Column(name = "member_address", nullable = false)
     private String memberAddress;
+
+    @Column(name = "member_role", nullable = false)
+    private MemberRole memberRole;
 
     @OneToMany(mappedBy = "t1_member",  cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderEntity> order = new ArrayList<>();

@@ -1,5 +1,6 @@
 package com.t1membership.member.dto.joinMember;
 
+import com.t1membership.member.domain.MemberEntity;
 import lombok.*;
 
 @Getter
@@ -15,4 +16,10 @@ public class JoinMemberRes {
     private String memberEmail;
     private String memberPhone;
     private String memberAddress;
+
+    public static JoinMemberRes from(MemberEntity memberEntity) {
+        return JoinMemberRes.builder()
+                .memberId(memberEntity.getMemberEmail())
+                .build();
+    }
 }
