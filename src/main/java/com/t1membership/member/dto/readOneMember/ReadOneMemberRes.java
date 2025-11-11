@@ -2,7 +2,10 @@ package com.t1membership.member.dto.readOneMember;
 
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
+import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import lombok.*;
+
+import java.util.List;
 
 @Getter
 @Setter
@@ -23,4 +26,5 @@ public class ReadOneMemberRes {
                 .memberId(memberEntity.getMemberEmail())
                 .build();
     }
+
 }

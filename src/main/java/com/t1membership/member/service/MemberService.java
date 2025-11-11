@@ -9,13 +9,17 @@ import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 public interface MemberService {
     JoinMemberRes joinMember(JoinMemberReq joinMemberReq);
-    ReadAllMemberRes readAllMember();
+    List<ReadAllMemberRes> readAllMember();
     ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq);
-    ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq);
+    ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq, MultipartFile multipartFile, Boolean removeProfile);
     DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq);
+
     public static class MemberIdExistException extends RuntimeException {
         public MemberIdExistException(String message) { super(message); }
     }

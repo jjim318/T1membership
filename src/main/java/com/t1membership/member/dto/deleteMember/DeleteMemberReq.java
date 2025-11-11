@@ -9,4 +9,5 @@ import lombok.*;
 @AllArgsConstructor
 public class DeleteMemberReq {
     private String memberId;
+    private String currenPw;//탈퇴확인용 비번
 }

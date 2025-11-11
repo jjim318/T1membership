@@ -32,7 +32,7 @@ public class MemberEntity extends BaseEntity {
     private String memberPhone;
     @Column(name = "member_birthY", nullable = false)
     private String memberBirthY;
-    @Column(name = "member_image", nullable = false)
+    @Column(name = "member_image")
     private String memberImage;
     @Column(name = "member_address", nullable = false)
     private String memberAddress;
