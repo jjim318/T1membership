@@ -13,11 +13,13 @@ import lombok.ToString;
 @ToString
 public class ModifyItemReq {
 
+    private Long itemNo;
+
     private String itemName;
 
-    private int itemPrice;
+    private Integer itemPrice;
 
-    private int itemStock;
+    private Integer itemStock;
 
     private ItemCategory itemCategory;
 

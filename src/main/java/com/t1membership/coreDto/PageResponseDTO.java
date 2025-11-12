@@ -1,4 +1,4 @@
-package com.anpetna.coreDto;
+package com.t1membership.coreDto;
 
 import lombok.Builder;
 import lombok.Getter;
@@ -7,6 +7,7 @@ import lombok.ToString;
 import java.util.List;
 
 @Getter
+@Builder
 @ToString
 public class PageResponseDTO<E> { // <E> E 엔티티용 변수명 (변할 수 있는 값 )
     // 페이징 처리 응답용 객체
