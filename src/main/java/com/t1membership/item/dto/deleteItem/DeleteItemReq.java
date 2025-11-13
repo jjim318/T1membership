@@ -5,6 +5,7 @@ import lombok.*;
 @Getter
 @Setter
 @ToString
+@Builder
 public class DeleteItemReq {
 
     private Long itemNo;

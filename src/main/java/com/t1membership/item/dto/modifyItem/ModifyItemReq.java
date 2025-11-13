@@ -9,7 +9,7 @@ import lombok.ToString;
 
 @Getter
 @Setter
-@Builder
+@Builder(toBuilder = true)
 @ToString
 public class ModifyItemReq {
 
