@@ -12,4 +12,8 @@ public class UpdateCartItemQuantityRes {
 
     private ItemDto item;
 
+    private Long itemNo;
+
+    private int itemQuantity;
+
 }

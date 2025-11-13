@@ -12,7 +12,17 @@ import lombok.*;
 @AllArgsConstructor
 @NoArgsConstructor
 @ToString
-@Table(name = "t1_cart")
+@Table(
+        name = "t1_cart",
+        uniqueConstraints = @UniqueConstraint(
+                name = "ux_cart_member_item",
+                columnNames = {"member_email", "item_no"}
+        ),
+        indexes = {
+                @Index(name = "idx_cart_member", columnList = "member_email"),
+                @Index(name = "idx_cart_item", columnList = "item_no")
+        }
+)
 public class CartEntity {
 
     @Id
