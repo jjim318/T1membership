@@ -10,6 +10,9 @@ import lombok.*;
 @NoArgsConstructor
 public class AddCartItemRes {
 
+    private Long itemNo;
+
     private ItemDto item;
 
+    private int itemQuantity;
 }
