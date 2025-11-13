@@ -8,7 +8,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ReadOneMemberReq {
-    private String memberId;
+    private String memberEmail;
     private String memberName;
     private String memberNickName;
     private String memberPhone;
