@@ -64,7 +64,7 @@ public class OrderEntity extends BaseEntity {
 
     //전체금액결제
     @Column(name = "order_total_price",nullable = false)
-    private int orderTotalPrice;
+    private long orderTotalPrice;
 }
 /* === GPT COMMENT START =====================================
 파일 목적: 주문 헤더(공통) 엔티티. 한 번의 주문(결제 트랜잭션)을 대표하며, 배송지/주문상태/총액 등 "주문 공통 정보"를 담습니다.

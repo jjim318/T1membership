@@ -35,6 +35,9 @@ public class OrderItemEntity {
     @Column(name = "item_image_snapshot", length = 500)
     private String itemImageSnapshot;
 
+    @Column(name = "item_price_snapshot")
+    private int itemPriceSnapshot;
+
     @Column(name = "price_at_order", nullable = false)
     private int priceAtOrder;              // 당시 단가
 
