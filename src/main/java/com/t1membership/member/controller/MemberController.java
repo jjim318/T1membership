@@ -1,6 +1,8 @@
 package com.t1membership.member.controller;
 
 import com.t1membership.ApiResult;
+import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
+import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
@@ -130,6 +132,20 @@ public class MemberController {
             @RequestPart(value = "removeProfile", required = false) boolean removeProfile
     )throws MemberServiceImpl.MemberIdExistException {
         ModifyMemberRes res = memberService.modifyMember(req,profile,removeProfile);
+        return new ApiResult<>(res);
+    }
+
+    @PostMapping(value = "/delete",
+    consumes = MediaType.APPLICATION_JSON_VALUE,
+    produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<DeleteMemberRes> deleteMember(
+            @RequestBody @Valid DeleteMemberReq req,
+            Authentication auth) {
+        if (req.getMemberEmail() == null || !auth.isAuthenticated()){
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"인증이 필요합니다");
+        }
+        req.setMemberEmail(auth.getName());
+        DeleteMemberRes res = memberService.deleteMember(req);
         return new ApiResult<>(res);
     }
 }

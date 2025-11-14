@@ -1,5 +1,6 @@
 package com.t1membership.member.dto.deleteMember;
 
+import com.t1membership.member.domain.MemberEntity;
 import lombok.*;
 
 @Getter
@@ -8,5 +9,11 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DeleteMemberRes {
-    private String memberId;
+    private String memberEmail;
+
+    public static DeleteMemberRes from(MemberEntity member) {
+        return DeleteMemberRes.builder()
+                .memberEmail(member.getMemberEmail())
+                .build();
+    }
 }

@@ -8,6 +8,6 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DeleteMemberReq {
-    private String memberId;
+    private String memberEmail;
     private String currenPw;//탈퇴확인용 비번
 }

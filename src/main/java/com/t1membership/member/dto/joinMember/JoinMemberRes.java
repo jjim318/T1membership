@@ -9,7 +9,7 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class JoinMemberRes {
-    private String memberId;
+
     private String memberPw;
     private String memberName;
     private String memberNickName;
@@ -19,7 +19,7 @@ public class JoinMemberRes {
 
     public static JoinMemberRes from(MemberEntity memberEntity) {
         return JoinMemberRes.builder()
-                .memberId(memberEntity.getMemberEmail())
+                .memberEmail(memberEntity.getMemberEmail())
                 .build();
     }
 }

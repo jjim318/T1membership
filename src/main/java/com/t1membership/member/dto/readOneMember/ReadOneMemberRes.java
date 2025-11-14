@@ -13,7 +13,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ReadOneMemberRes {
-    private String memberId;
+
     private String memberPw;
     private String memberName;
     private String memberNickName;
@@ -23,7 +23,7 @@ public class ReadOneMemberRes {
 
     public static ReadOneMemberRes from(MemberEntity memberEntity) {
         return ReadOneMemberRes.builder()
-                .memberId(memberEntity.getMemberEmail())
+                .memberEmail(memberEntity.getMemberEmail())
                 .build();
     }
 

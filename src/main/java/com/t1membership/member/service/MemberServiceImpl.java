@@ -233,7 +233,7 @@ public class MemberServiceImpl implements MemberService {
     public DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq) {
 
         //회원의 id(email)과 pw를 받음
-        String memberId = deleteMemberReq.getMemberId();
+        String memberId = deleteMemberReq.getMemberEmail();
         String currentPw = deleteMemberReq.getCurrenPw();
 
         //로그인한 유저의 인증정보 확인
@@ -278,7 +278,7 @@ public class MemberServiceImpl implements MemberService {
         //실제로는 지우지 않고 권한을 블랙리스트로 강등
         memberEntity.setMemberRole(MemberRole.BLACKLIST);
         memberRepository.saveAndFlush(memberEntity);
-        return null;
+        return DeleteMemberRes.from(memberEntity);
     }
 
 }
