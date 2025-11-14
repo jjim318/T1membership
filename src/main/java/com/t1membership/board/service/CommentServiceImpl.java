@@ -1,4 +1,4 @@
 package com.t1membership.board.service;
 
-public class CommentServiceImpl {
+public class CommentServiceImpl implements CommentService {
 }

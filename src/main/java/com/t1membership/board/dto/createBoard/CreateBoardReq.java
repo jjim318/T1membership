@@ -22,7 +22,7 @@ public class CreateBoardReq {
     private int boardLikeCount = 0;
 
     private BoardType boardType;
-    private boolean notice;
-    private boolean isSecret;
+    private Boolean notice;
+    private Boolean isSecret;
 
 }
