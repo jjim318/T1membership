@@ -47,10 +47,10 @@ public class ItemServiceImpl implements ItemService {
         if (!StringUtils.hasText(req.getItemName())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품명은 필수입니다.");
         }
-        if (req.getItemPrice() < 0) {
+        if (req.getItemPrice() == null || req.getItemPrice() < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
         }
-        if ( req.getItemStock() < 0) {
+        if (req.getItemStock() == null || req.getItemStock() < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
         }
 
@@ -59,10 +59,12 @@ public class ItemServiceImpl implements ItemService {
 
         // (선택) enum 기본값 처리: DTO가 null이면 서버에서 기본값 지정
         if (item.getItemCategory() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품 카테고리는 필수 입력값입니다.");
             // 필요 시 기본 카테고리 지정 or BAD_REQUEST
             // item.setItemCategory(ItemCategory.DEFAULT);
         }
         if (item.getItemSellStatus() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품 판매 상태는 필수 입력값입니다.");
             // 필요 시 기본 판매상태 지정
             // item.setItemSellStatus(ItemSellStatus.AVAILABLE);
         }
@@ -189,7 +191,7 @@ public class ItemServiceImpl implements ItemService {
     public PageResponseDTO<SearchAllItemRes> searchAllItem(SearchAllItemReq req) {
         var pageable = req.toPageable();
         var page = itemRepository.findAll(pageable);
-        var content = page.map(SearchAllItemRes::from).toList();
+        var content = page.map(SearchAllItemRes::from).getContent();
 
         //  SearchAllItemReq → PageRequestDTO 변환(어댑터)
         PageRequestDTO pr = PageRequestDTO.builder()
