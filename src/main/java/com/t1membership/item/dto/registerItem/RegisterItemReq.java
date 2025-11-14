@@ -13,9 +13,9 @@ public class RegisterItemReq {
 
     private String itemName;
 
-    private int itemPrice;
+    private Integer itemPrice;
 
-    private int itemStock;
+    private Integer itemStock;
 
     private ItemCategory itemCategory;
 
