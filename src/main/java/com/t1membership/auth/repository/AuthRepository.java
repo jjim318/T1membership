@@ -74,4 +74,7 @@ public interface AuthRepository extends JpaRepository<AuthEntity,String> {
         """, nativeQuery = true)
     int insertAccessBlacklist(@Param("hash") String hash,
                               @Param("expiresAt") Instant expiresAt);
+
+    // 만료된 토큰을 주기적으로 삭제
+    void deleteByExpiresAtBefore(Instant now);
 }

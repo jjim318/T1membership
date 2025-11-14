@@ -1,7 +1,7 @@
 package com.t1membership.config;
 
+import com.t1membership.auth.dto.tokenDto.TokenReq;
 import com.t1membership.auth.service.BlacklistServiceImpl;
-import com.t1membership.auth.dto.TokenRequest;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.constant.MemberRole; // enum: ACTIVE / BLACKLISTED
 import com.t1membership.member.repository.MemberRepository;
@@ -10,6 +10,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -40,7 +41,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String access = header.substring(7);
 
         // 2) 블랙리스트(토큰) 선차단 — 로그아웃/폐기 토큰은 즉시 401
-        TokenRequest tokenRequest = TokenRequest.builder().accessToken(access).build();
+        TokenReq tokenRequest = TokenReq.builder().accessToken(access).build();
         if (blacklistService.isBlacklisted(tokenRequest)) {
             response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Token is revoked");
             return;
@@ -58,8 +59,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (SecurityContextHolder.getContext().getAuthentication() == null) {
 
                 // 4) 사용자 상태 확인 — BLACKLISTED면 403
-                String memberId = jwtProvider.getUsernameForAccess(access); // Access 전용 subject
-                var status = memberRepository.findByMemberId(memberId)
+                String memberEmail = jwtProvider.getUsernameForAccess(access); // Access 전용 subject
+                MemberRole status = memberRepository.findByMemberEmail(memberEmail)
                         .map(MemberEntity::getMemberRole)
                         .orElse(MemberRole.BLACKLIST); // 못 찾으면 보수적으로 차단
                 if (status == MemberRole.BLACKLIST) {
@@ -68,7 +69,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
 
                 // 5) SecurityContext에 인증 주입 — roles는 JWT의 roles 클레임으로 세팅됨
-                var authentication = jwtProvider.getAuthentication(access);
+                Authentication authentication = jwtProvider.getAuthentication(access);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
@@ -91,6 +92,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
         // 리프레시/로그아웃 등 JWT 관리 엔드포인트는 필터 스킵 → 컨트롤러에서 처리
-        return uri.startsWith("/jwt/");
+        return uri.startsWith("/auth/");
     }
 }

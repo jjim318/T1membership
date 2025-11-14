@@ -52,7 +52,7 @@ public class UserDetailOrderRes {
                 .memo(o.getMemo())
                 .items(
                         o.getOrderItems().stream().map(oi -> OrderItemRes.builder()
-                                .itemNo(oi.getItem().getIno())
+                                .itemNo(oi.getItem().getItemNo())
                                 .itemNameSnapshot(oi.getItemNameSnapshot())
                                 .itemOptionSnapshot(oi.getItemOptionSnapshot())
                                 .itemImageSnapshot(oi.getItemImageSnapshot())
