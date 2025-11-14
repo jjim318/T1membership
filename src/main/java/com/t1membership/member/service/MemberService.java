@@ -19,8 +19,4 @@ public interface MemberService {
     ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq);
     ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq, MultipartFile multipartFile, Boolean removeProfile);
     DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq);
-
-    public static class MemberIdExistException extends RuntimeException {
-        public MemberIdExistException(String message) { super(message); }
-    }
 }

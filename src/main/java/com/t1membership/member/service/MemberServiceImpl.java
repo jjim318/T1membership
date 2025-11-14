@@ -12,6 +12,7 @@ import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
 import com.t1membership.member.repository.MemberRepository;
+import groovyjarjarpicocli.CommandLine;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.http.HttpStatus;
@@ -29,6 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.DuplicateFormatFlagsException;
 import java.util.List;
 import java.util.UUID;
 
@@ -45,8 +47,11 @@ public class MemberServiceImpl implements MemberService {
     public JoinMemberRes joinMember(JoinMemberReq joinMemberReq) {
 
         String memberId = joinMemberReq.getMemberEmail();
-        if (memberRepository.existsById(memberId)) {
+        if (memberRepository.existsByMemberEmail(memberId)) {
             throw new MemberIdExistException("이미 존재하는 회원의 이메일입니다.");
+        }
+        if (memberRepository.existsByNickname(joinMemberReq.getMemberNickName())) {
+            throw new DuplicateNicknameException("이미 사용 중인 닉네임입니다.");
         }
         MemberEntity memberEntity = modelMapper.map(joinMemberReq, MemberEntity.class);
         memberEntity.setMemberEmail(memberId);
@@ -56,6 +61,13 @@ public class MemberServiceImpl implements MemberService {
 
         MemberEntity savedMemberEntity = memberRepository.save(memberEntity);
         return JoinMemberRes.from(savedMemberEntity);
+    }
+    //헬퍼메서드
+    public static class MemberIdExistException extends RuntimeException {
+        public MemberIdExistException(String message) { super(message); }
+    }
+    public static class DuplicateNicknameException extends RuntimeException { // 🔥 닉네임 중복 예외
+        public DuplicateNicknameException(String message) { super(message); }
     }
 
     @Override
