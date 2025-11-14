@@ -37,6 +37,7 @@ public class MemberEntity extends BaseEntity {
     @Column(name = "member_address", nullable = false)
     private String memberAddress;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "member_role", nullable = false)
     private MemberRole memberRole;
 

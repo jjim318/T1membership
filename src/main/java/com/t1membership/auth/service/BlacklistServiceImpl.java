@@ -7,7 +7,9 @@ import com.t1membership.config.JwtProvider;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -63,5 +65,28 @@ public class BlacklistServiceImpl implements BlacklistService {
 
         // 7) 신규 저장
         authRepository.insertAccessBlacklist(accessHash, expiresAt);
+    }
+
+    // 주어진 Access토큰이 현재 차단 상태인지 확인, 유효한 동일 해시가 존재하면 차단.
+    @Override
+    public boolean isBlacklisted(TokenReq tokenRequest) {
+        if (tokenRequest.getAccessToken() == null || tokenRequest.getAccessToken().isBlank()) {
+            return false; // 토큰 없으면 ‘블랙리스트 아님’으로만 판단
+        }
+
+        Instant now = Instant.now();
+        String hash = tokenHash.sha256(tokenRequest.getAccessToken());
+
+        return authRepository.existsValidAccessHash(hash, now);
+    }
+
+
+    // 만료된 블랙리스트를 주기적으로 청소
+    // 매시 정각(주기 = 1시간)에 실행됨
+    @Scheduled(cron = "0 0 * * * *")
+    @Transactional
+    @Override
+    public void purgeExpired() {
+        authRepository.deleteByExpiresAtBefore(Instant.now());
     }
 }

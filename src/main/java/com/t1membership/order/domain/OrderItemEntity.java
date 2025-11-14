@@ -49,8 +49,8 @@ public class OrderItemEntity {
         OrderItemEntity oi = new OrderItemEntity();
         oi.setItem(item);
         oi.setQuantity(quantity);
-        oi.setPriceAtOrder(item.getIPrice());
-        oi.setItemNameSnapshot(item.getIName());
+        oi.setPriceAtOrder(item.getItemPrice());
+        oi.setItemNameSnapshot(item.getItemName());
         //oi.setItemImageSnapshot(item.getIImage());
         oi.setLineTotal(oi.getPriceAtOrder() * oi.getQuantity());
         return oi;

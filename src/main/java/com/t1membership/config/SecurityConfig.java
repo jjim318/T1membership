@@ -1,5 +1,7 @@
 package com.t1membership.config;
 
+import com.t1membership.auth.service.BlacklistService;
+import com.t1membership.auth.service.BlacklistServiceImpl;
 import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -29,7 +31,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(
             HttpSecurity http,
             JwtProvider jwtProvider,                               // JWT 파서/검증기
-            //BlacklistServiceImpl blacklistService,                 // Access 블랙리스트 조회 서비스
+            BlacklistServiceImpl blacklistService,                 // Access 블랙리스트 조회 서비스
             CorsConfigurationSource corsConfigurationSource,        // CORS 설정 빈 (주입만 받음)
             MemberRepository memberRepository) throws Exception {
         http
@@ -45,18 +47,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()  // ★추가: 프리플라이트 허용
 
                         // --- 기존 허용 경로 유지 ---
-                        .requestMatchers("/jwt/**").permitAll()                  // 토큰 발급/재발급 엔드포인트
-                        .requestMatchers(HttpMethod.POST, "/member/login").permitAll() // 기존 로그인 경로
-//                        .requestMatchers("/member/join").permitAll()    // 회원가입
-//                        .requestMatchers("/", "/signup", "/api/v1/**").permitAll()        // 기존 공개 경로들
+                        .requestMatchers("/auth/**").permitAll()                  // 토큰 발급/재발급 엔드포인트
 
-                        // --- ★추가: anpetna 네임스페이스 로그인/회원가입 허용 ---
-                        .requestMatchers("/member/login",
-                                "/member/join").permitAll()  // 새 프론트 경로 허용
+                        // --- ★추가: 네임스페이스 회원가입 허용 ---
+                        .requestMatchers("/member/join").permitAll()  // 새 프론트 경로 허용
 
                         // === 역할 기반 인가 ===
                         .requestMatchers("/member/readOne","/member/readAll").hasRole("ADMIN")        // 관리자 전용
-                        .requestMatchers("/member/my_page/","member/modify").hasAnyRole("USER") // 로그인 유저 전용
+                        .requestMatchers("/member/my_page/**","/member/modify").hasAnyRole("USER") // 로그인 유저 전용
 
                         // --- 그 외 모든 요청은 인증 필요 ---
                         .anyRequest().authenticated()
