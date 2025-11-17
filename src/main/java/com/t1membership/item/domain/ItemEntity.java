@@ -1,10 +1,7 @@
 package com.t1membership.item.domain;
 
 import com.t1membership.coreDomain.BaseEntity;
-import com.t1membership.item.constant.ItemCategory;
-import com.t1membership.item.constant.ItemSellStatus;
-import com.t1membership.item.constant.MembershipAllowedType;
-import com.t1membership.item.constant.MembershipPayType;
+import com.t1membership.item.constant.*;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -65,10 +62,6 @@ public class ItemEntity extends BaseEntity {
     @Column(name = "membership_one_time_price")
     private Integer membershipOneTimePrice;
 
-    // 단건 결제 시 기본 제공 개월 수 (예: 1개월권, 3개월권)
-    @Column(name = "membership_one_time_months")
-    private Integer membershipOneTimeMonths;
-
     // 설명 정도 하나 있으면 프론트에서 쓰기 좋음
     @Column(name = "membership_description", length = 1000)
     private String membershipDescription;
@@ -76,5 +69,11 @@ public class ItemEntity extends BaseEntity {
     // 활성 여부 (판매 중 / 내림)
     @Column(name = "membership_active")
     private Boolean membershipActive;
+
+
+    // POP 전용: 어느 선수 POP인지
+    @Enumerated(EnumType.STRING)
+    @Column(name = "pop_player")
+    private Player popPlayer;
 
 }

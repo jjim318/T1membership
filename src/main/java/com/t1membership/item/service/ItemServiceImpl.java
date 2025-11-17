@@ -18,6 +18,8 @@ import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.ItemSellStatus;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -189,8 +191,54 @@ public class ItemServiceImpl implements ItemService {
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<SearchAllItemRes> searchAllItem(SearchAllItemReq req) {
+
         var pageable = req.toPageable();
-        var page = itemRepository.findAll(pageable);
+
+        // 🔥 필터 파라미터 (있다고 가정)
+        var category  = req.getItemCategory(); // MD / MEMBERSHIP / POP / ALL
+        var popPlayer = req.getPopPlayer();    // POP일 때만 의미 있음
+
+        Page<ItemEntity> page;
+
+        // 1) 카테고리가 지정된 경우
+        if (category != null && category != ItemCategory.ALL) {
+
+            // 1-1) 멤버십 전용: 활성 멤버십만
+            if (category == ItemCategory.MEMBERSHIP) {
+                page = itemRepository.findByItemCategoryAndMembershipActiveIsTrue(
+                        ItemCategory.MEMBERSHIP,
+                        pageable
+                );
+
+                // 1-2) POP 전용: 선수별 / 전체
+            } else if (category == ItemCategory.POP) {
+
+                // 선수별 POP
+                if (popPlayer != null) {
+                    // ⚠ 여기서는 List → PageImpl 로 한번 감쌉니다.
+                    var list = itemRepository.findByItemCategoryAndPopPlayer(
+                            ItemCategory.POP,
+                            popPlayer
+                    );
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+                // POP 전체
+                else {
+                    var list = itemRepository.findByItemCategory(ItemCategory.POP);
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+
+                // 1-3) MD 같은 나머지 카테고리
+            } else {
+                page = itemRepository.findAllByItemCategory(category, pageable);
+            }
+
+            // 2) 카테고리 필터 없거나 ALL인 경우 → 전체 조회
+        } else {
+            page = itemRepository.findAll(pageable);
+        }
+
+        // 엔티티 → 응답 DTO 매핑
         var content = page.map(SearchAllItemRes::from).getContent();
 
         //  SearchAllItemReq → PageRequestDTO 변환(어댑터)
@@ -206,6 +254,7 @@ public class ItemServiceImpl implements ItemService {
                 .total((int) page.getTotalElements())
                 .build();
     }
+
 
 
     // =========================

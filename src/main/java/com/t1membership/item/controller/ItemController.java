@@ -50,7 +50,7 @@ public class ItemController {
     }
 
 
-    @GetMapping({"/{itemNo}", "/{itemNo}}/edit"})
+    @GetMapping({"/{itemNo}", "/{itemNo}/edit"})
     public ApiResult<SearchOneItemRes> searchOneItem(@PathVariable Long itemNo) {
         SearchOneItemReq searchReq = SearchOneItemReq.builder()
                 .itemNo(itemNo).build();
