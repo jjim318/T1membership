@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.math.BigDecimal;
+
 @Getter
 @Setter
 @Builder(toBuilder = true)
@@ -17,7 +19,7 @@ public class ModifyItemReq {
 
     private String itemName;
 
-    private Integer itemPrice;
+    private BigDecimal itemPrice;
 
     private Integer itemStock;
 
