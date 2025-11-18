@@ -92,6 +92,7 @@ public class OrderServiceImpl implements OrderService {
     // ======================
     // 1) 굿즈 주문 생성
     // ======================
+    @Override
     @Transactional
     public CreateOrderRes createGoodsOrder(String memberEmail, CreateGoodsOrderReq req) {
 
@@ -105,6 +106,7 @@ public class OrderServiceImpl implements OrderService {
     // ======================
     // 2) 멤버십 주문 생성
     // ======================
+    @Override
     @Transactional
     public CreateOrderRes createMembershipOrder(String memberEmail, CreateMembershipOrderReq req) {
 
@@ -116,6 +118,7 @@ public class OrderServiceImpl implements OrderService {
     // ======================
     // 3) POP 주문 생성
     // ======================
+    @Override
     @Transactional
     public CreateOrderRes createPopOrder(String memberEmail, CreatePopOrderReq req) {
 
@@ -123,11 +126,6 @@ public class OrderServiceImpl implements OrderService {
 
         return processOrder(order);
     }
-    //주문조회(회원
-
-    //주문조회(관리자
-
-    //주문상세조회(회원,관리자
 
     //주문전체취소(환불
 
