@@ -12,6 +12,7 @@ import lombok.*;
 public class CreateCommentRes {
 
     private Long commentNo;
+    private Long boardNo;
     private String commentWriter;
     private String commentContent;
     private int commentLikeCount;
@@ -19,6 +20,7 @@ public class CreateCommentRes {
     public static CreateCommentRes from(CommentEntity commentEntity) {
         return CreateCommentRes.builder()
                 .commentNo(commentEntity.getCommentNo())
+                .boardNo(commentEntity.getBoard().getBoardNo())
                 .commentWriter(commentEntity.getMember().getMemberNickName())
                 .commentContent(commentEntity.getCommentContent())
                 .commentLikeCount(commentEntity.getCommentLikeCount())

@@ -6,6 +6,7 @@ import lombok.*;
 
 @Entity
 @Getter
+@Setter
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
@@ -21,8 +22,8 @@ public class CommentEntity {
     @JoinColumn(name = "member_email")
     private MemberEntity member; // member
 
-    @Column(name = "comment_writer", nullable = false)
-    private String commentWriter;
+//    @Column(name = "comment_writer", nullable = false)
+//    private String commentWriter;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,4 +35,12 @@ public class CommentEntity {
 
     @Column(name = "comment_likeCount", nullable = false)
     private int commentLikeCount = 0;
+
+
+    // CommentEntity
+    public void updateContent(String content) {
+        this.commentContent = content;
+    }
+
+
 }
