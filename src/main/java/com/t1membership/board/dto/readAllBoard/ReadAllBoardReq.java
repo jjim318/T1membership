@@ -9,10 +9,10 @@ import lombok.*;
 @NoArgsConstructor
 public class ReadAllBoardReq {
 
-    private int page;
-    private int size;
-    private String boardType;
+    private int page = 0;
+    private int size = 10;
+    private String sortBy = "boardNo";
 
-    private String sortBy;
+    private String boardType;
 
 }
