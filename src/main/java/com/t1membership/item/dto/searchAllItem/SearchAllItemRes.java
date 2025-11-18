@@ -5,6 +5,8 @@ import com.t1membership.item.constant.ItemSellStatus;
 import com.t1membership.item.domain.ItemEntity;
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -14,7 +16,7 @@ public class SearchAllItemRes {
 
     private Long itemNo;
     private String itemName;
-    private int itemPrice;
+    private BigDecimal itemPrice;
     private int itemStock;
     private ItemCategory itemCategory;
     private ItemSellStatus itemSellStatus;

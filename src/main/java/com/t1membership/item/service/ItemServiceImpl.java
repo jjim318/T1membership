@@ -30,6 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
+
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -49,7 +51,7 @@ public class ItemServiceImpl implements ItemService {
         if (!StringUtils.hasText(req.getItemName())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품명은 필수입니다.");
         }
-        if (req.getItemPrice() == null || req.getItemPrice() < 0) {
+        if (req.getItemPrice() == null || req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
         }
         if (req.getItemStock() == null || req.getItemStock() < 0) {
@@ -111,7 +113,7 @@ public class ItemServiceImpl implements ItemService {
         }
 
         if (req.getItemPrice() != null) {
-            if (req.getItemPrice() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
+            if (req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
             // 세터가 없다면 위 빌더 재생성 방식으로 다시 구성
             item = ItemEntity.builder()
                     .itemNo(item.getItemNo())

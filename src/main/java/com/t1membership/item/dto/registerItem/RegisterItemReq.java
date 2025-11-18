@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.math.BigDecimal;
+
 @Getter
 @Setter
 @ToString
@@ -13,7 +15,7 @@ public class RegisterItemReq {
 
     private String itemName;
 
-    private Integer itemPrice;
+    private BigDecimal itemPrice;
 
     private Integer itemStock;
 

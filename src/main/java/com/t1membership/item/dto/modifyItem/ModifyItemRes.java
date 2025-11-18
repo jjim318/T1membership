@@ -8,6 +8,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
+
 @Getter
 @Setter
 @Builder
@@ -17,7 +19,7 @@ public class ModifyItemRes {
 
     private String itemName;
 
-    private Integer itemPrice;
+    private BigDecimal itemPrice;
 
     private Integer itemStock;
 
