@@ -5,6 +5,8 @@ import com.t1membership.item.constant.*;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Getter
 @Builder
@@ -23,7 +25,7 @@ public class ItemEntity extends BaseEntity {
     private String itemName;
 
     @Column(name = "item_price", nullable = false)
-    private int itemPrice;
+    private BigDecimal itemPrice;
 
     @Column(name = "item_stock", nullable = false)
     private int itemStock;

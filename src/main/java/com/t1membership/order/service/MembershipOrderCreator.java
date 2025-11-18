@@ -1,9 +1,12 @@
 package com.t1membership.order.service;
 
+import com.t1membership.item.constant.ItemCategory;
+import com.t1membership.item.constant.MembershipAllowedType;
 import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.item.repository.ItemRepository;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
+import com.t1membership.order.constant.MembershipPayType;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;
@@ -12,6 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Component
 @RequiredArgsConstructor
@@ -27,60 +33,82 @@ public class MembershipOrderCreator implements OrderCreator<CreateMembershipOrde
     @Override
     public OrderEntity create(String memberEmail, CreateMembershipOrderReq req) {
 
-        // 0) 기본 검증
-        if (req.getMonths() == null || req.getMonths() < 1) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "이용 개월 수가 올바르지 않습니다.");
+        // 1) 회원 조회
+        MemberEntity member = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "회원 정보를 찾을 수 없습니다."));
+
+        // 2) 멤버십 Item 조회 (planCode 기준)
+        ItemEntity membershipItem = itemRepository.findById(Long.valueOf(req.getPlanCode()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "멤버십 상품을 찾을 수 없습니다."));
+
+        // 3) 카테고리 검증
+        if (membershipItem.getItemCategory() != ItemCategory.MEMBERSHIP) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "MEMBERSHIP 상품이 아닙니다.");
         }
 
-        //회원 조회
-        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
-                .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND,"회원이 존재하지 않습니다"));
+        //4) 멤버십 정책 검증
+        //    MembershipAllowedType : ONE_TIME_ONLY / SUBSCRIPTION_ONLY / BOTH
+        //    autoRenew(boolean) → MembershipPayType 으로 변환해서 검사
+        MembershipPayType reqPayType = req.isAutoRenew()
+                ? MembershipPayType.RECURRING     // autoRenew = true → 정기결제
+                : MembershipPayType.ONE_TIME;     // false → 단건결제
 
-        //멤버쉽 상품 조회
-//        ItemEntity membershipItem = itemRepository.findByPlanCode(req.getPlanCode())
-//                .orElseThrow(() -> new ResponseStatusException(
-//                        HttpStatus.BAD_REQUEST, "존재하지 않는 멤버십 상품입니다."));
+        // 5) 정책 검증 (MembershipAllowedType)
+        MembershipAllowedType allowed = membershipItem.getMembershipAllowedType();
 
-        //결제 금액 계산
-        long unitPrice = membershipItem.getItemPrice();
-        long totalAmount;
-
-        if (req.isAutoRenew()){
-            //정기/연간 결제
-            totalAmount = unitPrice + membershipItem.getItemPrice();
-        }else {
-            //단건결제
-            totalAmount = unitPrice;
+        if (allowed == MembershipAllowedType.ONE_TIME_ONLY && reqPayType == MembershipPayType.RECURRING) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "이 멤버십은 단건 결제만 허용됩니다.");
         }
 
-        //주문 엔티티 생성(헤더
-        OrderEntity orderEntity = new OrderEntity();
-        orderEntity.setMember(memberEntity);
-        orderEntity.setOrderStatus(OrderStatus.PAID);
-        orderEntity.setOrderTotalPrice(totalAmount);
+        if (allowed == MembershipAllowedType.RECURRING_ONLY && reqPayType == MembershipPayType.ONE_TIME) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "이 멤버십은 정기결제만 가능합니다.");
+        }
 
-        // 주문 타입 구분 필드가 있으면 여기서 MEMBERSHIP 등으로 세팅
-        // order.setOrderType(OrderType.MEMBERSHIP);
+        //  6) 가격 계산
+        //    - 예시: item.price 를 "월 구독료" 라고 보고 개월 수만큼 곱함
+        BigDecimal pricePerMonth = membershipItem.getItemPrice();
 
-        // 멤버십 관련 스냅샷(이름/생일/전화 등)을 Order에 남기고 싶으면 여기서
-        // order.setMembershipName(req.getMemberName());
-        // order.setMembershipBirth(req.getMemberBirth());
-        // order.setMembershipPhone(req.getMemberPhone());
+        // months 도 BigDecimal로 변환해서 곱하기
+        BigDecimal totalPrice = pricePerMonth.multiply(BigDecimal.valueOf(req.getMonths()));
 
-        //주문 아이템 스냅샷 생성 (멤버쉽은 1개로 고정
-        OrderItemEntity orderItemEntity = new OrderItemEntity();
-        orderItemEntity.setOrder(orderEntity);                 // 연관관계
-        orderItemEntity.setItem(membershipItem);         // 원본 Item 연관관계 있으면
-        orderItemEntity.setOrderItemNo(membershipItem.getId());
-        orderItemEntity.setItemNameSnapshot(membershipItem.getName());   // 스냅샷
-        orderItemEntity.setItemPriceSnapshot(unitPrice);                  // 단가 스냅샷
-        orderItemEntity.setQuantity(1);
+        // 7) 기간 계산
+        LocalDateTime startDate = LocalDateTime.now();
+        LocalDateTime endDate = startDate.plusMonths(req.getMonths());
 
-        // 필요하면 payType 느낌으로도 스냅샷 남겨도 됨
-        // orderItem.setPayType(req.isAutoRenew() ? "RECURRING" : "ONE_TIME");
+        // 8) 주문 엔티티 생성
+        OrderEntity order = OrderEntity.builder()
+                .member(member)
+                .orderStatus(OrderStatus.ORDERED)   // 결제 전 상태
+                .orderTotalPrice(totalPrice)             // 총 금액(BigDecimal)
 
-        //order에 아이템 추가
-        orderEntity.getOrderItems().add(orderItemEntity);
-        return orderEntity;
+                // 멤버십 스냅샷 정보 저장 (나중에 정책 바뀌어도 과거 주문 데이터는 유지됨)
+                .membershipPlanCode(req.getPlanCode())
+                .membershipMonths(req.getMonths())
+                .membershipStartDate(startDate)
+                .membershipEndDate(endDate)
+                .membershipPayType(reqPayType)
+                .membershipMemberName(req.getMemberName())
+                .membershipMemberBirth(req.getMemberBirth())
+                .membershipMemberPhone(req.getMemberPhone())
+                .autoRenew(req.isAutoRenew())
+                .build();
+
+        // 9) 주문-아이템 스냅샷 생성
+        OrderItemEntity orderItem = OrderItemEntity.builder()
+                .order(order)
+                .item(membershipItem)
+                .itemNameSnapshot(membershipItem.getItemName())
+                .itemCategorySnapshot(membershipItem.getItemCategory())
+                .itemPriceSnapshot(pricePerMonth)   // BigDecimal 로 스냅샷 저장 추천
+                .priceAtOrder(pricePerMonth)
+                .quantity(1)                // 멤버십은 항상 1개
+                .build();
+
+        // 양방향 매핑 시 편의 메서드
+        if (order.getOrderItems() != null) {
+            order.getOrderItems().add(orderItem);
+        }
+
+        return order;
     }
 }

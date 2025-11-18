@@ -17,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Component
@@ -55,7 +56,7 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         orderRepository.save(order); // PK 필요하니 여기서 저장
 
         // 3) 단건 vs 장바구니 분기
-        long totalAmount;
+        BigDecimal totalAmount;
         if (req.getCartItemIds() != null && !req.getCartItemIds().isEmpty()) {
             // 장바구니 선택 주문
             totalAmount = createFromCartItems(order, memberEmail, req);
@@ -74,7 +75,7 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
     }
 
     //단건주문처리
-    private long createFromSingleItem(OrderEntity order, CreateGoodsOrderReq req) {
+    private BigDecimal createFromSingleItem(OrderEntity order, CreateGoodsOrderReq req) {
 
         if (req.getItemId() == null || req.getQuantity() == null) {
             throw new ResponseStatusException(
@@ -105,11 +106,18 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
 
         order.getOrderItems().add(orderItem);
 
-        return (long) item.getItemPrice() * quantity;
+        //단건 주문 금액 = 단가 × 수량 (BigDecimal)
+        BigDecimal lineTotal = item.getItemPrice()
+                .multiply(BigDecimal.valueOf(quantity));
+
+        //필요하면 orderItem 에도 lineTotal 저장 (필드가 있다면)
+        orderItem.setLineTotal(lineTotal);
+
+        return lineTotal;
     }
 
     //장바구니 선택 주문 관리
-    private long createFromCartItems(OrderEntity order,
+    private BigDecimal createFromCartItems(OrderEntity order,
                                      String memberEmail,
                                      CreateGoodsOrderReq req) {
 
@@ -123,7 +131,7 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
                     HttpStatus.BAD_REQUEST, "유효하지 않은 장바구니 항목이 있습니다.");
         }
 
-        long totalAmount = 0L;
+        BigDecimal totalAmount = BigDecimal.ZERO;
         boolean first = true;
 
         for (CartEntity cartItem : cartItems) {
@@ -158,7 +166,15 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
                 first = false;
             }
 
-            totalAmount += (long) item.getItemPrice() * quantity;
+            //개별 라인 금액 = 단가 × 수량 (BigDecimal)
+            BigDecimal lineTotal = item.getItemPrice()
+                    .multiply(BigDecimal.valueOf(quantity));
+
+            //필요하면
+            orderItem.setLineTotal(lineTotal);
+
+            //총합에 더하기
+            totalAmount = totalAmount.add(lineTotal);
         }
 
         return totalAmount;
