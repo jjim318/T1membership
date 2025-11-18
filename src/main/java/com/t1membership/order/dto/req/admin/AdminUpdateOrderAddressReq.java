@@ -7,7 +7,7 @@ import lombok.*;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AdminUpsateOrderAddressReq {
+public class AdminUpdateOrderAddressReq {
     //관리자 배송지 변경 요청
     private Long orderNo;  // 주문 번호
 
