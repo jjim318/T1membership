@@ -2,6 +2,8 @@ package com.t1membership.item.service;
 
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.image.dto.ImageDTO;
 import com.t1membership.image.service.FileService;
 import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.item.dto.deleteItem.DeleteItemReq;
@@ -29,9 +31,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -47,7 +51,7 @@ public class ItemServiceImpl implements ItemService {
     // =========================
     @Override
     @PreAuthorize("hasRole('ADMIN')")
-    public RegisterItemRes registerItem(RegisterItemReq req) {
+    public RegisterItemRes registerItem(RegisterItemReq req, List<MultipartFile> images) {
 
         // 필수값 방어
         if (!StringUtils.hasText(req.getItemName())) {
@@ -76,6 +80,23 @@ public class ItemServiceImpl implements ItemService {
         }
 
         ItemEntity saved = itemRepository.save(item);
+
+        if (images != null && !images.isEmpty()) {
+            int order = 0;
+            for (MultipartFile file : images) {
+                if (file.isEmpty()) continue;
+
+                // (1) 실제 파일 저장 + 메타 정보 생성
+                ImageDTO dto = fileService.uploadFile(file, order++);
+
+                // (2) DTO -> ImageEntity 변환 + 아이템 연결
+                ImageEntity image = ImageEntity.fromDtoForItem(dto, saved);
+
+                // (3) 양방향 연관관계 유지
+                saved.addImage(image);
+            }
+        }
+
         return RegisterItemRes.from(saved);
     }
 
@@ -84,7 +105,7 @@ public class ItemServiceImpl implements ItemService {
     // =========================
     @Override
     @PreAuthorize("hasRole('ADMIN')")
-    public ModifyItemRes modifyItem(ModifyItemReq req) {
+    public ModifyItemRes modifyItem(ModifyItemReq req, List<MultipartFile> images) {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
@@ -163,9 +184,21 @@ public class ItemServiceImpl implements ItemService {
                     .build();
         }
 
-        // 더티체킹 대신 명시 저장(불변 빌더 재생성 방식을 썼으므로)
-        item = itemRepository.save(item);
-        return ModifyItemRes.from(item);
+
+        if (images != null && !images.isEmpty()) {
+            int order = item.getImages().size(); // 기존 이미지 뒤에 이어붙이기
+            for (MultipartFile file : images) {
+                if (file.isEmpty()) continue;
+
+                ImageDTO dto = fileService.uploadFile(file, order++);
+                ImageEntity image = ImageEntity.fromDtoForItem(dto, item);
+                item.addImage(image);
+            }
+        }
+
+        ItemEntity saved = itemRepository.save(item);
+
+        return ModifyItemRes.from(saved);
     }
 
     // =========================

@@ -14,7 +14,11 @@ import com.t1membership.item.dto.searchOneItem.SearchOneItemReq;
 import com.t1membership.item.dto.searchOneItem.SearchOneItemRes;
 import com.t1membership.item.service.ItemService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/item")
@@ -23,19 +27,19 @@ public class ItemController {
 
     private final ItemService itemService;
 
-    @PostMapping
-    public ApiResult<RegisterItemRes> registerItem(@RequestBody RegisterItemReq postReq) {
-        var postRes = itemService.registerItem(postReq);
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<RegisterItemRes> registerItem(@ModelAttribute RegisterItemReq postReq, @RequestPart(value = "images", required = false) List<MultipartFile> images) {
+        var postRes = itemService.registerItem(postReq, images);
         return new ApiResult<>(postRes);
     }
 
 
-    @PutMapping(value = "/{itemNo}")
-    public ApiResult<ModifyItemRes> modifyItem(@PathVariable Long itemNo, @RequestBody ModifyItemReq putReq) {
+    @PutMapping(value = "/{itemNo}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<ModifyItemRes> modifyItem(@PathVariable Long itemNo, @ModelAttribute ModifyItemReq putReq, @RequestPart(value = "images", required = false) List<MultipartFile> images) {
         putReq = putReq.toBuilder()
                 .itemNo(itemNo)
                 .build();
-        var putRes = itemService.modifyItem(putReq);
+        var putRes = itemService.modifyItem(putReq, images);
         return new ApiResult<>(putRes);
     }
 
