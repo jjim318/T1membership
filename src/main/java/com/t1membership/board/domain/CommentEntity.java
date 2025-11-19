@@ -3,6 +3,8 @@ package com.t1membership.board.domain;
 import com.t1membership.member.domain.MemberEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 
 @Entity
 @Getter
@@ -16,6 +18,7 @@ public class CommentEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "board_no")
+    @OnDelete(action = OnDeleteAction.CASCADE)
     private BoardEntity board;
 
     @ManyToOne(fetch = FetchType.LAZY)

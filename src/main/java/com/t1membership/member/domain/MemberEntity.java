@@ -1,6 +1,7 @@
 package com.t1membership.member.domain;
 
 import com.t1membership.coreDomain.BaseEntity;
+import com.t1membership.image.domain.ImageEntity;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.order.domain.OrderEntity;
 import jakarta.persistence.*;
@@ -43,5 +44,20 @@ public class MemberEntity extends BaseEntity {
 
     @OneToMany(mappedBy = "t1_member",  cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderEntity> order = new ArrayList<>();
+
+
+    @Builder.Default
+    @OneToMany(mappedBy = "member", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC, uuid ASC")
+    private List<ImageEntity> images = new ArrayList<>();
+
+    public void addImage(ImageEntity image) {
+        images.add(image);
+        image.setMember(this);
+    }
+    public void removeImage(ImageEntity image) {
+        images.remove(image);
+        image.setMember(null);
+    }
 
 }

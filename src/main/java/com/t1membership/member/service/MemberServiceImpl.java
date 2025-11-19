@@ -1,5 +1,6 @@
 package com.t1membership.member.service;
 
+import com.t1membership.image.service.FileService;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
@@ -39,6 +40,7 @@ import java.util.UUID;
 @Transactional
 public class MemberServiceImpl implements MemberService {
 
+    private final FileService fileService;
     private final MemberRepository memberRepository;
     private final ModelMapper modelMapper;
     private final PasswordEncoder passwordEncoder;
