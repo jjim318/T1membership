@@ -28,11 +28,11 @@ public class PopOrderCreator implements OrderCreator<CreatePopOrderReq> {
     //→ Creator는 “로직만” 담당, 트랜잭션 경계는 Service가 관리
 
     @Override
-    public OrderEntity create(String membberEmail, CreatePopOrderReq req) {
+    public OrderEntity create(String memberEmail, CreatePopOrderReq req) {
 
         // 1) 회원조회
-        MemberEntity memberEntity = memberRepository.findByMemberEmail(membberEmail)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "회원 젇보가 없습니다"));
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "회원 정보가 없습니다"));
 
         // 2) pop상품 조회
         ItemEntity popItem = itemRepository.findById(req.getPopId())
@@ -61,7 +61,6 @@ public class PopOrderCreator implements OrderCreator<CreatePopOrderReq> {
         // - 공통 팩토리 메서드 사용 (단가/합계/스냅샷 계산은 OrderItemEntity.of에서 처리)
         OrderItemEntity orderItem = OrderItemEntity.of(popItem, 1);
         orderItem.setPlayerSnapshot(popItem.getPopPlayer());   // ★ 스냅샷 저장
-        order.addItem(orderItem);
 
         // 8) 연관관계 & 총액 재계산
         order.addItem(orderItem);   // orderItems에 추가 + recalcTotal() 호출

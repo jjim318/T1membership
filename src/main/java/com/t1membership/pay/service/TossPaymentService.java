@@ -47,10 +47,7 @@ public class TossPaymentService {
         Map<String, Object> body = Map.of(
                 "amount", amount,
                 "orderId", orderId,
-                "orderName", orderName,
-                // 성공/실패 리다이렉트 URL은 프론트 라우팅에 맞게 교체
-                "successUrl", "http://localhost:8080/toss-success.html",
-                "failUrl",    "http://localhost:8080/toss-fail.html"
+                "orderName", orderName
         );
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);

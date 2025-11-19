@@ -41,10 +41,28 @@ public class AdminDetailOrderRes {
                 .orderNo(orderEntity.getOrderNo())
                 .memberEmail(orderEntity.getMember().getMemberEmail())
                 .orderStatus(orderEntity.getOrderStatus())
+                .createdAt(orderEntity.getCreateDate())
+                .updatedAt(orderEntity.getLatestDate())
+                // tossPaymentStatus 는 결제 엔티티에서 끌어와야 하면 나중에 추가
+                .receiverName(orderEntity.getReceiverName())
+                .receiverPhone(orderEntity.getReceiverPhone())
                 .receiverAddress(orderEntity.getReceiverAddress())
                 .receiverDetailAddress(orderEntity.getReceiverDetailAddress())
                 .receiverZipCode(orderEntity.getReceiverZipCode())
-                .receiverPhone(orderEntity.getReceiverPhone())
+                .memo(orderEntity.getMemo())
+                .items(
+                        orderEntity.getOrderItems().stream()
+                                .map(oi -> OrderItemRes.builder()
+                                        .itemNo(oi.getItem().getItemNo())
+                                        .itemNameSnapshot(oi.getItemNameSnapshot())
+                                        .itemOptionSnapshot(oi.getItemOptionSnapshot())
+                                        .itemImageSnapshot(oi.getItemImageSnapshot())
+                                        .priceAtOrder(oi.getPriceAtOrder())
+                                        .quantity(oi.getQuantity())
+                                        .lineTotal(oi.getLineTotal())
+                                        .build()
+                                ).toList()
+                )
                 .build();
     }
 }

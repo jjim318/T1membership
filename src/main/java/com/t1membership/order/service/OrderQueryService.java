@@ -1,6 +1,7 @@
 package com.t1membership.order.service;
 
 import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.dto.req.admin.AdminSearchOrderReq;
 import com.t1membership.order.dto.res.admin.AdminDetailOrderRes;
 import com.t1membership.order.dto.res.common.SummaryOrderRes;
 import com.t1membership.order.dto.res.user.UserDetailOrderRes;
@@ -30,7 +31,7 @@ public class OrderQueryService {
     //관리자용 주문 목록 조회 (전체 페이징
     //관리자 권한 체크는 Controller / SecurityConfig 에서 ROLE_ADMIN 으로 처리
     public Page<SummaryOrderRes> getAllOrderAdmin(Pageable pageable) {
-        Page<OrderEntity> page = orderRepository.findAll(pageable);
+        Page<OrderEntity> page = orderRepository.findAllByOrderByCreatedAtDesc(pageable);
         return page.map(SummaryOrderRes::from);
     }
 
@@ -49,6 +50,12 @@ public class OrderQueryService {
         OrderEntity orderEntity = orderRepository.findByIdFetchItems(orderNo)
                 .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"주문을 찾을 수 없습니다"));
         return AdminDetailOrderRes.from(orderEntity);
+    }
+
+    //조건 검색
+    public Page<SummaryOrderRes> searchOrders(AdminSearchOrderReq req, Pageable pageable) {
+        Page<OrderEntity> page = orderRepository.searchOrders(req, pageable);
+        return page.map(SummaryOrderRes::from);
     }
 
 
