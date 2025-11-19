@@ -2,6 +2,7 @@ package com.t1membership.item.service;
 
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.service.FileService;
 import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.item.dto.deleteItem.DeleteItemReq;
 import com.t1membership.item.dto.deleteItem.DeleteItemRes;
@@ -37,6 +38,7 @@ import java.math.BigDecimal;
 @Transactional
 public class ItemServiceImpl implements ItemService {
 
+    private final FileService fileService;
     private final ItemRepository itemRepository;
     private final ModelMapper modelMapper;
 

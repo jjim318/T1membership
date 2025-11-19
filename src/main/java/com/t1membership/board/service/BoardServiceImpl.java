@@ -15,6 +15,7 @@ import com.t1membership.board.dto.updateBoard.UpdateBoardRes;
 import com.t1membership.board.repository.BoardRepository;
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.service.FileService;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ import java.util.List;
 @Transactional
 public class BoardServiceImpl implements BoardService {
 
+    private final FileService fileService;
     private final BoardRepository boardRepository;
     private final MemberRepository memberRepository;
 

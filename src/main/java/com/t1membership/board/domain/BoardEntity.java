@@ -2,9 +2,13 @@ package com.t1membership.board.domain;
 
 import com.t1membership.board.constant.BoardType;
 import com.t1membership.coreDomain.BaseEntity;
+import com.t1membership.image.domain.ImageEntity;
 import com.t1membership.member.domain.MemberEntity;
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -47,4 +51,22 @@ public class BoardEntity extends BaseEntity {
 
     @Column(nullable = false)
     private boolean isSecret = false;
+
+
+    @Builder.Default
+    @OneToMany(mappedBy = "board", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC, uuid ASC") // 08.27 추가
+    private List<ImageEntity> images = new ArrayList<>(); // 이미지
+
+
+    public void addImage(ImageEntity image) {
+        images.add(image);
+        image.setBoard(this); // ImageEntity에 setBoard(…) 존재해야 함
+    }
+
+    public void removeImage(ImageEntity image) {
+        images.remove(image);
+        image.setBoard(null);
+    }
+
 }
