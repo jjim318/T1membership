@@ -1,11 +1,14 @@
 package com.t1membership.item.domain;
 
 import com.t1membership.coreDomain.BaseEntity;
+import com.t1membership.image.domain.ImageEntity;
 import com.t1membership.item.constant.*;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -24,7 +27,7 @@ public class ItemEntity extends BaseEntity {
     @Column(name = "item_name", nullable = false)
     private String itemName;
 
-    @Column(name = "item_price", nullable = false, precision = 15, scale = 2)
+    @Column(name = "item_price", nullable = false)
     private BigDecimal itemPrice;
 
     @Column(name = "item_stock", nullable = false)
@@ -77,5 +80,26 @@ public class ItemEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "pop_player")
     private Player popPlayer;
+
+    //환불/취소 메서드 롤백
+    public void increaseStock(int qty) {
+        this.itemStock += qty;
+    }
+
+
+    @Builder.Default
+    @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC, uuid ASC")
+    private List<ImageEntity> images = new ArrayList<>();
+
+    public void addImage(ImageEntity image) {
+        images.add(image);
+        image.setItem(this);
+    }
+    public void removeImage(ImageEntity image) {
+        images.remove(image);
+        image.setItem(null);
+    }
+
 
 }
