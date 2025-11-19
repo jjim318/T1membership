@@ -1,4 +1,4 @@
-package com.t1membership.pay.config;
+package com.anpetna.pay.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;

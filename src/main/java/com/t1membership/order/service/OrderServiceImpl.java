@@ -8,7 +8,6 @@ import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
 import com.t1membership.order.dto.req.user.CreateMembershipOrderReq;
 import com.t1membership.order.dto.req.user.CreateOrderReq;
 import com.t1membership.order.dto.req.user.CreatePopOrderReq;
-import com.t1membership.order.dto.res.common.CancelOrderRes;
 import com.t1membership.order.dto.res.user.CreateOrderRes;
 import com.t1membership.order.dto.res.user.UserDetailOrderRes;
 import com.t1membership.order.repository.OrderRepository;
@@ -21,8 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -134,4 +131,30 @@ public class OrderServiceImpl implements OrderService {
 
         return processOrder(order);
     }
+
+    //주문전체취소(환불
+
+    //주문부분취소(환불
+    @Override
+    @Transactional
+    public UserDetailOrderRes cancelMyOrder(String memberEmail, CancelOrderReq req) {
+
+        Long orderNo = req.getOrderNo();
+
+        // 1) 내 주문인지 검증 + orderItems fetch
+        OrderEntity order = orderRepository
+                .findByOrderNoAndMember_MemberEmail(orderNo, memberEmail)
+                .orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
+
+        // 회원 쪽은 무조건 전체 취소만 허용
+        if (order.getOrderStatus() == OrderStatus.PAID) {
+            tossPaymentService.cancelPayment(order, req.getReason());
+        }
+
+        order.cancelByUser();
+
+        return UserDetailOrderRes.from(order);
+    }
+
 }

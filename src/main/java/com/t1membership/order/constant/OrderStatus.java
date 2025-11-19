@@ -22,7 +22,7 @@ public enum OrderStatus {
         return this == ORDERED
                 || this == PAID
                 || this == PARTIALLY_CANCELED
-                || this == DELIVERED;
+                || this == SHIPPED;
     }
 
 }

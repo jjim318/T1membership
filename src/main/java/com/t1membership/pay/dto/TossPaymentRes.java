@@ -1,8 +1,8 @@
-package com.t1membership.pay.dto;
+package com.anpetna.pay.dto;
 
-import com.t1membership.pay.constant.TossPaymentMethod;
-import com.t1membership.pay.constant.TossPaymentStatus;
-import com.t1membership.pay.domain.TossPaymentEntity;
+import com.anpetna.pay.constant.TossPaymentMethod;
+import com.anpetna.pay.constant.TossPaymentStatus;
+import com.anpetna.pay.domain.TossPaymentEntity;
 import lombok.*;
 
 import java.time.LocalDateTime;
