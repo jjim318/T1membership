@@ -57,7 +57,7 @@ public class TossPaymentController {
 
         // 로그인되어 있으면 소유자 검증(테스트 중 익명 접근은 통과)
         String memberId = currentMemberId(authentication); // private helper
-        if (memberId != null && !memberId.equals(order.getMemberEntity().getMemberEmail())) {
+        if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
         if (order.getOrderStatus() != OrderStatus.ORDERED)
@@ -125,7 +125,7 @@ public class TossPaymentController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "주문 없음"));
 
         String memberId = currentMemberId(authentication); // ← 안전 추출
-        if (memberId != null && !memberId.equals(order.getMemberEntity().getMemberEmail())) {
+        if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
         assertPayable(order);
@@ -142,32 +142,3 @@ public class TossPaymentController {
         return ResponseEntity.ok(Map.of("isSuccess", true, "data", result));
     }
 }
-
-
-//여기 아래는 위젯
-//@RestController
-//@RequiredArgsConstructor
-//public class TossPaymentController {
-//
-//    private final TossPaymentService tossPaymentService;
-//
-//    @PostMapping("/api/pay/toss/prepare")
-//    public ApiResult<TossPrepareRes> prepare(@RequestBody TossPrepareReq req) {
-//        return new ApiResult<>(tossPaymentService.prepare(req));
-//        // 전역 래퍼를 안 쓰면:
-//        // return ResponseEntity.ok(tossPaymentService.prepare(req));
-//    }
-//
-//    @PostMapping("/api/pay/toss/confirm")
-//    public ApiResult<TossConfirmRes> confirm(@RequestBody TossConfirmReq req) {
-//        return new ApiResult<>(tossPaymentService.confirm(req));
-//        // 전역 래퍼를 안 쓰면:
-//        // return ResponseEntity.ok(tossPaymentService.confirm(req));
-//    }
-//
-//    // (선택) client-key 핑용
-//    @GetMapping("/api/pay/toss/client-key")
-//    public ResponseEntity<String> clientKeyPing() {
-//        return ResponseEntity.ok("ok");
-//    }
-//}

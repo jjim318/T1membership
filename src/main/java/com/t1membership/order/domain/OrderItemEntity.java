@@ -77,8 +77,9 @@ public class OrderItemEntity {
         oi.setPriceAtOrder(priceAtOrder);
 
         //스냅샷
-        oi.setPriceAtOrder(item.getItemPrice());
+        oi.setPriceAtOrder(priceAtOrder);
         oi.setItemNameSnapshot(item.getItemName());
+        oi.setItemPriceSnapshot(item.getItemPrice());
         //oi.setItemImageSnapshot(item.getIImage());
 
         //라인 합계

@@ -2,11 +2,11 @@ package com.t1membership.order.service;
 
 import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.MembershipAllowedType;
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.item.repository.ItemRepository;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
-import com.t1membership.order.constant.MembershipPayType;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;

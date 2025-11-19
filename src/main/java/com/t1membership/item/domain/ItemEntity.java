@@ -78,4 +78,9 @@ public class ItemEntity extends BaseEntity {
     @Column(name = "pop_player")
     private Player popPlayer;
 
+    //환불/취소 메서드 롤백
+    public void increaseStock(int qty) {
+        this.itemStock += qty;
+    }
+
 }

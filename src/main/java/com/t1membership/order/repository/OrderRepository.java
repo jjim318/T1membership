@@ -1,6 +1,7 @@
 package com.t1membership.order.repository;
 
 import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.dto.req.admin.AdminSearchOrderReq;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -23,4 +24,8 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
 
     @Query("select o from OrderEntity o left join fetch o.orderItems where o.orderNo = :orderNo")
     Optional<OrderEntity> findByIdFetchItems(@Param("orderNo") Long orderNo);
+
+    Page<OrderEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    Page<OrderEntity> searchOrders(AdminSearchOrderReq req, Pageable pageable);
 }

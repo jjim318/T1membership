@@ -1,8 +1,8 @@
 package com.t1membership.order.domain;
 
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.coreDomain.BaseEntity;
-import com.t1membership.order.constant.MembershipPayType;
 import com.t1membership.order.constant.OrderStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -91,6 +91,59 @@ public class OrderEntity extends BaseEntity {
     //전체금액결제
     @Column(name = "order_total_price",nullable = false)
     private BigDecimal orderTotalPrice;
+
+    // ====== 비즈니스 메서드 ======
+
+    // ===== 관리자 전체 취소 =====
+    public void cancelAllByAdmin() {
+        if (!orderStatus.isCancelableByAdmin()) {
+            throw new IllegalStateException("현재 상태에서는 전체 취소가 불가능합니다.");
+        }
+        restoreStock(this.orderItems);
+        this.orderStatus = OrderStatus.CANCELED;
+    }
+
+    // ===== 관리자 부분 취소 =====
+    public void cancelPartiallyByAdmin(List<Long> cancelItemNos) {
+        if (!orderStatus.isCancelableByAdmin()) {
+            throw new IllegalStateException("현재 상태에서는 부분 취소가 불가능합니다.");
+        }
+
+        List<OrderItemEntity> targets = this.orderItems.stream()
+                .filter(oi -> cancelItemNos.contains(oi.getOrderItemNo()))
+                .toList();
+
+        if (targets.isEmpty()) {
+            throw new IllegalArgumentException("취소할 주문상품을 찾을 수 없습니다.");
+        }
+
+        // 재고 롤백
+        restoreStock(targets);
+
+        // 주문에서 제거 (orphanRemoval=true 이면 DB에서도 삭제)
+        this.orderItems.removeAll(targets);
+
+        if (this.orderItems.isEmpty()) {
+            this.orderStatus = OrderStatus.CANCELED;
+        } else {
+            this.orderStatus = OrderStatus.PARTIALLY_CANCELED;
+        }
+    }
+
+    // ===== 회원 전체 취소 =====
+    public void cancelByUser() {
+        if (!orderStatus.isCancelableByUser()) {
+            throw new IllegalStateException("현재 상태에서는 회원이 취소할 수 없습니다.");
+        }
+        restoreStock(this.orderItems);
+        this.orderStatus = OrderStatus.CANCELED;
+    }
+
+    private void restoreStock(List<OrderItemEntity> items) {
+        for (OrderItemEntity oi : items) {
+            oi.getItem().increaseStock(oi.getQuantity());
+        }
+    }
 }
 /* === GPT COMMENT START =====================================
 파일 목적: 주문 헤더(공통) 엔티티. 한 번의 주문(결제 트랜잭션)을 대표하며, 배송지/주문상태/총액 등 "주문 공통 정보"를 담습니다.

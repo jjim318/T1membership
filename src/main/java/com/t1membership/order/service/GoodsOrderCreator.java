@@ -23,8 +23,8 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
+
     private final MemberRepository memberRepository;
-    private final OrderRepository orderRepository;
     private final ItemRepository itemRepository;
     private final CartRepository cartRepository;
     //주문 한 건을 생성해서 결제 준비값을 돌려줌
@@ -39,8 +39,7 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
 
         // 1) 회원 검증
         MemberEntity member = memberRepository.findById(memberEmail)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "회원이 존재하지 않습니다."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "회원이 존재하지 않습니다."));
 
         // 2) 주문 엔티티 생성 + 공통 정보 세팅
         OrderEntity order = new OrderEntity();
@@ -51,27 +50,24 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         order.setReceiverDetailAddress(req.getReceiverDetailAddress());
         order.setReceiverZipCode(req.getReceiverZipCode());
         order.setMemo(req.getMemo());
-        order.setOrderStatus(OrderStatus.PAID);
+        order.setOrderStatus(OrderStatus.ORDERED);
 
-        orderRepository.save(order); // PK 필요하니 여기서 저장
+        BigDecimal totalAmount;
 
         // 3) 단건 vs 장바구니 분기
-        BigDecimal totalAmount;
-        if (req.getCartItemIds() != null && !req.getCartItemIds().isEmpty()) {
-            // 장바구니 선택 주문
-            totalAmount = createFromCartItems(order, memberEmail, req);
-        } else {
-            // 단건 주문
+        if (req.getItemId() != null && req.getQuantity() != null) {
             totalAmount = createFromSingleItem(order, req);
+        } else {
+            totalAmount = createFromCartItems(order, memberEmail, req);
         }
 
-        // 4) 총 금액 주문 헤더에 세팅
+        // 4) 총 금액 세팅 (recalcTotal 도 있지만, 명시적으로 맞춰줌)
         order.setOrderTotalPrice(totalAmount);
 
-        // 5) 최종 주문 저장 (orderItems까지 cascade 되도록 설정되어 있다고 가정)
-        orderRepository.save(order);
+        // ❌ 여기서 save 금지: Creator는 "엔티티 조립"만 담당
+        // orderRepository.save(order);
 
-        return order; // 서비스에서 Toss 호출할 때 이걸 사용
+        return order; // 서비스에서 save + Toss 호출
     }
 
     //단건주문처리

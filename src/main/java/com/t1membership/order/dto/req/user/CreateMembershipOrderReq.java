@@ -1,6 +1,6 @@
 package com.t1membership.order.dto.req.user;
 
-import com.t1membership.order.constant.MembershipPayType;
+import com.t1membership.item.constant.MembershipPayType;
 import jakarta.validation.constraints.*;
 import lombok.*;
 

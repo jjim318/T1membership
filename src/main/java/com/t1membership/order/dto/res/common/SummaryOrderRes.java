@@ -35,9 +35,11 @@ public class SummaryOrderRes {
 
         return SummaryOrderRes.builder()
                 .orderNo(order.getOrderNo())
+                .memberEmail(order.getMember().getMemberEmail())
                 .orderDate(order.getCreateDate())
                 .orderStatus(order.getOrderStatus())
                 .orderTotalPrice(order.getOrderTotalPrice())
+                .itemCount(order.getOrderItems() != null ? order.getOrderItems().size() : 0)
                 .itemName(itemName)
                 .build();
     }

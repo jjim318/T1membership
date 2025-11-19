@@ -13,7 +13,7 @@ public class AdminUpdateOrderStatusReq {
     //관리자 주문 상태 변경 요청
 
     @NotNull
-    private String orderNo;//주문 번호
+    private Long orderNo;//주문 번호
 
     @NotNull
     private OrderStatus orderStatus;//주문 상태 변경 가능
