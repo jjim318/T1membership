@@ -25,57 +25,7 @@ public class AdminOrderServiceImpl implements AdminOrderService {
     private final TossPaymentService tossPaymentService;
     //관리자용 주문 서비스 구현체
 
-    //관리자 취소
-    @Override
-    @Transactional
-    public AdminDetailOrderRes cancelOrder(CancelOrderReq req) {
-
-        // 1) 어떤 주문을 취소할지 조회
-        OrderEntity order = orderRepository.findByIdFetchItems(req.getOrderNo())
-                .orElseThrow(() ->
-                        new ResponseStatusException(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."));
-
-        // 2) 이미 완전히 취소/배송 완료된 주문이면 막기
-        if (order.getOrderStatus() == OrderStatus.CANCELED
-                || order.getOrderStatus() == OrderStatus.DELIVERED
-                || order.getOrderStatus() == OrderStatus.RETURNED
-                || order.getOrderStatus() == OrderStatus.REFUNDED) {
-            // 이미 완결 상태인 주문은 취소 불가
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "이미 취소되었거나 배송 완료된 주문입니다."
-            );
-        }
-
-        // 3) ★ 나중에 Toss 환불 붙일 자리
-        //    - 현재 형님 말로는 "환불 로직이 아직 없다" → 실제 PG 호출은 나중으로 미룸
-        //    - 전체 취소/부분 취소에 따라 전체 환불/부분 환불을 여기서 호출하면 됨.
-        // if (order.getOrderStatus() == OrderStatus.PAID
-        //         || order.getOrderStatus() == OrderStatus.SHIPMENT_READY
-        //         || order.getOrderStatus() == OrderStatus.SHIPPED) {
-        //
-        //     if (req.getOrderItemNos() == null || req.getOrderItemNos().isEmpty()) {
-        //         // 전체 취소 + 전체 환불
-        //         tossPaymentService.cancelPaymentByAdmin(order, req.getReason());
-        //     } else {
-        //         // 부분 취소 + 부분 환불
-        //         tossPaymentService.partialCancelPaymentByAdmin(order, req.getOrderItemNos(), req.getReason());
-        //     }
-        // }
-
-        // 4) 실제 주문/재고 상태 변경 (도메인 메서드 사용)
-        if (req.getOrderItemNos() == null || req.getOrderItemNos().isEmpty()) {
-            // ✅ 전체 취소: 주문에 속한 모든 OrderItem 재고 롤백 + 주문 상태 CANCELED
-            order.cancelAllByAdmin();
-        } else {
-            // ✅ 부분 취소: 선택한 OrderItem만 재고 롤백 + 주문 상태 적절히 변경(예: PARTIALLY_CANCELED)
-            order.cancelPartiallyByAdmin(req.getOrderItemNos());
-        }
-
-        // 5) 관리자 상세 응답 DTO로 변환해서 반환
-        return AdminDetailOrderRes.from(order);
-    }
-    // ================== 4) 배송지 변경 ==================
+    // ================== 배송지 변경 ==================
     @Override
     @Transactional
     public UpdateOrderAddressRes updateAddress(AdminUpdateOrderAddressReq req) {
@@ -128,7 +78,7 @@ public class AdminOrderServiceImpl implements AdminOrderService {
         return UpdateOrderAddressRes.from(order);
     }
 
-    // ================== 5) 주문 상태 변경 ==================
+    // ================== 주문 상태 변경 ==================
     @Override
     @Transactional
     public AdminDetailOrderRes updateStatus(AdminUpdateOrderStatusReq req) {

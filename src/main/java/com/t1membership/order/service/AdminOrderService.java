@@ -18,7 +18,4 @@ public interface AdminOrderService {
     //주문 상태 변경
     AdminDetailOrderRes updateStatus(AdminUpdateOrderStatusReq req);
 
-    // 주문 전체 취소
-    AdminDetailOrderRes cancelOrder(CancelOrderReq req);
-
 }
