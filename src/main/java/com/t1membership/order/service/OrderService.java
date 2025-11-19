@@ -11,10 +11,8 @@ public interface OrderService {
     //주문 서비스 인터페이스(유저용
 
     CreateOrderRes createGoodsOrder(String memberEmail, CreateGoodsOrderReq req);
+
     CreateOrderRes createMembershipOrder(String memberEmail, CreateMembershipOrderReq req);
+
     CreateOrderRes createPopOrder(String memberEmail, CreatePopOrderReq req);
-
-    // 내 주문 취소
-    UserDetailOrderRes cancelMyOrder(String memberEmail, CancelOrderReq req);
-
 }

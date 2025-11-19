@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 @RestController
@@ -23,15 +24,24 @@ public class TossPaymentController {
     private final OrderRepository orderRepository;
     private final TossPaymentService tossPaymentService;
 
-    // 공통: 라인합 재계산(0 방지)
+    // 공통: 라인합 재계산(BigDecimal 기반)
     private int computeOrderAmount(OrderEntity order) {
+
         return order.getOrderItems().stream()
-                .mapToInt(oi -> {
-                    int line = oi.getLineTotal();
-                    if (line <= 0) line = oi.getPriceAtOrder() * oi.getQuantity();
+                .map(oi -> {
+                    BigDecimal line = oi.getLineTotal();
+
+                    // lineTotal <= 0 이면 priceAtOrder * quantity 로 계산
+                    if (line == null || line.compareTo(BigDecimal.ZERO) <= 0) {
+                        line = oi.getPriceAtOrder().multiply(
+                                BigDecimal.valueOf(oi.getQuantity())
+                        );
+                    }
+
                     return line;
                 })
-                .sum();
+                .reduce(BigDecimal.ZERO, BigDecimal::add)          // BigDecimal 합계
+                .intValueExact();                                   // Toss cancelAmount 위해 Integer 변환
     }
     // 공통 헬퍼 (컨트롤러 안에 추가)
     private String currentMemberId(Authentication auth) {
