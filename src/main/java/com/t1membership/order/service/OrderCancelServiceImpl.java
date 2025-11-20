@@ -1,5 +1,6 @@
 package com.t1membership.order.service;
 
+import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;
@@ -143,6 +144,19 @@ public class OrderCancelServiceImpl implements OrderCancelService {
 
         // 5) TODO: 재고 롤백, 정산/회계 로그, 알림 발송 등은 별도 서비스에서 처리 권장
 
+        // 5) 재고 롤백
+        for (OrderItemEntity orderItem : order.getOrderItems()) {
+            ItemEntity item = orderItem.getItem();  // 어떤 상품인지
+            int qty = orderItem.getQuantity();      // 몇 개 복구할지
+
+            // 재고 복원
+            int newStock = item.getItemStock() + qty;
+            item.setItemStock(newStock);
+
+            log.info("[InventoryRollback] 상품 ID={} 재고 복구: +{} → 현재 재고={}",
+                    item.getItemNo(), qty, newStock);
+        }
+
         // 6) 응답 DTO 조립
         CancelOrderRes res = new CancelOrderRes();
         res.setOrderNo(order.getOrderNo());
@@ -257,6 +271,20 @@ public class OrderCancelServiceImpl implements OrderCancelService {
 
         // TODO: 재고 롤백 (부분 취소된 상품만 수량 복구)
         // TODO: 회계/정산 로그, 알림 / 히스토리 로그
+
+        // 6) 재고 롤백 (부분 취소된 상품만 처리)
+        for (OrderItemEntity oi : orderItems) {
+            if (targetSet.contains(oi.getOrderItemNo())) { // 요청된 아이템만
+                ItemEntity item = oi.getItem();
+                int qty = oi.getQuantity();
+
+                int newStock = item.getItemStock() + qty;
+                item.setItemStock(newStock);
+
+                log.info("[InventoryRollback] 부분취소 - 상품 ID={} 재고 복구: +{} → 현재 재고={}",
+                        item.getItemNo(), qty, newStock);
+            }
+        }
 
         // 6) 응답 DTO 조립
         CancelOrderRes res = new CancelOrderRes();
