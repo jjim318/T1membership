@@ -3,6 +3,7 @@ package com.t1membership.item.service;
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.image.dto.ExistingImageDTO;
 import com.t1membership.image.dto.ImageDTO;
 import com.t1membership.image.service.FileService;
 import com.t1membership.item.domain.ItemEntity;
@@ -35,7 +36,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.util.List;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -104,8 +105,11 @@ public class ItemServiceImpl implements ItemService {
     // 수정 (ADMIN 전용)
     // =========================
     @Override
+    @Transactional
     @PreAuthorize("hasRole('ADMIN')")
-    public ModifyItemRes modifyItem(ModifyItemReq req, List<MultipartFile> images) {
+    public ModifyItemRes modifyItem(ModifyItemReq req,
+                                    List<MultipartFile> newImages,
+                                    List<ExistingImageDTO> existingImages) {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
@@ -119,75 +123,68 @@ public class ItemServiceImpl implements ItemService {
         ItemEntity item = itemRepository.findById(req.getItemNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "아이템을 찾을 수 없습니다."));
 
-        // --- 불변 필드 방어: itemNo는 변경 불가 ---
-
-        // --- 변경 가능 필드만 업데이트 (null-안전) ---
+        // ====== 기본 정보 수정 (영속 엔티티 직접 수정) ======
         if (StringUtils.hasText(req.getItemName())) {
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo()) // ID 유지
-                    .itemName(req.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
-            // 위처럼 빌더 재생성 방식을 쓰면 불변 스타일 유지 가능.
-            // 만약 세터가 있다면 item.setItemName(req.getItemName()); 로 단순화 가능.
+            item.setItemName(req.getItemName());
         }
 
         if (req.getItemPrice() != null) {
-            if (req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
-            // 세터가 없다면 위 빌더 재생성 방식으로 다시 구성
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(req.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            if (req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
+            }
+            item.setItemPrice(req.getItemPrice());
         }
 
         if (req.getItemStock() != null) {
-            if (req.getItemStock() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(req.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            if (req.getItemStock() < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
+            }
+            item.setItemStock(req.getItemStock());
         }
 
         if (req.getItemCategory() != null) {
-            ItemCategory cat = req.getItemCategory();
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(cat)
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            item.setItemCategory(req.getItemCategory());
         }
 
         if (req.getItemSellStatus() != null) {
-            ItemSellStatus status = req.getItemSellStatus();
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(status)
-                    .build();
+            item.setItemSellStatus(req.getItemSellStatus());
         }
 
+        // ====== 기존 이미지 처리 (삭제 + 순서 변경) ======
+        Map<String, Integer> keepMap = new HashMap<>();
+        if (existingImages != null) {
+            for (ExistingImageDTO dto : existingImages) {
+                keepMap.put(dto.getFileName(), dto.getSortOrder());
+            }
+        }
 
-        if (images != null && !images.isEmpty()) {
-            int order = item.getImages().size(); // 기존 이미지 뒤에 이어붙이기
-            for (MultipartFile file : images) {
+        List<ImageEntity> currentImages = new ArrayList<>(item.getImages());
+
+        for (ImageEntity img : currentImages) {
+            String fileName = img.getFileName();
+
+            if (!keepMap.containsKey(fileName)) {
+                fileService.deleteFile(fileName);
+                item.removeImage(img);
+            } else {
+                Integer newOrder = keepMap.get(fileName);
+                img.setSortOrder(newOrder != null ? newOrder : 0);
+            }
+        }
+
+        // ====== 새 이미지 추가 ======
+        int orderStart = 0;
+        if (item.getImages() != null && !item.getImages().isEmpty()) {
+            orderStart = item.getImages().stream()
+                    .map(ImageEntity::getSortOrder)
+                    .filter(Objects::nonNull)
+                    .max(Integer::compareTo)
+                    .orElse(0) + 1;
+        }
+
+        if (newImages != null && !newImages.isEmpty()) {
+            int order = orderStart;
+            for (MultipartFile file : newImages) {
                 if (file.isEmpty()) continue;
 
                 ImageDTO dto = fileService.uploadFile(file, order++);
@@ -200,6 +197,7 @@ public class ItemServiceImpl implements ItemService {
 
         return ModifyItemRes.from(saved);
     }
+
 
     // =========================
     // 삭제 (기본: 하드 삭제)

@@ -2,6 +2,7 @@ package com.t1membership.item.controller;
 
 import com.t1membership.ApiResult;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.dto.ExistingImageDTO;
 import com.t1membership.item.dto.deleteItem.DeleteItemReq;
 import com.t1membership.item.dto.deleteItem.DeleteItemRes;
 import com.t1membership.item.dto.modifyItem.ModifyItemReq;
@@ -35,13 +36,20 @@ public class ItemController {
 
 
     @PutMapping(value = "/{itemNo}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResult<ModifyItemRes> modifyItem(@PathVariable Long itemNo, @ModelAttribute ModifyItemReq putReq, @RequestPart(value = "images", required = false) List<MultipartFile> images) {
+    public ApiResult<ModifyItemRes> modifyItem(
+            @PathVariable Long itemNo,
+            @ModelAttribute ModifyItemReq putReq,
+            @RequestPart(value = "images", required = false) List<MultipartFile> newImages,
+            @RequestPart(value = "existingImages", required = false) List<ExistingImageDTO> existingImages
+    ) {
         putReq = putReq.toBuilder()
                 .itemNo(itemNo)
                 .build();
-        var putRes = itemService.modifyItem(putReq, images);
-        return new ApiResult<>(putRes);
+
+        var res = itemService.modifyItem(putReq, newImages, existingImages);
+        return new ApiResult<>(res);
     }
+
 
 
     @DeleteMapping("/{itemNo}")

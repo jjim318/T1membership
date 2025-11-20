@@ -1,6 +1,7 @@
 package com.t1membership.item.service;
 
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.dto.ExistingImageDTO;
 import com.t1membership.item.dto.deleteItem.DeleteItemReq;
 import com.t1membership.item.dto.deleteItem.DeleteItemRes;
 import com.t1membership.item.dto.modifyItem.ModifyItemReq;
@@ -19,7 +20,7 @@ public interface ItemService {
 
     RegisterItemRes registerItem(RegisterItemReq registerItemReq, List<MultipartFile> images);
 
-    ModifyItemRes modifyItem(ModifyItemReq modifyItemReq, List<MultipartFile> images);
+    ModifyItemRes modifyItem(ModifyItemReq modifyItemReq, List<MultipartFile> newImages, List<ExistingImageDTO> existingImages);
 
     DeleteItemRes deleteItem(DeleteItemReq deleteItemReq);
 
