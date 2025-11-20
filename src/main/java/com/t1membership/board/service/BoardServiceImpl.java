@@ -15,6 +15,9 @@ import com.t1membership.board.dto.updateBoard.UpdateBoardRes;
 import com.t1membership.board.repository.BoardRepository;
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.image.dto.ExistingImageDTO;
+import com.t1membership.image.dto.ImageDTO;
 import com.t1membership.image.service.FileService;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
@@ -28,9 +31,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.List;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -89,7 +93,7 @@ public class BoardServiceImpl implements BoardService {
        생성
     ======================= */
     @Override
-    public CreateBoardRes createBoard(CreateBoardReq req) {
+    public CreateBoardRes createBoard(CreateBoardReq req, List<MultipartFile> images) {
         Authentication auth = currentAuthOrThrow();
         String email = auth.getName();
 
@@ -121,6 +125,24 @@ public class BoardServiceImpl implements BoardService {
                 .build();
 
         BoardEntity saved = boardRepository.save(entity);
+
+        // 2) 이미지가 있으면 파일 저장 + ImageEntity 연결
+        if (images != null && !images.isEmpty()) {
+            int order = 0;
+            for (MultipartFile file : images) {
+                if (file.isEmpty()) continue;
+
+                // (1) 파일 시스템 저장 + 메타 정보 생성
+                ImageDTO dto = fileService.uploadFile(file, order++);
+
+                // (2) DTO -> 엔티티 + 게시글 연결
+                ImageEntity image = ImageEntity.fromDtoForBoard(dto, saved);
+
+                // (3) 양방향 연관관계
+                saved.addImage(image);
+            }
+        }
+
         return CreateBoardRes.from(saved);
     }
 
@@ -194,7 +216,11 @@ public class BoardServiceImpl implements BoardService {
        수정 (작성자 or 관리자)
     ======================= */
     @Override
-    public UpdateBoardRes updateBoard(UpdateBoardReq req) {
+    @Transactional
+    public UpdateBoardRes updateBoard(UpdateBoardReq req,
+                                      List<ExistingImageDTO> existingImages,
+                                      List<MultipartFile> newImages) {
+
         Authentication auth = currentAuthOrThrow();
         String email = auth.getName();
 
@@ -210,6 +236,7 @@ public class BoardServiceImpl implements BoardService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "작성자 또는 관리자만 수정할 수 있습니다.");
         }
 
+        // ====== 기본 텍스트 정보 수정 ======
         if (StringUtils.hasText(req.getBoardTitle())) {
             board.setBoardTitle(req.getBoardTitle().trim());
         }
@@ -230,9 +257,63 @@ public class BoardServiceImpl implements BoardService {
             board.setSecret(req.getIsSecret());
         }
 
-        // 더티체킹으로 반영
+        // ====== 기존 이미지 정리 (삭제 + 정렬 변경) ======
+        Map<String, Integer> keepMap = new HashMap<>();
+        if (existingImages != null) {
+            for (ExistingImageDTO dto : existingImages) {
+                if (dto.getFileName() != null) {
+                    keepMap.put(dto.getFileName(), dto.getSortOrder());
+                }
+            }
+        }
+
+        // 현재 게시글에 달린 이미지들을 복사해서 순회
+        List<ImageEntity> currentImages = new ArrayList<>(board.getImages());
+
+        for (ImageEntity img : currentImages) {
+            String fileName = img.getFileName();
+
+            // existingImages 목록에 없는 애들은 삭제
+            if (!keepMap.containsKey(fileName)) {
+                if (fileName != null) {
+                    fileService.deleteFile(fileName);   // 실제 파일 삭제
+                }
+                board.removeImage(img);                 // 연관관계 제거 (orphanRemoval로 DB row 삭제)
+            } else {
+                // 남길 이미지면 sortOrder 갱신
+                Integer newOrder = keepMap.get(fileName);
+                img.setSortOrder(newOrder != null ? newOrder : 0);
+            }
+        }
+
+        // ====== 새 이미지 추가 ======
+        int orderStart = 0;
+        if (board.getImages() != null && !board.getImages().isEmpty()) {
+            orderStart = board.getImages().stream()
+                    .map(ImageEntity::getSortOrder)
+                    .filter(Objects::nonNull)
+                    .max(Integer::compareTo)
+                    .orElse(0) + 1;
+        }
+
+        if (newImages != null && !newImages.isEmpty()) {
+            int order = orderStart;
+            for (MultipartFile file : newImages) {
+                if (file == null || file.isEmpty()) continue;
+
+                // 파일 시스템에 저장 + 메타정보 생성
+                ImageDTO dto = fileService.uploadFile(file, order++);
+
+                // DTO -> 엔티티 변환 + 게시글 연결
+                ImageEntity image = ImageEntity.fromDtoForBoard(dto, board);
+                board.addImage(image);
+            }
+        }
+
+        // 영속 엔티티라 더티체킹으로 텍스트 + 이미지 변경 모두 반영됨
         return UpdateBoardRes.from(board);
     }
+
 
     /* =======================
        삭제 (작성자 or 관리자)
