@@ -114,24 +114,23 @@ public class MemberController {
     }
 
     //이미지 없이 수정버전
-    @PostMapping(value = "/modify",
+    // ===== 회원 정보 + 프로필 이미지 수정 =====
+    @PostMapping(
+            value = "/modify",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ApiResult<ModifyMemberRes> modifyMember(
-            @RequestBody @Valid ModifyMemberReq req)throws MemberServiceImpl.MemberIdExistException {
-        ModifyMemberRes res = memberService.modifyMember(req,null,null);
-        return new ApiResult<>(res);
-    }
-    //이미지도 수정버전
-    @PostMapping(value = "/modify",
-    consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-    produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<ModifyMemberRes> modifyImage(
-            @RequestPart("json") ModifyMemberReq req,
+            @ModelAttribute @Valid ModifyMemberReq req,
             @RequestPart(value = "profileFile", required = false) MultipartFile profile,
-            @RequestPart(value = "removeProfile", required = false) boolean removeProfile
-    )throws MemberServiceImpl.MemberIdExistException {
-        ModifyMemberRes res = memberService.modifyMember(req,profile,removeProfile);
+            @RequestPart(value = "removeProfile", required = false) Boolean removeProfile
+    ) throws MemberServiceImpl.MemberIdExistException {
+
+        // profile == null && removeProfile == null  → 텍스트만 수정
+        // profile != null                          → 기존 이미지 삭제 + 새 이미지 등록
+        // removeProfile == true                    → 이미지 삭제(기본이미지 상태로)
+
+        ModifyMemberRes res = memberService.modifyMember(req, profile, removeProfile);
         return new ApiResult<>(res);
     }
 
