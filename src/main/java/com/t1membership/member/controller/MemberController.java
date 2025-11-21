@@ -121,7 +121,7 @@ public class MemberController {
     public ApiResult<ModifyMemberRes> modifyMember(
             @ModelAttribute @Valid ModifyMemberReq req,
             @RequestPart(value = "profileFile", required = false) MultipartFile profile,
-            @RequestPart(value = "removeProfile", required = false) Boolean removeProfile
+            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
     ) throws MemberServiceImpl.MemberIdExistException {
 
         // profile == null && removeProfile == null  → 텍스트만 수정

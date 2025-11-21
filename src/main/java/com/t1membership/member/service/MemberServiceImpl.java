@@ -131,21 +131,21 @@ public class MemberServiceImpl implements MemberService {
             modifyMemberReq.setMemberEmail(loginEmail);
         }
 
-        String memberId = modifyMemberReq.getMemberEmail();
+        String memberEmail = modifyMemberReq.getMemberEmail();
 
         //대상 이메일 누락 방어
-        if (!StringUtils.hasText(memberId)) {
+        if (!StringUtils.hasText(memberEmail)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
         }
 
         //본인 또는 관리자만 허용
-        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberId))) {
+        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
         }
 
         //조회
-        MemberEntity memberEntity = memberRepository.findById(memberId)
-                .orElseThrow(() -> new UsernameNotFoundException(memberId));
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
 
         //비밀번호 변경
         String memberPw = modifyMemberReq.getMemberPw();
