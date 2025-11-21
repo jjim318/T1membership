@@ -100,7 +100,8 @@ public class SecurityConfig {
                         "/swagger-ui/**",
                         "/v3/api-docs/**",
                         "/swagger-resources/**",
-                        "/webjars/**"
+                        "/webjars/**",
+                        "/error"
                 ).permitAll()
 
                 // 게시판/아이템/댓글 조회는 누구나 (GET만)
@@ -111,8 +112,12 @@ public class SecurityConfig {
                 ).permitAll()
 
                 // === (2) 로그인한 USER 이상만 ===
-                // 마이페이지, 회원 정보 수정
-                .requestMatchers("/member/my_page/**", "/member/modify").hasRole("USER")
+                // 마이페이지, 회원 정보 수정  → 로그인한 회원 (USER/ADMIN) 모두 가능
+                .requestMatchers("/member/my_page/**", "/member/modify").hasAnyRole("USER", "ADMIN")
+
+                // 회원 목록/단건 조회
+                .requestMatchers("/member/readAll").hasRole("ADMIN")              // 전체 목록은 관리자만
+                .requestMatchers("/member/readOne").hasAnyRole("USER", "ADMIN")   // 단건 조회는 회원+관리자
 
                 // 장바구니
                 .requestMatchers("/cart/**").hasRole("USER")
@@ -139,9 +144,6 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/item").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/item/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/item/**").hasRole("ADMIN")
-
-                // 회원 목록/단건 조회
-                .requestMatchers("/member/readOne", "/member/readAll").hasRole("ADMIN")
 
                 // === (4) 그 외 모든 요청은 '인증'만 필요 (권한은 추가로 메서드 단위에서 제한 가능) ===
                 .anyRequest().authenticated()
@@ -178,7 +180,7 @@ public class SecurityConfig {
         // 개발/로컬 프론트엔드 Origin (운영 시 실제 도메인만 남기고 정리 필요)
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
-                "http://192.168.0.160:3000"
+                "http://localhost:3001"
         ));
 
         // 허용 메서드

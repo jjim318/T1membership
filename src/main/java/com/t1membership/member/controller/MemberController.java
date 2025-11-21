@@ -83,35 +83,33 @@ public class MemberController {
             @PathVariable(value = "memberEmail",required = false) String memberEmail,
             @AuthenticationPrincipal(expression = "username") String username,
             Authentication auth) {
-        //조회할 대상 결정
+
+        // 조회 대상 이메일 결정
         final String targetEmail = (memberEmail == null || memberEmail.isBlank())
-                ? username //URL에 email이 없으면 본인 기준
-                : memberEmail; //URL에 email이 있으면 그 사람 기준
-        //방어 코드
+                ? username
+                : memberEmail;
+
         if (targetEmail == null || targetEmail.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"조회할 회원이 없습니다");
         }
-//        //이메일 비교 시 대소문자 무시 (본인 확인)
-//        boolean isSelf = targetEmail.equalsIgnoreCase(username);
-//        //관리자 권한 여부
-//        boolean isAdmin = auth.getAuthorities().stream()
-//                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-//
-//        //본인과 관리자가 아니면 접근 불가
-//        if (!(isSelf || isAdmin)) {
-//            throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본인 또는 관리자만 정보를 조회할 수 있습니다");
-//        }
-        //주석처리 한 이유는 @PreAuthorize("hasRole('ADMIN') or #memberEmail == null") 이걸로 하고 있기 때문에 중복
 
-        //서비스 요청 dto 생성
+        // 추가로 “본인 or 관리자” 체크를 하려면 (선택사항)
+        boolean isSelf = targetEmail.equalsIgnoreCase(username);
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+
+        if (!(isSelf || isAdmin)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "본인 또는 관리자만 정보를 조회할 수 있습니다");
+        }
+
         ReadOneMemberReq req = new ReadOneMemberReq();
-        req.setMemberEmail(targetEmail.trim());//.trim : 앞뒤 공백 제거
+        req.setMemberEmail(targetEmail.trim());
 
-        //서비스에서 조회
         ReadOneMemberRes res = memberService.readOneMember(req);
-
         return new ApiResult<>(res);
     }
+
 
     //이미지 없이 수정버전
     // ===== 회원 정보 + 프로필 이미지 수정 =====

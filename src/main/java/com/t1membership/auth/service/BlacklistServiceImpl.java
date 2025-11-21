@@ -7,6 +7,7 @@ import com.t1membership.auth.util.TokenHash;
 import com.t1membership.config.JwtProvider;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ import java.util.Date;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BlacklistServiceImpl implements BlacklistService {
 
     private final JwtProvider jwtProvider;
@@ -71,15 +73,32 @@ public class BlacklistServiceImpl implements BlacklistService {
 
     // 주어진 Access토큰이 현재 차단 상태인지 확인, 유효한 동일 해시가 존재하면 차단.
     @Override
-    public boolean isBlacklisted(TokenReq tokenRequest) {
-        if (tokenRequest.getAccessToken() == null || tokenRequest.getAccessToken().isBlank()) {
-            return false; // 토큰 없으면 ‘블랙리스트 아님’으로만 판단
+    public boolean isBlacklisted(TokenReq tokenReq) {
+        try {
+            if (tokenReq == null || tokenReq.getAccessToken() == null || tokenReq.getAccessToken().isBlank()) {
+                log.warn("[BL] 액세스 토큰이 비어있습니다. tokenReq={}", tokenReq);
+                // 여기서 굳이 400 던지지 말고 false 로 처리 (필터에서 예외 안 터지게)
+                return false;
+            }
+
+            String rawToken = tokenReq.getAccessToken();
+            String hash = tokenHash.sha256(rawToken);
+
+            boolean exists = blacklistRepository
+                    .existsByAccessTokenHashAndExpiresAtAfter(hash, Instant.now());
+
+            log.info("[BL] 블랙리스트 조회 결과 exists={} hash={}", exists, hash);
+            return exists;
+
+        } catch (ResponseStatusException e) {
+            // 혹시 위에서 다른 방식으로 던지게 바꿔도 방어
+            log.error("[BL] ResponseStatusException 발생", e);
+            return false;
+        } catch (Exception e) {
+            log.error("[BL] 블랙리스트 조회 중 예외 발생", e);
+            // 서비스 전체가 터지지 않도록 false
+            return false;
         }
-
-        Instant now = Instant.now();
-        String hash = tokenHash.sha256(tokenRequest.getAccessToken());
-
-        return blacklistRepository.existsValidAccessHash(hash, now);
     }
 
 

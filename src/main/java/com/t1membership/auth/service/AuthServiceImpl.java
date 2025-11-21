@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -57,42 +58,44 @@ public class AuthServiceImpl implements AuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,"블랙리스트는 로그인을 할 수 없습니다");
         }
 
-        //토큰 발급에 사용할 최종 email
-        final String Email = memberEntity.getMemberEmail();
+        // ==== 🔥 권한 문자열 & roles 리스트 준비 ====
+        // DB에 저장된 MemberRole → "USER", "ADMIN" 형태로 뽑아옴
+        String role = Optional.ofNullable(memberEntity.getMemberRole())
+                .map(Object::toString)                  // Enum -> "USER" / "ADMIN" / ...
+                .map(s -> s.startsWith("ROLE_") ? s.substring(5) : s) // "ROLE_USER" → "USER"
+                .map(String::toUpperCase)               // 혹시 소문자면 대문자로
+                .orElse("USER");                        // 널이면 기본 USER
 
-        //토큰 발급
-        String accessToken = jwtProvider.createAccessToken(Email);
-        String refreshToken = jwtProvider.createRefreshToken(Email);
+        // JwtProvider에 넘길 roles 클레임 (["USER"], ["ADMIN"] ...)
+        List<String> roles = List.of(role);
 
-        //리프레시토큰 만료시각
+        // ==== 🔥 토큰 발급 (roles 포함해서 발급!) ====
+        String accessToken = jwtProvider.createAccessToken(memberEmail, roles);
+        String refreshToken = jwtProvider.createRefreshToken(memberEmail, roles);
+
+        // 리프레시 토큰 만료 시각
         Instant refreshExp = jwtProvider.getRefreshExpiration(refreshToken);
 
-        //리프레시 토큰 해시로 변환
+        // 리프레시 토큰 해시로 변환
         String refreshHash = tokenHash.sha256(refreshToken);
 
-        //한 멤버당 토큰은 1개만
-        int updated = authRepository.upsertRefreshForMember(memberEmail,refreshHash,refreshExp);
-        if (updated == 0){
+        // 한 멤버당 토큰은 1개만 유지
+        int updated = authRepository.upsertRefreshForMember(memberEmail, refreshHash, refreshExp);
+        if (updated == 0) {
             AuthEntity authEntity = AuthEntity.builder()
                     .memberEmail(memberEmail)
-                    .refreshToken(refreshToken)
+                    .refreshToken(refreshToken) // 형님 기존 로직 유지 (원래 문자열 저장하던대로)
                     .expiresAt(refreshExp)
                     .revokedAt(null)
                     .build();
             authRepository.save(authEntity);
         }
-        //권한 문자열 가공
-        String role = Optional.ofNullable(memberEntity.getMemberRole())
-                .map(Object::toString)      // Enum -> "ADMIN"
-                .map(s -> s.startsWith("ROLE_") ? s.substring(5) : s)
-                .map(String::toUpperCase)
-                .orElse("USER");
 
-        //최종응답객체
+        // 최종 응답 객체
         return TokenRes.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
-                .memberRole(role)
+                .memberRole(role)   // "USER" / "ADMIN" 그대로 내려줌
                 .build();
     }
 
