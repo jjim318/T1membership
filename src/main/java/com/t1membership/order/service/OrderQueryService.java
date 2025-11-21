@@ -24,14 +24,14 @@ public class OrderQueryService {
     //내 주문 목록 조회 (회원
     //loginEmail 은 반드시 SecurityContext / @AuthenticationPrincipal 에서 받은 값만 사용
     public Page<SummaryOrderRes> getMyOrders(String memberEmail, Pageable pageable) {
-        Page<OrderEntity> page = orderRepository.findByMember_MemberEmailOrderByCreatedAtDesc(memberEmail, pageable);
+        Page<OrderEntity> page = orderRepository.findByMember_MemberEmailOrderByCreateDateDesc(memberEmail, pageable);
         return page.map(SummaryOrderRes::from);
     }
 
     //관리자용 주문 목록 조회 (전체 페이징
     //관리자 권한 체크는 Controller / SecurityConfig 에서 ROLE_ADMIN 으로 처리
     public Page<SummaryOrderRes> getAllOrderAdmin(Pageable pageable) {
-        Page<OrderEntity> page = orderRepository.findAllByOrderByCreatedAtDesc(pageable);
+        Page<OrderEntity> page = orderRepository.findAllByOrderByCreateDateDesc(pageable);
         return page.map(SummaryOrderRes::from);
     }
 

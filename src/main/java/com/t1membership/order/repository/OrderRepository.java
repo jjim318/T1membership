@@ -17,7 +17,7 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
     Optional<OrderEntity> findByOrderNoAndMember_MemberEmail(Long orderNo, String memberEmail);
 
     // 목록(요약)용: 상태/기간 필터 등 필요 시 조건 메서드 추가
-    Page<OrderEntity> findByMember_MemberEmailOrderByCreatedAtDesc(String memberEmail, Pageable pageable);
+    Page<OrderEntity> findByMember_MemberEmailOrderByCreateDateDesc(String memberEmail, Pageable pageable);
 
     @Query("select o from OrderEntity o join fetch o.member where o.orderNo = :orderNo")
     Optional<OrderEntity> findDetailById(@Param("orderNo") Long orderNo);
@@ -25,7 +25,14 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
     @Query("select o from OrderEntity o left join fetch o.orderItems where o.orderNo = :orderNo")
     Optional<OrderEntity> findByIdFetchItems(@Param("orderNo") Long orderNo);
 
-    Page<OrderEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
+    Page<OrderEntity> findAllByOrderByCreateDateDesc(Pageable pageable);
 
+    @Query("""
+    select o
+      from OrderEntity o
+     where (:#{#req.memberEmail} is null or o.member.memberEmail = :#{#req.memberEmail})
+       and (:#{#req.orderStatus} is null or o.orderStatus = :#{#req.orderStatus})
+     order by o.orderNo desc
+""")
     Page<OrderEntity> searchOrders(AdminSearchOrderReq req, Pageable pageable);
 }

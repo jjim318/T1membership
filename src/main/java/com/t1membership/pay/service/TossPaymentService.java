@@ -19,7 +19,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TossPaymentService {
 
-    @Value("${toss.secret-key}")
+    @Value("${toss.payments.secret-key:}")
     private String tossSecretKey; // 반드시 test_sk_... (테스트)
 
     private final RestTemplate tossrestTemplate;

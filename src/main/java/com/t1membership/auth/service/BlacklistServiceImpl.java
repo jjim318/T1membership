@@ -2,6 +2,7 @@ package com.t1membership.auth.service;
 
 import com.t1membership.auth.dto.tokenDto.TokenReq;
 import com.t1membership.auth.repository.AuthRepository;
+import com.t1membership.auth.repository.BlacklistRepository;
 import com.t1membership.auth.util.TokenHash;
 import com.t1membership.config.JwtProvider;
 import io.jsonwebtoken.Claims;
@@ -22,6 +23,7 @@ public class BlacklistServiceImpl implements BlacklistService {
     private final JwtProvider jwtProvider;
     private final TokenHash tokenHash;
     private final AuthRepository authRepository;
+    private final BlacklistRepository blacklistRepository;
 
     @Override
     public void addToBlacklist(TokenReq tokenRequest) {
@@ -58,13 +60,13 @@ public class BlacklistServiceImpl implements BlacklistService {
         String accessHash = tokenHash.sha256(tokenRequest.getAccessToken());
 
         // 6) 중복 등록 방지: 아직 유효한 동일 해시가 있음 → 204 (신규 저장 없음)
-        boolean exists = authRepository.existsByAccessTokenHashAndExpiresAtAfter(accessHash, now);
+        boolean exists = blacklistRepository.existsByAccessTokenHashAndExpiresAtAfter(accessHash, now);
         if (exists) {
             throw new ResponseStatusException(HttpStatus.NO_CONTENT);
         }
 
         // 7) 신규 저장
-        authRepository.insertAccessBlacklist(accessHash, expiresAt);
+        blacklistRepository.insertAccessBlacklist(accessHash, expiresAt);
     }
 
     // 주어진 Access토큰이 현재 차단 상태인지 확인, 유효한 동일 해시가 존재하면 차단.
@@ -77,7 +79,7 @@ public class BlacklistServiceImpl implements BlacklistService {
         Instant now = Instant.now();
         String hash = tokenHash.sha256(tokenRequest.getAccessToken());
 
-        return authRepository.existsValidAccessHash(hash, now);
+        return blacklistRepository.existsValidAccessHash(hash, now);
     }
 
 
@@ -87,6 +89,6 @@ public class BlacklistServiceImpl implements BlacklistService {
     @Transactional
     @Override
     public void purgeExpired() {
-        authRepository.deleteByExpiresAtBefore(Instant.now());
+        blacklistRepository.deleteByExpiresAtBefore(Instant.now());
     }
 }

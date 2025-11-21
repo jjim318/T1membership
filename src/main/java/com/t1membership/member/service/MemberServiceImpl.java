@@ -50,7 +50,7 @@ public class MemberServiceImpl implements MemberService {
         if (memberRepository.existsByMemberEmail(memberId)) {
             throw new MemberIdExistException("이미 존재하는 회원의 이메일입니다.");
         }
-        if (memberRepository.existsByNickname(joinMemberReq.getMemberNickName())) {
+        if (memberRepository.existsByMemberNickName(joinMemberReq.getMemberNickName())) {
             throw new DuplicateNicknameException("이미 사용 중인 닉네임입니다.");
         }
         MemberEntity memberEntity = modelMapper.map(joinMemberReq, MemberEntity.class);
