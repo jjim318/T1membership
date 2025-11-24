@@ -1,5 +1,8 @@
 package com.t1membership.member.service;
 
+import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.image.dto.ImageDTO;
+import com.t1membership.image.service.FileService;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
@@ -8,11 +11,11 @@ import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
+import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
 import com.t1membership.member.repository.MemberRepository;
-import groovyjarjarpicocli.CommandLine;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
 import org.springframework.http.HttpStatus;
@@ -28,20 +31,24 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.DuplicateFormatFlagsException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class MemberServiceImpl implements MemberService {
 
+    private final FileService fileService;
     private final MemberRepository memberRepository;
     private final ModelMapper modelMapper;
     private final PasswordEncoder passwordEncoder;
+
+    //회원인지 체크
+    @Override
+    public boolean existsByEmail(String email) {
+        return memberRepository.existsByMemberEmail(email);
+    }
 
     @Override
     public JoinMemberRes joinMember(JoinMemberReq joinMemberReq) {
@@ -50,7 +57,7 @@ public class MemberServiceImpl implements MemberService {
         if (memberRepository.existsByMemberEmail(memberId)) {
             throw new MemberIdExistException("이미 존재하는 회원의 이메일입니다.");
         }
-        if (memberRepository.existsByNickname(joinMemberReq.getMemberNickName())) {
+        if (memberRepository.existsByMemberNickName(joinMemberReq.getMemberNickName())) {
             throw new DuplicateNicknameException("이미 사용 중인 닉네임입니다.");
         }
         MemberEntity memberEntity = modelMapper.map(joinMemberReq, MemberEntity.class);
@@ -59,9 +66,13 @@ public class MemberServiceImpl implements MemberService {
 
         memberEntity.setMemberRole(MemberRole.USER);
 
+        // 🔥 가입 시 기본 이미지 URL 설정 (실제 파일 업로드 X)
+        memberEntity.setMemberImage("/images/default-profile.png"); // 기본이미지 경로에 맞게 수정할것!!!!!
+
         MemberEntity savedMemberEntity = memberRepository.save(memberEntity);
         return JoinMemberRes.from(savedMemberEntity);
     }
+
     //헬퍼메서드
     public static class MemberIdExistException extends RuntimeException {
         public MemberIdExistException(String message) { super(message); }
@@ -87,24 +98,44 @@ public class MemberServiceImpl implements MemberService {
     //페이징처리 고민
 
     @Override
-    @PreAuthorize("isAuthenticated() and (hasRole('ADMIN') or #p0.memberEmail == authentication.name)")
-    //isAuthenticated() : 로그인(인증)이 되어야 진입가능
-    //hasRole('ADMIN') : 어드민이면 무조건 통과
-    //#p0.memberId == authentication.name : 첫 번째 파라미터(#p.0)인 readOneMemberReq의 memberEmail과 현재 로그인한 사용자의 이름(authentication.name)과 같아야 통과
-    @Transactional(readOnly = true)//읽기 전용 트랜잭션
-    //조회 성능/안전성(우발적 flush 방지)에 유리
+    @PreAuthorize("isAuthenticated()")   // 로그인은 기본
+    @Transactional(readOnly = true)
     public ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String memberId = authentication.getName();
-        boolean isAdmin = authentication.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
 
-        if (!isAdmin && !memberRepository.existsById(memberId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본인 정보만 조회할 수 있습니다");
+        // === 1) 인증 정보 ===
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()
+                || "anonymousUser".equals(auth.getPrincipal())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        MemberEntity memberEntity = memberRepository.findById(memberId)
-                .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"회원을 찾을 수 없습니다"));
+        String loginEmail = auth.getName(); // JWT subject (이메일)
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+
+        // === 2) 요청으로 들어온 targetEmail ===
+        String targetEmail = readOneMemberReq.getMemberEmail();
+
+        if (targetEmail == null || targetEmail.isBlank()) {
+            // null 이면 무조건 자기 자신
+            targetEmail = loginEmail;
+        }
+
+        // === 3) 본인 or ADMIN 검증 ===
+        boolean isSelf = loginEmail.equalsIgnoreCase(targetEmail);
+        if (!(isSelf || isAdmin)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인 또는 관리자만 정보를 조회할 수 있습니다."
+            );
+        }
+
+        // === 4) 실제 조회는 이메일 기준 ===
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(targetEmail)
+                .orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
+
+        // === 5) DTO 변환 ===
         return ReadOneMemberRes.from(memberEntity);
     }
 
@@ -127,26 +158,25 @@ public class MemberServiceImpl implements MemberService {
         String loginEmail = auth.getName(); // JWT의 subject/username이 이메일이라고 가정
 
         //본인 요청의 경우 요청 바디에 이메일을 로그인 이메일로 강제 고정
-        //클라이언트가 다른 이메일로 조작해도 무효
         if (!isAdmin) {
             modifyMemberReq.setMemberEmail(loginEmail);
         }
 
-        String memberId = modifyMemberReq.getMemberEmail();
+        String memberEmail = modifyMemberReq.getMemberEmail();
 
         //대상 이메일 누락 방어
-        if (!StringUtils.hasText(memberId)) {
+        if (!StringUtils.hasText(memberEmail)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
         }
 
         //본인 또는 관리자만 허용
-        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberId))) {
+        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
         }
 
         //조회
-        MemberEntity memberEntity = memberRepository.findById(memberId)
-                .orElseThrow(() -> new UsernameNotFoundException(memberId));
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
 
         //비밀번호 변경
         String memberPw = modifyMemberReq.getMemberPw();
@@ -158,33 +188,54 @@ public class MemberServiceImpl implements MemberService {
         memberEntity.setMemberNickName(modifyMemberReq.getMemberNickName());
         memberEntity.setMemberPhone(modifyMemberReq.getMemberPhone());
 
-        //이미지 처리
-        String oldUrl = memberEntity.getMemberImage(); // 현재 문자열 URL
-
-        if (multipartFile != null && !multipartFile.isEmpty()) {
-            //새 파일 교체(검증
-            validateImage(multipartFile);
-            //기존 파일 물리 삭제
-            if (StringUtils.hasText(oldUrl)) {
-                deletePhysicalIfLocal(oldUrl);
+        // =========================
+        //   프로필 이미지 처리
+        // =========================
+        // 1) 삭제 요청이 먼저라면 -> 기존 이미지 전부 제거
+        if (Boolean.TRUE.equals(removeProfile)) {
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);   // 실제 파일 삭제 (비동기 가능)
+                }
+                memberEntity.removeImage(img);          // 연관관계 제거 (orphanRemoval로 DB row 삭제)
             }
-            //새 파일 저장 후 URL 세팅
-            String newUrl = storeFileAndGetUrl(multipartFile);
-            memberEntity.setMemberImage(newUrl);
-        } else if (Boolean.TRUE.equals(removeProfile)) {
-            //삭제만 요청
-            if (StringUtils.hasText(oldUrl)) {
-                deletePhysicalIfLocal(oldUrl);
-            }
-            memberEntity.setMemberImage(null); // 또는 ""로 비움
+            memberEntity.setMemberImage(null);          // 문자열 URL 캐시도 비움
         }
-        //그게 아니라면 그대로
 
+        // 2) 새 프로필 이미지 업로드 요청이 있으면 → 기존 것들 지우고 새로 1장 등록
+        if (multipartFile != null && !multipartFile.isEmpty()) {
+            validateImage(multipartFile);
+
+            // 기존 이미지 정리 (파일 + DB)
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);
+                }
+                memberEntity.removeImage(img);
+            }
+
+            // 새 파일 저장 (프로필은 1장이므로 sortOrder=0 고정)
+            ImageDTO dto = fileService.uploadFile(multipartFile, 0);
+
+            // DTO -> 엔티티 변환 + 멤버 연결
+            ImageEntity image = ImageEntity.fromDtoForMember(dto, memberEntity);
+            memberEntity.addImage(image);
+
+            // 문자열 캐시 필드도 동기화 (있으면)
+            memberEntity.setMemberImage(dto.getUrl());
+        }
+
+        // 영속 엔티티라 save() 호출 안 해도 되지만, 명시적으로 한 번 호출해도 무방
         memberRepository.save(memberEntity);
 
         return ModifyMemberRes.from(memberEntity);
     }
-    //헬퍼
+
+    // 이미지 유효성 검증 (기존 로직 그대로 사용)
     private void validateImage(MultipartFile file) {
         long max = 5 * 1024 * 1024L; // 5MB
         if (file.getSize() > max) {
@@ -196,37 +247,86 @@ public class MemberServiceImpl implements MemberService {
         }
     }
 
-    private void deletePhysicalIfLocal(String urlOrPath) {
-        // 로컬이면 Files.deleteIfExists(...), S3면 s3Client.deleteObject(...)
-        // 구현체에 맞게 작성
-        String basePath = "C:/t1membership/uploads/";
+    @Override
+    @Transactional
+    public ModifyMemberRes modifyProfile(ModifyProfileReq req,
+                                         MultipartFile profileFile,
+                                         Boolean removeProfile) {
 
-        String fileName = urlOrPath.replace("/uploads/", "");
-        File file = new File(basePath + fileName);
-
-        if (file.exists()) {
-            file.delete();
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
-    }
 
-    private String storeFileAndGetUrl(MultipartFile file) {
-        try {
-            // 1) 저장할 실제 경로
-            String uploadDir = "C:/t1membership/uploads/";  // 형님이 원하는 경로로 변경 가능
+        boolean isAdmin = auth.getAuthorities().stream()
+                .map(granted -> granted.getAuthority())
+                .anyMatch(role -> "ROLE_ADMIN".equals(role) || "ADMIN".equals(role));
 
-            // 2) 파일 이름 랜덤으로 변경 (덮어쓰기 방지)
-            String newFileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
+        String loginEmail = auth.getName(); // JWT subject = 이메일
 
-            // 3) 파일 저장
-            File saveFile = new File(uploadDir, newFileName);
-            file.transferTo(saveFile);
-
-            // 4) 프론트에서 접근할 수 있는 URL 반환
-            return "/uploads/" + newFileName;
-
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장 실패", e);
+        // 일반 회원이면 무조건 본인 이메일로 고정
+        if (!isAdmin) {
+            req.setMemberEmail(loginEmail);
         }
+
+        String memberEmail = req.getMemberEmail();
+
+        if (!StringUtils.hasText(memberEmail)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
+        }
+
+        // 본인 또는 ADMIN만 허용
+        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
+        }
+
+        // ===== 조회 =====
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
+
+        // ===== 닉네임만 수정 =====
+        memberEntity.setMemberNickName(req.getMemberNickName());
+
+        // =========================
+        //   프로필 이미지 처리
+        // =========================
+
+        // 1) 삭제 요청 → 기존 이미지 제거
+        if (Boolean.TRUE.equals(removeProfile)) {
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);
+                }
+                memberEntity.removeImage(img);
+            }
+            memberEntity.setMemberImage(null);
+        }
+
+        // 2) 새 이미지 업로드 → 기존 것 지우고 새로 1장 등록
+        if (profileFile != null && !profileFile.isEmpty()) {
+            validateImage(profileFile);
+
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);
+                }
+                memberEntity.removeImage(img);
+            }
+
+            ImageDTO dto = fileService.uploadFile(profileFile, 0);
+            ImageEntity image = ImageEntity.fromDtoForMember(dto, memberEntity);
+            memberEntity.addImage(image);
+
+            memberEntity.setMemberImage(dto.getUrl());
+        }
+
+        memberRepository.save(memberEntity);
+
+        return ModifyMemberRes.from(memberEntity);
     }
 
     @Override
@@ -262,18 +362,6 @@ public class MemberServiceImpl implements MemberService {
                 || !passwordEncoder.matches(currentPw, memberEntity.getMemberPw())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호가 일치하지 않습니다.");
         }
-        //발급한 토큰 무효화/삭제 + 로그로 남김
-//        try {
-//            Instant now = Instant.now();
-//            tokenRepository.revokeAllActiveByMemberId(memberId, now);
-//        } catch (Exception ex) {
-//            log.warning("[member-delete] revoke tokens failed ...");
-//        }
-//        try {
-//            tokenRepository.deleteByMemberId(memberId);
-//        } catch (Exception ex) {
-//            log.warning("[member-delete] delete tokens failed ...");
-//        }
 
         //실제로는 지우지 않고 권한을 블랙리스트로 강등
         memberEntity.setMemberRole(MemberRole.BLACKLIST);

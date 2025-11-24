@@ -1,5 +1,9 @@
 package com.t1membership.order.dto.req.user;
 
+import com.t1membership.item.constant.Player;
+import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;

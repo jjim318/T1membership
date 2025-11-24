@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -183,8 +184,8 @@ public class CartServiceImpl implements CartService {
             }
         }
 
-        int totalQty = 0;
-        int totalAmt = 0;
+        int totalQty = 0;                          // 총 수량(개수) → int 유지
+        BigDecimal totalAmt = BigDecimal.ZERO;     // 총 금액 → BigDecimal로 변경
         List<PrepareOrderRes.Line> resultLines = new ArrayList<>();
 
         for (CartEntity line : lines) {
@@ -198,9 +199,11 @@ public class CartServiceImpl implements CartService {
                 continue;
             }
 
-            int unitPrice = item.getItemPrice();
+            // ====== 여기부터 금액 BigDecimal 처리 ======
+            // ItemEntity.getItemPrice() 가 BigDecimal 이라고 가정
+            BigDecimal unitPrice = item.getItemPrice();
             int qty = line.getItemQuantity();
-            int lineAmt = unitPrice * qty;
+            BigDecimal lineAmt = unitPrice.multiply(BigDecimal.valueOf(qty));
 
             resultLines.add(PrepareOrderRes.Line.builder()
                     .itemNo(item.getItemNo())
@@ -211,7 +214,7 @@ public class CartServiceImpl implements CartService {
                     .build());
 
             totalQty += qty;
-            totalAmt += lineAmt;
+            totalAmt = totalAmt.add(lineAmt);
         }
 
         boolean ok = violations.isEmpty() && !resultLines.isEmpty();

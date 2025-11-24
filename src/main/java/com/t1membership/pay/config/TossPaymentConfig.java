@@ -1,4 +1,4 @@
-package com.anpetna.pay.config;
+package com.t1membership.pay.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,7 +18,7 @@ import java.util.List;
 @Configuration
 public class TossPaymentConfig {
 
-    @Value("${toss.secret-key:}") // ✅ 이름 통일 + 기본값(빈문자)로 부팅시 명확히 체크
+    @Value("${toss.payments.secret-key:}") // ✅ 이름 통일 + 기본값(빈문자)로 부팅시 명확히 체크
     private String secretKey;
 
     @Bean

@@ -3,10 +3,12 @@ package com.t1membership.member.controller;
 import com.t1membership.ApiResult;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
 import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
+import com.t1membership.member.dto.exists.EmailExistsRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
+import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
@@ -16,6 +18,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -32,6 +35,12 @@ import java.util.List;
 public class MemberController {
 
     private final MemberService memberService;
+
+    @GetMapping("/exists")
+    public ResponseEntity<EmailExistsRes> exists(@RequestParam("email") String email) {
+        boolean exists = memberService.existsByEmail(email);
+        return ResponseEntity.ok(new EmailExistsRes(exists));
+    }
 
     @PostMapping(value = "/join",
     consumes = MediaType.APPLICATION_JSON_VALUE, //요청은 application/json 형식만 허용
@@ -59,7 +68,7 @@ public class MemberController {
         }
 
         //비밀번호에 특수문자 넣었는지 검증
-        if (req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")){
+        if (!req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다");
         }
 
@@ -76,75 +85,95 @@ public class MemberController {
         return new ApiResult<>(res);
     }
 
-    @GetMapping({"/readOne","/my_page/{memberEmail}"})
-    @PreAuthorize("hasRole('ADMIN') or #memberEmail == null")
+    // 내 정보 조회 (마이페이지, 헤더 프로필, 등등)
+    @GetMapping("/readOne")
+    @PreAuthorize("isAuthenticated()")
     @Transactional(readOnly = true)
-    public ApiResult<ReadOneMemberRes> readOne(
-            @PathVariable(value = "memberEmail",required = false) String memberEmail,
-            @AuthenticationPrincipal(expression = "username") String username,
-            Authentication auth) {
-        //조회할 대상 결정
-        final String targetEmail = (memberEmail == null || memberEmail.isBlank())
-                ? username //URL에 email이 없으면 본인 기준
-                : memberEmail; //URL에 email이 있으면 그 사람 기준
-        //방어 코드
-        if (targetEmail == null || targetEmail.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"조회할 회원이 없습니다");
+    public ApiResult<ReadOneMemberRes> readMyInfo(Authentication auth) {
+
+        String username = auth.getName();  // principal = 이메일
+
+        if (username == null || username.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
-//        //이메일 비교 시 대소문자 무시 (본인 확인)
-//        boolean isSelf = targetEmail.equalsIgnoreCase(username);
-//        //관리자 권한 여부
-//        boolean isAdmin = auth.getAuthorities().stream()
-//                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-//
-//        //본인과 관리자가 아니면 접근 불가
-//        if (!(isSelf || isAdmin)) {
-//            throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본인 또는 관리자만 정보를 조회할 수 있습니다");
-//        }
-        //주석처리 한 이유는 @PreAuthorize("hasRole('ADMIN') or #memberEmail == null") 이걸로 하고 있기 때문에 중복
 
-        //서비스 요청 dto 생성
         ReadOneMemberReq req = new ReadOneMemberReq();
-        req.setMemberEmail(targetEmail.trim());//.trim : 앞뒤 공백 제거
+        req.setMemberEmail(username.trim());
 
-        //서비스에서 조회
         ReadOneMemberRes res = memberService.readOneMember(req);
+        return new ApiResult<>(res);
+    }
 
+
+    // 관리자: 특정 회원 상세 조회
+    @GetMapping("/my_page/{memberEmail}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional(readOnly = true)
+    public ApiResult<ReadOneMemberRes> readOneByAdmin(
+            @PathVariable("memberEmail") String memberEmail
+    ) {
+        if (memberEmail == null || memberEmail.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "조회할 회원이 없습니다.");
+        }
+
+        ReadOneMemberReq req = new ReadOneMemberReq();
+        req.setMemberEmail(memberEmail.trim());
+
+        ReadOneMemberRes res = memberService.readOneMember(req);
         return new ApiResult<>(res);
     }
 
     //이미지 없이 수정버전
-    @PostMapping(value = "/modify",
+    // ===== 회원 정보 + 프로필 이미지 수정 =====
+    @PostMapping(
+            value = "/modify",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ApiResult<ModifyMemberRes> modifyMember(
-            @RequestBody @Valid ModifyMemberReq req)throws MemberServiceImpl.MemberIdExistException {
-        ModifyMemberRes res = memberService.modifyMember(req,null,null);
+            @ModelAttribute @Valid ModifyMemberReq req,
+            @RequestPart(value = "profileFile", required = false) MultipartFile profile,
+            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
+    ) throws MemberServiceImpl.MemberIdExistException {
+
+        // profile == null && removeProfile == null  → 텍스트만 수정
+        // profile != null                          → 기존 이미지 삭제 + 새 이미지 등록
+        // removeProfile == true                    → 이미지 삭제(기본이미지 상태로)
+
+        ModifyMemberRes res = memberService.modifyMember(req, profile, removeProfile);
         return new ApiResult<>(res);
     }
-    //이미지도 수정버전
-    @PostMapping(value = "/modify",
-    consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-    produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<ModifyMemberRes> modifyImage(
-            @RequestPart("json") ModifyMemberReq req,
-            @RequestPart(value = "profileFile", required = false) MultipartFile profile,
-            @RequestPart(value = "removeProfile", required = false) boolean removeProfile
-    )throws MemberServiceImpl.MemberIdExistException {
-        ModifyMemberRes res = memberService.modifyMember(req,profile,removeProfile);
+
+    //티원 프로필 수정용
+    @PostMapping(
+            value = "/profile", // 🔥 프로필 전용
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ApiResult<ModifyMemberRes> modifyProfile(
+            @ModelAttribute @Valid ModifyProfileReq req,
+            @RequestPart(value = "profileFile", required = false) MultipartFile profileFile,
+            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
+    ) {
+
+        ModifyMemberRes res = memberService.modifyProfile(req, profileFile, removeProfile);
         return new ApiResult<>(res);
     }
 
     @PostMapping(value = "/delete",
-    consumes = MediaType.APPLICATION_JSON_VALUE,
-    produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<DeleteMemberRes> deleteMember(
-            @RequestBody @Valid DeleteMemberReq req,
-            Authentication auth) {
-        if (req.getMemberEmail() == null || !auth.isAuthenticated()){
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"인증이 필요합니다");
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<DeleteMemberRes> deleteMember(Authentication auth) {
+
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증이 필요합니다");
         }
-        req.setMemberEmail(auth.getName());
+
+        String loginEmail = auth.getName();
+
+        DeleteMemberReq req = new DeleteMemberReq();
+        req.setMemberEmail(loginEmail);
+
         DeleteMemberRes res = memberService.deleteMember(req);
         return new ApiResult<>(res);
     }

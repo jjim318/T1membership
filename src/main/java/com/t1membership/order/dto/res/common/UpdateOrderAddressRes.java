@@ -1,5 +1,6 @@
 package com.t1membership.order.dto.res.common;
 
+import com.t1membership.order.domain.OrderEntity;
 import lombok.*;
 
 @Getter
@@ -19,4 +20,15 @@ public class UpdateOrderAddressRes {
     private String receiverZipCode;
     private String memo;
 
+    public static UpdateOrderAddressRes from(OrderEntity orderEntity) {
+        return UpdateOrderAddressRes.builder()
+                .orderNo(orderEntity.getOrderNo())
+                .receiverName(orderEntity.getReceiverName())
+                .receiverPhone(orderEntity.getReceiverPhone())
+                .receiverAddress(orderEntity.getReceiverAddress())
+                .receiverDetailAddress(orderEntity.getReceiverDetailAddress())
+                .receiverZipCode(orderEntity.getReceiverZipCode())
+                .memo(orderEntity.getMemo())
+                .build();
+    }
 }

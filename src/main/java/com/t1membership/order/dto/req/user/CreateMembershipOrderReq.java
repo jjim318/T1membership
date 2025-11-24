@@ -1,5 +1,6 @@
 package com.t1membership.order.dto.req.user;
 
+import com.t1membership.item.constant.MembershipPayType;
 import jakarta.validation.constraints.*;
 import lombok.*;
 
@@ -10,13 +11,17 @@ import lombok.*;
 @AllArgsConstructor
 public class CreateMembershipOrderReq implements CreateOrderReq.Payload{
 
-    @NotNull private String planCode;
-    @NotNull @Min(1) private Integer months;
-    private boolean autoRenew;
+    @NotNull
+    private String planCode; //멤버십 상품 코드
+    @NotNull @Min(1)
+    private Integer months; //플랜 정책에 따라 다양
+
+    private boolean autoRenew; //true면 정기결제(구독), false면 단건
+
+    @NotNull
+    private MembershipPayType membershipPayType;
 
     //멤버쉽 주문 생성(payload구현체
-    @NotNull
-    private Long cartNo;//장바구니 번호(결제 번호
     @NotBlank
     private String memberBirth;//멤버쉽 생일
     @NotBlank

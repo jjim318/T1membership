@@ -5,6 +5,7 @@ import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.dto.res.common.OrderItemRes;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -20,7 +21,7 @@ public class UserDetailOrderRes {
     private OrderStatus orderStatus;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private int orderTotalPrice;
+    private BigDecimal orderTotalPrice;
 
     // 결제 관련 (선택)
     private String paymentMethod;
@@ -52,7 +53,7 @@ public class UserDetailOrderRes {
                 .memo(o.getMemo())
                 .items(
                         o.getOrderItems().stream().map(oi -> OrderItemRes.builder()
-                                .itemNo(oi.getItem().getIno())
+                                .itemNo(oi.getItem().getItemNo())
                                 .itemNameSnapshot(oi.getItemNameSnapshot())
                                 .itemOptionSnapshot(oi.getItemOptionSnapshot())
                                 .itemImageSnapshot(oi.getItemImageSnapshot())

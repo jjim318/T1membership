@@ -2,6 +2,7 @@ package com.t1membership.exception;
 
 import com.t1membership.ApiError;
 import com.t1membership.member.service.MemberService;
+import com.t1membership.member.service.MemberServiceImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.Builder;
 import lombok.extern.log4j.Log4j2;
@@ -16,9 +17,9 @@ import java.time.LocalDateTime;
 @Log4j2
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(MemberService.MemberIdExistException.class)
+    @ExceptionHandler(MemberServiceImpl.MemberIdExistException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    public ApiError handleMemberIdExist(MemberService.MemberIdExistException ex,
+    public ApiError handleMemberIdExist(MemberServiceImpl.MemberIdExistException ex,
                                         HttpServletRequest req) {
         log.warn("[MemberIdExist] {}", ex.getMessage());
         return ApiError.builder()

@@ -1,14 +1,21 @@
 package com.t1membership.order.domain;
 
+import com.t1membership.item.constant.ItemCategory;
+import com.t1membership.item.constant.Player;
 import com.t1membership.item.domain.ItemEntity;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
+
+import java.math.BigDecimal;
+import java.util.List;
 
 @Entity
 @Table(name = "t1_order_item")
 @Getter
 @Setter
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
 public class OrderItemEntity {
 
     @Id
@@ -25,6 +32,15 @@ public class OrderItemEntity {
     @JoinColumn(name = "item_no", nullable = false)
     private ItemEntity item;
 
+    //상품이 뭔지
+    @Enumerated(EnumType.STRING)
+    @Column(name = "item_category_snapshot", length = 20)
+    private ItemCategory itemCategorySnapshot;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "player_snapshot", length = 20)
+    private Player playerSnapshot;
+
     // 주문 시점 스냅샷 + 수량
     @Column(name = "item_name_snapshot", length = 200)
     private String itemNameSnapshot;
@@ -35,24 +51,42 @@ public class OrderItemEntity {
     @Column(name = "item_image_snapshot", length = 500)
     private String itemImageSnapshot;
 
+    @Column(name = "item_price_snapshot")
+    private BigDecimal itemPriceSnapshot;
+
     @Column(name = "price_at_order", nullable = false)
-    private int priceAtOrder;              // 당시 단가
+    private BigDecimal priceAtOrder;              // 당시 단가
 
     @Column(name = "quantity", nullable = false)
     private int quantity;                  // 주문 수량
 
     @Column(name = "line_total", nullable = false)
-    private int lineTotal;                 // 단가 * 수량
+    private BigDecimal lineTotal;                 // 단가 * 수량
 
     // 팩토리/계산 보조
     public static OrderItemEntity of(ItemEntity item, int quantity) {
         OrderItemEntity oi = new OrderItemEntity();
         oi.setItem(item);
         oi.setQuantity(quantity);
-        oi.setPriceAtOrder(item.getIPrice());
-        oi.setItemNameSnapshot(item.getIName());
+
+        BigDecimal priceAtOrder = item.getItemPrice();
+        if (priceAtOrder == null) {
+            priceAtOrder = BigDecimal.ZERO; // NPE 방지(선택사항)
+        }
+
+        // 주문 시점 단가
+        oi.setPriceAtOrder(priceAtOrder);
+
+        //스냅샷
+        oi.setPriceAtOrder(priceAtOrder);
+        oi.setItemNameSnapshot(item.getItemName());
+        oi.setItemPriceSnapshot(item.getItemPrice());
         //oi.setItemImageSnapshot(item.getIImage());
-        oi.setLineTotal(oi.getPriceAtOrder() * oi.getQuantity());
+
+        //라인 합계
+        BigDecimal lineTotal = priceAtOrder.multiply(BigDecimal.valueOf(quantity));
+        oi.setLineTotal(lineTotal);
+
         return oi;
     }
 }

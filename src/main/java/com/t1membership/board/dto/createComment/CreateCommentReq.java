@@ -13,11 +13,12 @@ import lombok.*;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateCommentReq {
 
-    private Long bno;
+    private Long boardNo;
 
     @NotBlank
-    private String cContent;
+    private String commentContent;
+
     @Builder.Default
-    private int cLikeCount = 0;
+    private int commentLikeCount = 0;
 
 }

@@ -1,11 +1,15 @@
 package com.t1membership.order.domain;
 
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.coreDomain.BaseEntity;
 import com.t1membership.order.constant.OrderStatus;
+import com.t1membership.pay.domain.TossPaymentEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,6 +50,37 @@ public class OrderEntity extends BaseEntity {
     @Column(name = "memo", length = 200)
     private String memo;
 
+    // 멤버십 전용 스냅샷 필드 -----------------------------
+
+    @Column(name = "membership_plan_code")
+    private String membershipPlanCode;
+    @Column(name = "membership_months")
+    private Integer membershipMonths;
+    @Column(name = "membership_start_date")
+    private LocalDateTime membershipStartDate;
+    @Column(name = "membership_end_date")
+    private LocalDateTime membershipEndDate;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "membership_pay_type", length = 20)
+    private MembershipPayType membershipPayType;
+    @Column(name = "membership_member_name")
+    private String membershipMemberName;
+    @Column(name = "membership_member_birth")
+    private String membershipMemberBirth;
+    @Column(name = "membership_member_phone")
+    private String membershipMemberPhone;
+    @Column(name = "membership_auto_renew")
+    private Boolean autoRenew;
+
+    //취소 --------------------
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "toss_pay")
+    private TossPaymentEntity tossPayment;
+
+    @Column(name = "canceledAt")
+    private LocalDateTime canceledAt;
+
+
     // 주문 항목들
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItemEntity> orderItems = new ArrayList<>();
@@ -58,13 +93,14 @@ public class OrderEntity extends BaseEntity {
     }
     public void recalcTotal() {
         this.orderTotalPrice = orderItems.stream()
-                .mapToInt(OrderItemEntity::getLineTotal)
-                .sum();// 모든 orderItem lineTotal합산
+                .map(OrderItemEntity::getLineTotal)          // Stream<BigDecimal>
+                .reduce(BigDecimal.ZERO, BigDecimal::add);   // BigDecimal 합산
     }
 
     //전체금액결제
     @Column(name = "order_total_price",nullable = false)
-    private int orderTotalPrice;
+    private BigDecimal orderTotalPrice;
+
 }
 /* === GPT COMMENT START =====================================
 파일 목적: 주문 헤더(공통) 엔티티. 한 번의 주문(결제 트랜잭션)을 대표하며, 배송지/주문상태/총액 등 "주문 공통 정보"를 담습니다.

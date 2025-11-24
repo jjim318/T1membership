@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 @RestController
@@ -23,15 +24,24 @@ public class TossPaymentController {
     private final OrderRepository orderRepository;
     private final TossPaymentService tossPaymentService;
 
-    // 공통: 라인합 재계산(0 방지)
+    // 공통: 라인합 재계산(BigDecimal 기반)
     private int computeOrderAmount(OrderEntity order) {
+
         return order.getOrderItems().stream()
-                .mapToInt(oi -> {
-                    int line = oi.getLineTotal();
-                    if (line <= 0) line = oi.getPriceAtOrder() * oi.getQuantity();
+                .map(oi -> {
+                    BigDecimal line = oi.getLineTotal();
+
+                    // lineTotal <= 0 이면 priceAtOrder * quantity 로 계산
+                    if (line == null || line.compareTo(BigDecimal.ZERO) <= 0) {
+                        line = oi.getPriceAtOrder().multiply(
+                                BigDecimal.valueOf(oi.getQuantity())
+                        );
+                    }
+
                     return line;
                 })
-                .sum();
+                .reduce(BigDecimal.ZERO, BigDecimal::add)          // BigDecimal 합계
+                .intValueExact();                                   // Toss cancelAmount 위해 Integer 변환
     }
     // 공통 헬퍼 (컨트롤러 안에 추가)
     private String currentMemberId(Authentication auth) {
@@ -57,7 +67,7 @@ public class TossPaymentController {
 
         // 로그인되어 있으면 소유자 검증(테스트 중 익명 접근은 통과)
         String memberId = currentMemberId(authentication); // private helper
-        if (memberId != null && !memberId.equals(order.getMemberEntity().getMemberEmail())) {
+        if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
         if (order.getOrderStatus() != OrderStatus.ORDERED)
@@ -125,7 +135,7 @@ public class TossPaymentController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "주문 없음"));
 
         String memberId = currentMemberId(authentication); // ← 안전 추출
-        if (memberId != null && !memberId.equals(order.getMemberEntity().getMemberEmail())) {
+        if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
         assertPayable(order);
@@ -142,32 +152,3 @@ public class TossPaymentController {
         return ResponseEntity.ok(Map.of("isSuccess", true, "data", result));
     }
 }
-
-
-//여기 아래는 위젯
-//@RestController
-//@RequiredArgsConstructor
-//public class TossPaymentController {
-//
-//    private final TossPaymentService tossPaymentService;
-//
-//    @PostMapping("/api/pay/toss/prepare")
-//    public ApiResult<TossPrepareRes> prepare(@RequestBody TossPrepareReq req) {
-//        return new ApiResult<>(tossPaymentService.prepare(req));
-//        // 전역 래퍼를 안 쓰면:
-//        // return ResponseEntity.ok(tossPaymentService.prepare(req));
-//    }
-//
-//    @PostMapping("/api/pay/toss/confirm")
-//    public ApiResult<TossConfirmRes> confirm(@RequestBody TossConfirmReq req) {
-//        return new ApiResult<>(tossPaymentService.confirm(req));
-//        // 전역 래퍼를 안 쓰면:
-//        // return ResponseEntity.ok(tossPaymentService.confirm(req));
-//    }
-//
-//    // (선택) client-key 핑용
-//    @GetMapping("/api/pay/toss/client-key")
-//    public ResponseEntity<String> clientKeyPing() {
-//        return ResponseEntity.ok("ok");
-//    }
-//}

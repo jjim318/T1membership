@@ -2,6 +2,10 @@ package com.t1membership.item.service;
 
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
+import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.image.dto.ExistingImageDTO;
+import com.t1membership.image.dto.ImageDTO;
+import com.t1membership.image.service.FileService;
 import com.t1membership.item.domain.ItemEntity;
 import com.t1membership.item.dto.deleteItem.DeleteItemReq;
 import com.t1membership.item.dto.deleteItem.DeleteItemRes;
@@ -18,6 +22,8 @@ import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.ItemSellStatus;
 import lombok.RequiredArgsConstructor;
 import org.modelmapper.ModelMapper;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -26,13 +32,18 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class ItemServiceImpl implements ItemService {
 
+    private final FileService fileService;
     private final ItemRepository itemRepository;
     private final ModelMapper modelMapper;
 
@@ -41,16 +52,16 @@ public class ItemServiceImpl implements ItemService {
     // =========================
     @Override
     @PreAuthorize("hasRole('ADMIN')")
-    public RegisterItemRes registerItem(RegisterItemReq req) {
+    public RegisterItemRes registerItem(RegisterItemReq req, List<MultipartFile> images) {
 
         // 필수값 방어
         if (!StringUtils.hasText(req.getItemName())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품명은 필수입니다.");
         }
-        if (req.getItemPrice() < 0) {
+        if (req.getItemPrice() == null || req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
         }
-        if ( req.getItemStock() < 0) {
+        if (req.getItemStock() == null || req.getItemStock() < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
         }
 
@@ -59,15 +70,34 @@ public class ItemServiceImpl implements ItemService {
 
         // (선택) enum 기본값 처리: DTO가 null이면 서버에서 기본값 지정
         if (item.getItemCategory() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품 카테고리는 필수 입력값입니다.");
             // 필요 시 기본 카테고리 지정 or BAD_REQUEST
             // item.setItemCategory(ItemCategory.DEFAULT);
         }
         if (item.getItemSellStatus() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "상품 판매 상태는 필수 입력값입니다.");
             // 필요 시 기본 판매상태 지정
             // item.setItemSellStatus(ItemSellStatus.AVAILABLE);
         }
 
         ItemEntity saved = itemRepository.save(item);
+
+        if (images != null && !images.isEmpty()) {
+            int order = 0;
+            for (MultipartFile file : images) {
+                if (file.isEmpty()) continue;
+
+                // (1) 실제 파일 저장 + 메타 정보 생성
+                ImageDTO dto = fileService.uploadFile(file, order++);
+
+                // (2) DTO -> ImageEntity 변환 + 아이템 연결
+                ImageEntity image = ImageEntity.fromDtoForItem(dto, saved);
+
+                // (3) 양방향 연관관계 유지
+                saved.addImage(image);
+            }
+        }
+
         return RegisterItemRes.from(saved);
     }
 
@@ -75,8 +105,11 @@ public class ItemServiceImpl implements ItemService {
     // 수정 (ADMIN 전용)
     // =========================
     @Override
+    @Transactional
     @PreAuthorize("hasRole('ADMIN')")
-    public ModifyItemRes modifyItem(ModifyItemReq req) {
+    public ModifyItemRes modifyItem(ModifyItemReq req,
+                                    List<MultipartFile> newImages,
+                                    List<ExistingImageDTO> existingImages) {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
@@ -90,75 +123,81 @@ public class ItemServiceImpl implements ItemService {
         ItemEntity item = itemRepository.findById(req.getItemNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "아이템을 찾을 수 없습니다."));
 
-        // --- 불변 필드 방어: itemNo는 변경 불가 ---
-
-        // --- 변경 가능 필드만 업데이트 (null-안전) ---
+        // ====== 기본 정보 수정 (영속 엔티티 직접 수정) ======
         if (StringUtils.hasText(req.getItemName())) {
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo()) // ID 유지
-                    .itemName(req.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
-            // 위처럼 빌더 재생성 방식을 쓰면 불변 스타일 유지 가능.
-            // 만약 세터가 있다면 item.setItemName(req.getItemName()); 로 단순화 가능.
+            item.setItemName(req.getItemName());
         }
 
         if (req.getItemPrice() != null) {
-            if (req.getItemPrice() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
-            // 세터가 없다면 위 빌더 재생성 방식으로 다시 구성
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(req.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            if (req.getItemPrice().compareTo(BigDecimal.ZERO) < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "가격이 올바르지 않습니다.");
+            }
+            item.setItemPrice(req.getItemPrice());
         }
 
         if (req.getItemStock() != null) {
-            if (req.getItemStock() < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(req.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            if (req.getItemStock() < 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "재고가 올바르지 않습니다.");
+            }
+            item.setItemStock(req.getItemStock());
         }
 
         if (req.getItemCategory() != null) {
-            ItemCategory cat = req.getItemCategory();
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(cat)
-                    .itemSellStatus(item.getItemSellStatus())
-                    .build();
+            item.setItemCategory(req.getItemCategory());
         }
 
         if (req.getItemSellStatus() != null) {
-            ItemSellStatus status = req.getItemSellStatus();
-            item = ItemEntity.builder()
-                    .itemNo(item.getItemNo())
-                    .itemName(item.getItemName())
-                    .itemPrice(item.getItemPrice())
-                    .itemStock(item.getItemStock())
-                    .itemCategory(item.getItemCategory())
-                    .itemSellStatus(status)
-                    .build();
+            item.setItemSellStatus(req.getItemSellStatus());
         }
 
-        // 더티체킹 대신 명시 저장(불변 빌더 재생성 방식을 썼으므로)
-        item = itemRepository.save(item);
-        return ModifyItemRes.from(item);
+        // ====== 기존 이미지 처리 (삭제 + 순서 변경) ======
+        Map<String, Integer> keepMap = new HashMap<>();
+        if (existingImages != null) {
+            for (ExistingImageDTO dto : existingImages) {
+                keepMap.put(dto.getFileName(), dto.getSortOrder());
+            }
+        }
+
+        List<ImageEntity> currentImages = new ArrayList<>(item.getImages());
+
+        for (ImageEntity img : currentImages) {
+            String fileName = img.getFileName();
+
+            if (!keepMap.containsKey(fileName)) {
+                fileService.deleteFile(fileName);
+                item.removeImage(img);
+            } else {
+                Integer newOrder = keepMap.get(fileName);
+                img.setSortOrder(newOrder != null ? newOrder : 0);
+            }
+        }
+
+        // ====== 새 이미지 추가 ======
+        int orderStart = 0;
+        if (item.getImages() != null && !item.getImages().isEmpty()) {
+            orderStart = item.getImages().stream()
+                    .map(ImageEntity::getSortOrder)
+                    .filter(Objects::nonNull)
+                    .max(Integer::compareTo)
+                    .orElse(0) + 1;
+        }
+
+        if (newImages != null && !newImages.isEmpty()) {
+            int order = orderStart;
+            for (MultipartFile file : newImages) {
+                if (file.isEmpty()) continue;
+
+                ImageDTO dto = fileService.uploadFile(file, order++);
+                ImageEntity image = ImageEntity.fromDtoForItem(dto, item);
+                item.addImage(image);
+            }
+        }
+
+        ItemEntity saved = itemRepository.save(item);
+
+        return ModifyItemRes.from(saved);
     }
+
 
     // =========================
     // 삭제 (기본: 하드 삭제)
@@ -187,9 +226,55 @@ public class ItemServiceImpl implements ItemService {
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<SearchAllItemRes> searchAllItem(SearchAllItemReq req) {
+
         var pageable = req.toPageable();
-        var page = itemRepository.findAll(pageable);
-        var content = page.map(SearchAllItemRes::from).toList();
+
+        // 🔥 필터 파라미터 (있다고 가정)
+        var category  = req.getItemCategory(); // MD / MEMBERSHIP / POP / ALL
+        var popPlayer = req.getPopPlayer();    // POP일 때만 의미 있음
+
+        Page<ItemEntity> page;
+
+        // 1) 카테고리가 지정된 경우
+        if (category != null && category != ItemCategory.ALL) {
+
+            // 1-1) 멤버십 전용: 활성 멤버십만
+            if (category == ItemCategory.MEMBERSHIP) {
+                page = itemRepository.findByItemCategoryAndMembershipActiveIsTrue(
+                        ItemCategory.MEMBERSHIP,
+                        pageable
+                );
+
+                // 1-2) POP 전용: 선수별 / 전체
+            } else if (category == ItemCategory.POP) {
+
+                // 선수별 POP
+                if (popPlayer != null) {
+                    // ⚠ 여기서는 List → PageImpl 로 한번 감쌉니다.
+                    var list = itemRepository.findByItemCategoryAndPopPlayer(
+                            ItemCategory.POP,
+                            popPlayer
+                    );
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+                // POP 전체
+                else {
+                    var list = itemRepository.findByItemCategory(ItemCategory.POP);
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+
+                // 1-3) MD 같은 나머지 카테고리
+            } else {
+                page = itemRepository.findAllByItemCategory(category, pageable);
+            }
+
+            // 2) 카테고리 필터 없거나 ALL인 경우 → 전체 조회
+        } else {
+            page = itemRepository.findAll(pageable);
+        }
+
+        // 엔티티 → 응답 DTO 매핑
+        var content = page.map(SearchAllItemRes::from).getContent();
 
         //  SearchAllItemReq → PageRequestDTO 변환(어댑터)
         PageRequestDTO pr = PageRequestDTO.builder()
@@ -204,6 +289,7 @@ public class ItemServiceImpl implements ItemService {
                 .total((int) page.getTotalElements())
                 .build();
     }
+
 
 
     // =========================

@@ -19,13 +19,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TossPaymentService {
 
-    @Value("${toss.client-key}")
-    private String tossClientKey; // API 개별연동용 test_ck_... (참고용; create에는 사용 안 함)
-
-    @Value("${toss.secret-key}")
+    @Value("${toss.payments.secret-key:}")
     private String tossSecretKey; // 반드시 test_sk_... (테스트)
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate tossrestTemplate;
 
     /**
      * 1) 결제창 URL 생성 (API 개별 연동)
@@ -40,23 +37,18 @@ public class TossPaymentService {
         final String basic = "Basic " + Base64.getEncoder()
                 .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set(HttpHeaders.AUTHORIZATION, basic);
+        HttpHeaders headers = createAuthHeaders();
 
         Map<String, Object> body = Map.of(
                 "amount", amount,
                 "orderId", orderId,
-                "orderName", orderName,
-                // 성공/실패 리다이렉트 URL은 프론트 라우팅에 맞게 교체
-                "successUrl", "http://localhost:8080/toss-success.html",
-                "failUrl",    "http://localhost:8080/toss-fail.html"
+                "orderName", orderName
         );
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
         try {
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+            ResponseEntity<Map> response = tossrestTemplate.postForEntity(url, entity, Map.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 throw new IllegalStateException("결제창 생성 실패: http=" + response.getStatusCode());
             }
@@ -89,9 +81,7 @@ public class TossPaymentService {
         final String basic = "Basic " + Base64.getEncoder()
                 .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set(HttpHeaders.AUTHORIZATION, basic);
+        HttpHeaders headers = createAuthHeaders();
 
         Map<String, Object> body = Map.of(
                 "paymentKey", paymentKey,
@@ -102,7 +92,7 @@ public class TossPaymentService {
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
         try {
-            ResponseEntity<Map> res = restTemplate.postForEntity(url, entity, Map.class);
+            ResponseEntity<Map> res = tossrestTemplate.postForEntity(url, entity, Map.class);
             if (!res.getStatusCode().is2xxSuccessful()) {
                 throw new IllegalStateException("결제 승인 실패: http=" + res.getStatusCode() + ", body=" + res.getBody());
             }
@@ -116,9 +106,69 @@ public class TossPaymentService {
             throw new IllegalStateException("Toss confirm error: http=" + e.getStatusCode() + ", body=" + err, e);
         }
     }
+    /**
+     * 3) 결제 취소 / 환불
+     * - paymentKey 기준 취소
+     * - cancelAmount 를 넘기면 부분취소, null 이면 전액취소(형님 정책에 맞게 조절)
+     * - 실제 Order 상태 변경, 재고 복구 등은 OrderService 에서 처리
+     */
+    @Transactional
+    public Map<String, Object> cancelPayment(String paymentKey,
+                                             Integer cancelAmount,
+                                             String cancelReason) {
+        // Toss 취소 endpoint: POST /v1/payments/{paymentKey}/cancel
+        final String url = "https://api.tosspayments.com/v1/payments/" + paymentKey + "/cancel";
+
+        HttpHeaders headers = createAuthHeaders();
+
+        // body 구성: reason 은 필수, amount 는 정책에 따라
+        // 전액 취소만 쓴다면 cancelAmount 없이 reason 만 보내도 됨.
+        Map<String, Object> body;
+        if (cancelAmount != null && cancelAmount > 0) {
+            body = Map.of(
+                    "cancelReason", cancelReason,
+                    "cancelAmount", cancelAmount
+            );
+        } else {
+            body = Map.of(
+                    "cancelReason", cancelReason
+            );
+        }
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<Map> res = tossrestTemplate.postForEntity(url, entity, Map.class);
+            if (!res.getStatusCode().is2xxSuccessful()) {
+                throw new IllegalStateException("결제 취소 실패: http=" + res.getStatusCode() + ", body=" + res.getBody());
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resBody = (Map<String, Object>) res.getBody();
+            log.debug("[Toss] cancel OK: {}", resBody);
+            return resBody;
+
+        } catch (HttpStatusCodeException e) {
+            String err = e.getResponseBodyAsString();
+            log.error("[Toss] cancel error: http={}, body={}", e.getStatusCode(), err);
+            throw new IllegalStateException("Toss cancel error: http=" + e.getStatusCode() + ", body=" + err, e);
+        }
+    }
 
     // ---------------- helpers ----------------
 
+    /**
+     * Authorization, Content-Type 공통 세팅
+     */
+    private HttpHeaders createAuthHeaders() {
+        final String basic = "Basic " + Base64.getEncoder()
+                .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set(HttpHeaders.AUTHORIZATION, basic);
+        return headers;
+    }
     /**
      * checkoutUrl / checkout(string) / checkout.url(object) 모두 지원
      */
@@ -153,195 +203,6 @@ public class TossPaymentService {
                 }
             }
         }
-
         return null;
     }
 }
-
-
-//여기 아래는 위젯
-//@Service
-//@RequiredArgsConstructor
-//public class TossPaymentService {
-//
-//    private final OrderRepository orderRepository;
-//    private final TossPaymentRepository paymentRepository;
-//    private final MemberRepository memberRepository;     // ⭐ 추가
-//
-//    @Value("${toss.secret-key:test_sk_GePWvyJnrKO7ARRxG1Y1rgLzN97E}")
-//    private String tossSecretKey;
-//
-//    @Value("${app.guest-member-id:#{null}}")
-//    private String guestMemberId;                        // 문자열 guest id
-//
-//    @Transactional
-//    public TossPrepareRes prepare(TossPrepareReq req) {
-//        // 0) 표시용 주문명
-//        final String displayOrderName = nonBlank(req.getOrderName()) ? req.getOrderName() : "주문";
-//
-//        // 1) orderNo 필수로 처리 (신규 주문 생성 모드는 지금 플로우에선 비활성화 권장)
-//        if (req.getOrderNo() == null) {
-//            throw new IllegalArgumentException("orderNo is required for prepare");
-//        }
-//
-//        // 2) 주문 조회
-//        OrderEntity order = orderRepository.findById(req.getOrderNo())
-//                .orElseThrow(() -> new IllegalArgumentException("order not found: " + req.getOrderNo()));
-//
-//        // 3) 총액 계산: (1) 엔티티 필드 우선, (2) 0/null이면 라인아이템 합산으로 보강
-//        Integer total = order.getOrderTotalPrice(); // ← 너희 필드명 유지
-//        if (total == null || total <= 0) {
-//            // ★ 필드명 맞춰서 사용: getOrderItems(), getItemPrice(), getQuantity()
-//            total = order.getOrderItems().stream()
-//                    .map(oi -> oi.getItem().getItemPrice() * oi.getQuantity())
-//                    .reduce(0, Integer::sum);
-//        }
-//
-//        if (total == null || total <= 0) {
-//            // 전역 예외처리에서 400(BAD_REQUEST)로 매핑 추천
-//            throw new IllegalStateException("amount must be > 0");
-//        }
-//
-//        // 4) 상점주문번호(문자열, 고유 보장)
-//        String orderTossId = "ORDER-" + order.getOrderNo();
-//        if (paymentRepository.existsByOrderTossId(orderTossId)) {
-//            orderTossId = orderTossId + "-" + UUID.randomUUID().toString().substring(0, 4).toUpperCase();
-//        }
-//
-//        // 5) 결제 레코드 저장(PENDING)
-//        TossPaymentEntity payment = TossPaymentEntity.builder()
-//                .order(order)
-//                .orderTossId(orderTossId)
-//                .orderName(displayOrderName)
-//                .totalAmount(total)                      // ★ DB에서 계산한 총액을 저장
-//                .tossPaymentStatus(TossPaymentStatus.PENDING)
-//                .tossPaymentMethod(TossPaymentMethod.UNKNOWN)
-//                .build();
-//        paymentRepository.save(payment);
-//
-//        // 6) (선택) 실제 Toss 준비 호출부가 따로 있다면 여기에서 호출
-//        //    현재 구조라면 굳이 외부 호출 없어도 됨. 위젯은 orderId/amount만 정확하면 진행 가능.
-//
-//        // 7) 응답: 프론트가 위젯/confirm에 그대로 사용
-//        return TossPrepareRes.builder()
-//                .orderId(orderTossId)
-//                .orderName(displayOrderName)
-//                .totalAmount(total)                     // ★ confirmAmount 자동 세팅
-//                .build();
-//    }
-//
-//
-//    @Transactional
-//    public TossConfirmRes confirm(TossConfirmReq req) {
-//        if (!nonBlank(req.getPaymentKey())) throw new IllegalArgumentException("paymentKey required");
-//        if (!nonBlank(req.getOrderId()))   throw new IllegalArgumentException("orderId required");
-//        if (req.getTotalAmount() == null || req.getTotalAmount() <= 0) {
-//            throw new IllegalArgumentException("amount must be > 0");
-//        }
-//        final int reqAmount = req.getTotalAmount();
-//
-//        TossPaymentEntity payment = paymentRepository.findByOrderTossId(req.getOrderId())
-//                .orElseThrow(() -> new IllegalArgumentException("payment not found: " + req.getOrderId()));
-//
-//        if (payment.getTotalAmount() != reqAmount) {
-//            throw new IllegalStateException("amount mismatch: req=" + reqAmount + ", expected=" + payment.getTotalAmount());
-//        }
-//
-//        Map<String, Object> tossRes = callTossConfirm(req.getPaymentKey(), req.getOrderId(), reqAmount);
-//
-//        TossPaymentMethod method = parseMethod(tossRes);
-//        int approvedAmount = reqAmount;
-//        Object totalAmountObj = (tossRes != null) ? tossRes.get("totalAmount") : null;
-//        if (totalAmountObj instanceof Number n) approvedAmount = n.intValue();
-//
-//        String receiptUrl = extractReceiptUrl(tossRes);
-//
-//        payment.setTossPaymentStatus(TossPaymentStatus.DONE);
-//        payment.setTossPaymentMethod(method);
-//        payment.setApprovedAt(LocalDateTime.now(ZoneOffset.UTC));
-//        payment.setTossPaymentKey(req.getPaymentKey());
-//        if (nonBlank(receiptUrl)) payment.setReceiptUrl(receiptUrl);
-//        paymentRepository.save(payment);
-//
-//        return TossConfirmRes.builder()
-//                .orderId(payment.getOrderTossId())
-//                .approvedAmount(approvedAmount)
-//                .method(method.name())
-//                .orderName(payment.getOrderName())
-//                .status(payment.getTossPaymentStatus().name())
-//                .build();
-//    }
-//
-//    // -------------------- helpers --------------------
-//    private boolean nonBlank(String s) { return s != null && !s.trim().isEmpty(); }
-//
-//    /** 프로젝트 보안컨텍스트에 맞게 구현 (없으면 null 반환) */
-//    private String getCurrentMemberIdOrNull() {
-//        // 예) Spring Security:
-//        // var auth = SecurityContextHolder.getContext().getAuthentication();
-//        // if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof CustomUser u) {
-//        //     return u.getMemberId(); // String
-//        // }
-//        return null;
-//    }
-//
-//    private Map<String, Object> callTossConfirm(String paymentKey, String orderId, int amount) {
-//
-//        //System.out.println(("Using tossSecretKey = {}"+ tossSecretKey));
-//
-//        String url = "https://api.tosspayments.com/v1/payments/confirm";
-//
-//        String basic = "Basic " + Base64.getEncoder()
-//                .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
-//
-//        HttpHeaders headers = new HttpHeaders();
-//        headers.setContentType(MediaType.APPLICATION_JSON);
-//        headers.set(HttpHeaders.AUTHORIZATION, basic);
-//
-//        Map<String, Object> body = Map.of(
-//                "paymentKey", paymentKey,
-//                "orderId",    orderId,
-//                "amount",     amount
-//        );
-//
-//        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-//        RestTemplate rt = new RestTemplate();
-//        try {
-//            ResponseEntity<Map> res = rt.exchange(url, HttpMethod.POST, entity, Map.class);
-//            if (!res.getStatusCode().is2xxSuccessful()) {
-//                throw new IllegalStateException("Toss confirm failed: http=" + res.getStatusCode());
-//            }
-//            @SuppressWarnings("unchecked")
-//            Map<String, Object> bodyMap = (Map<String, Object>) res.getBody();
-//            return bodyMap;
-//        } catch (HttpStatusCodeException e) {
-//            String err = e.getResponseBodyAsString();
-//            throw new IllegalStateException("Toss confirm error: http=" + e.getStatusCode() + ", body=" + err, e);
-//        }
-//    }
-//
-//    @SuppressWarnings("unchecked")
-//    private TossPaymentMethod parseMethod(Map<String, Object> res) {
-//        if (res == null) return TossPaymentMethod.UNKNOWN;
-//        if (res.containsKey("card"))           return TossPaymentMethod.CARD;
-//        if (res.containsKey("virtualAccount")) return TossPaymentMethod.VIRTUAL_ACCOUNT;
-//        if (res.containsKey("transfer"))       return TossPaymentMethod.TRANSFER;
-//        if (res.containsKey("mobilePhone"))    return TossPaymentMethod.MOBILE_PHONE;
-//        Object m = res.get("method");
-//        if (m instanceof String s) {
-//            try { return TossPaymentMethod.valueOf(s); } catch (Exception ignore) {}
-//        }
-//        return TossPaymentMethod.UNKNOWN;
-//    }
-//
-//    @SuppressWarnings("unchecked")
-//    private String extractReceiptUrl(Map<String, Object> res) {
-//        if (res == null) return null;
-//        Object receipt = res.get("receipt");
-//        if (receipt instanceof Map<?, ?> r) {
-//            Object url = r.get("url");
-//            return (url instanceof String u && !u.isBlank()) ? u : null;
-//        }
-//        return null;
-//    }
-//}

@@ -1,6 +1,7 @@
 package com.t1membership.order.dto.res.admin;
 
 import com.t1membership.order.constant.OrderStatus;
+import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.dto.res.common.OrderItemRes;
 import com.t1membership.pay.constant.TossPaymentStatus;
 import lombok.*;
@@ -34,6 +35,36 @@ public class AdminDetailOrderRes {
     // 주문 상품들
     private List<OrderItemRes> items;
 
+
+    public static AdminDetailOrderRes from(OrderEntity orderEntity) {
+        return AdminDetailOrderRes.builder()
+                .orderNo(orderEntity.getOrderNo())
+                .memberEmail(orderEntity.getMember().getMemberEmail())
+                .orderStatus(orderEntity.getOrderStatus())
+                .createdAt(orderEntity.getCreateDate())
+                .updatedAt(orderEntity.getLatestDate())
+                // tossPaymentStatus 는 결제 엔티티에서 끌어와야 하면 나중에 추가
+                .receiverName(orderEntity.getReceiverName())
+                .receiverPhone(orderEntity.getReceiverPhone())
+                .receiverAddress(orderEntity.getReceiverAddress())
+                .receiverDetailAddress(orderEntity.getReceiverDetailAddress())
+                .receiverZipCode(orderEntity.getReceiverZipCode())
+                .memo(orderEntity.getMemo())
+                .items(
+                        orderEntity.getOrderItems().stream()
+                                .map(oi -> OrderItemRes.builder()
+                                        .itemNo(oi.getItem().getItemNo())
+                                        .itemNameSnapshot(oi.getItemNameSnapshot())
+                                        .itemOptionSnapshot(oi.getItemOptionSnapshot())
+                                        .itemImageSnapshot(oi.getItemImageSnapshot())
+                                        .priceAtOrder(oi.getPriceAtOrder())
+                                        .quantity(oi.getQuantity())
+                                        .lineTotal(oi.getLineTotal())
+                                        .build()
+                                ).toList()
+                )
+                .build();
+    }
 }
 /* === GPT COMMENT START =====================================
 파일 목적: 관리자 화면용 주문 상세 응답 DTO.

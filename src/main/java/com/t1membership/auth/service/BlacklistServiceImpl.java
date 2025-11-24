@@ -1,0 +1,113 @@
+package com.t1membership.auth.service;
+
+import com.t1membership.auth.dto.tokenDto.TokenReq;
+import com.t1membership.auth.repository.AuthRepository;
+import com.t1membership.auth.repository.BlacklistRepository;
+import com.t1membership.auth.util.TokenHash;
+import com.t1membership.config.JwtProvider;
+import io.jsonwebtoken.Claims;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.Instant;
+import java.util.Date;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BlacklistServiceImpl implements BlacklistService {
+
+    private final JwtProvider jwtProvider;
+    private final TokenHash tokenHash;
+    private final AuthRepository authRepository;
+    private final BlacklistRepository blacklistRepository;
+
+    @Override
+    public void addToBlacklist(TokenReq tokenRequest) {
+
+        // 1) 입력 방어: null/blank
+        if (tokenRequest.getAccessToken() == null || tokenRequest.getAccessToken().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "액세스 토큰이 비었습니다.");
+        }
+
+        // 2) 파싱: 형식/서명 오류 → 400
+        final Claims claims;
+        try {
+            // 만료된 토큰이어도 Claims 읽기 위해 parseClaims 사용 (형식/서명 오류만 예외로 간주)
+            claims = jwtProvider.parseClaims(tokenRequest.getAccessToken());
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "유효하지 않은 액세스 토큰 형식입니다.");
+        }
+
+        // 3) exp 검사: exp 없음 → 400
+        Date exp = claims.getExpiration();
+        if (exp == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "만료 정보(exp)가 없는 토큰입니다.");
+        }
+
+        // 4) 이미 만료된 토큰 → 204 (등록 불필요)
+        Instant expiresAt = exp.toInstant();
+        Instant now = Instant.now();
+        if (!expiresAt.isAfter(now)) {
+            // 이미 만료된 토큰은 블랙리스트 저장 불필요하므로 바디 없이 정상 종료 시그널
+            throw new ResponseStatusException(HttpStatus.NO_CONTENT);
+        }
+
+        // 5) 토큰 원문 해시화
+        String accessHash = tokenHash.sha256(tokenRequest.getAccessToken());
+
+        // 6) 중복 등록 방지: 아직 유효한 동일 해시가 있음 → 204 (신규 저장 없음)
+        boolean exists = blacklistRepository.existsByAccessTokenHashAndExpiresAtAfter(accessHash, now);
+        if (exists) {
+            throw new ResponseStatusException(HttpStatus.NO_CONTENT);
+        }
+
+        // 7) 신규 저장
+        blacklistRepository.insertAccessBlacklist(accessHash, expiresAt);
+    }
+
+    // 주어진 Access토큰이 현재 차단 상태인지 확인, 유효한 동일 해시가 존재하면 차단.
+    @Override
+    public boolean isBlacklisted(TokenReq tokenReq) {
+        try {
+            if (tokenReq == null || tokenReq.getAccessToken() == null || tokenReq.getAccessToken().isBlank()) {
+                log.warn("[BL] 액세스 토큰이 비어있습니다. tokenReq={}", tokenReq);
+                // 여기서 굳이 400 던지지 말고 false 로 처리 (필터에서 예외 안 터지게)
+                return false;
+            }
+
+            String rawToken = tokenReq.getAccessToken();
+            String hash = tokenHash.sha256(rawToken);
+
+            boolean exists = blacklistRepository
+                    .existsByAccessTokenHashAndExpiresAtAfter(hash, Instant.now());
+
+            log.info("[BL] 블랙리스트 조회 결과 exists={} hash={}", exists, hash);
+            return exists;
+
+        } catch (ResponseStatusException e) {
+            // 혹시 위에서 다른 방식으로 던지게 바꿔도 방어
+            log.error("[BL] ResponseStatusException 발생", e);
+            return false;
+        } catch (Exception e) {
+            log.error("[BL] 블랙리스트 조회 중 예외 발생", e);
+            // 서비스 전체가 터지지 않도록 false
+            return false;
+        }
+    }
+
+
+    // 만료된 블랙리스트를 주기적으로 청소
+    // 매시 정각(주기 = 1시간)에 실행됨
+    @Scheduled(cron = "0 0 * * * *")
+    @Transactional
+    @Override
+    public void purgeExpired() {
+        blacklistRepository.deleteByExpiresAtBefore(Instant.now());
+    }
+}
