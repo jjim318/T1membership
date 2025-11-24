@@ -11,11 +11,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @RequiredArgsConstructor
 @Slf4j
@@ -36,7 +39,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         log.info("\n========== [JWT FILTER START] uri={} ==========", uri);
         log.info("[JWT] header={}", header);
 
-        // 1) Authorization 없으면 그냥 익명으로 넘김
+        // 1) Authorization 없으면 그냥 익명으로
         if (header == null || !header.startsWith("Bearer ")) {
             log.info("[JWT] 헤더 없음 or Bearer 아님 → 익명으로 통과");
             chain.doFilter(request, response);
@@ -77,30 +80,50 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 4) SecurityContext 비어 있을 때만 세팅
             if (SecurityContextHolder.getContext().getAuthentication() == null) {
 
+                // === 4-1) 토큰에서 이메일(subject) 꺼냄 ===
                 String memberEmail = jwtProvider.getUsernameForAccess(access);
                 log.info("[JWT] subject(memberEmail)={}", memberEmail);
 
-                MemberRole status = memberRepository.findByMemberEmail(memberEmail)
-                        .map(MemberEntity::getMemberRole)
-                        .orElse(MemberRole.USER); // 없으면 USER 취급 (dev용 완화)
+                // === 4-2) DB에서 MemberRole 조회 ===
+                MemberEntity member = memberRepository.findByMemberEmail(memberEmail)
+                        .orElse(null);
 
+                if (member == null) {
+                    log.warn("[JWT] DB에 회원 없음 → 인증 없음 처리");
+                    chain.doFilter(request, response);
+                    log.info("========== [JWT FILTER END - NO MEMBER] ==========\n");
+                    return;
+                }
+
+                MemberRole status = member.getMemberRole();
                 log.info("[JWT] DB MemberRole={}", status);
 
+                // === 4-3) BLACKLIST 는 즉시 403 ===
                 if (status == MemberRole.BLACKLIST) {
                     log.warn("[JWT] BLACKLIST 사용자 → 403");
                     response.sendError(HttpServletResponse.SC_FORBIDDEN, "User is blacklisted");
                     return;
                 }
 
-                Authentication authentication = jwtProvider.getAuthentication(access);
-                log.info("[JWT] authentication={}", authentication);
+                // === 4-4) Spring Security 권한 문자열 생성 ===
+                // MemberRole.USER   -> ROLE_USER
+                // MemberRole.ADMIN  -> ROLE_ADMIN
+                String roleName = "ROLE_" + status.name(); // USER -> ROLE_USER
+                var authorities = List.of(new SimpleGrantedAuthority(roleName));
 
-                if (authentication == null) {
-                    log.warn("[JWT] authentication=null → 인증 세팅 안 함");
-                } else {
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                    log.info("[JWT] SecurityContext 에 인증 세팅 완료");
-                }
+                // === 4-5) Authentication 객체 생성 ===
+                Authentication authentication =
+                        new UsernamePasswordAuthenticationToken(
+                                memberEmail,    // principal (또는 member)
+                                null,           // credentials
+                                authorities     // 권한
+                        );
+
+                log.info("[JWT] authentication principal={} authorities={}",
+                        authentication.getPrincipal(), authentication.getAuthorities());
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                log.info("[JWT] SecurityContext 에 인증 세팅 완료");
             } else {
                 log.info("[JWT] SecurityContext 에 이미 인증 존재 → 기존 것 사용");
             }

@@ -26,7 +26,7 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<TokenRes> logout(@RequestHeader(value = "AuthorIzation",required = false) String authorization,
+    public ResponseEntity<TokenRes> logout(@RequestHeader(value = "Authorization",required = false) String authorization,
     @RequestBody TokenReq tokenReq) {
         String access = clean(authorization);
         String refresh = clean(tokenReq.getRefreshToken());

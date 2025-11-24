@@ -3,10 +3,12 @@ package com.t1membership.member.controller;
 import com.t1membership.ApiResult;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
 import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
+import com.t1membership.member.dto.exists.EmailExistsRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
+import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
@@ -16,6 +18,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -32,6 +35,12 @@ import java.util.List;
 public class MemberController {
 
     private final MemberService memberService;
+
+    @GetMapping("/exists")
+    public ResponseEntity<EmailExistsRes> exists(@RequestParam("email") String email) {
+        boolean exists = memberService.existsByEmail(email);
+        return ResponseEntity.ok(new EmailExistsRes(exists));
+    }
 
     @PostMapping(value = "/join",
     consumes = MediaType.APPLICATION_JSON_VALUE, //요청은 application/json 형식만 허용
@@ -59,7 +68,7 @@ public class MemberController {
         }
 
         //비밀번호에 특수문자 넣었는지 검증
-        if (req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")){
+        if (!req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다");
         }
 
@@ -76,40 +85,43 @@ public class MemberController {
         return new ApiResult<>(res);
     }
 
-    @GetMapping({"/readOne","/my_page/{memberEmail}"})
-    @PreAuthorize("hasRole('ADMIN') or #memberEmail == null")
+    // 내 정보 조회 (마이페이지, 헤더 프로필, 등등)
+    @GetMapping("/readOne")
+    @PreAuthorize("isAuthenticated()")
     @Transactional(readOnly = true)
-    public ApiResult<ReadOneMemberRes> readOne(
-            @PathVariable(value = "memberEmail",required = false) String memberEmail,
-            @AuthenticationPrincipal(expression = "username") String username,
-            Authentication auth) {
+    public ApiResult<ReadOneMemberRes> readMyInfo(Authentication auth) {
 
-        // 조회 대상 이메일 결정
-        final String targetEmail = (memberEmail == null || memberEmail.isBlank())
-                ? username
-                : memberEmail;
+        String username = auth.getName();  // principal = 이메일
 
-        if (targetEmail == null || targetEmail.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"조회할 회원이 없습니다");
-        }
-
-        // 추가로 “본인 or 관리자” 체크를 하려면 (선택사항)
-        boolean isSelf = targetEmail.equalsIgnoreCase(username);
-        boolean isAdmin = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-
-        if (!(isSelf || isAdmin)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "본인 또는 관리자만 정보를 조회할 수 있습니다");
+        if (username == null || username.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
         ReadOneMemberReq req = new ReadOneMemberReq();
-        req.setMemberEmail(targetEmail.trim());
+        req.setMemberEmail(username.trim());
 
         ReadOneMemberRes res = memberService.readOneMember(req);
         return new ApiResult<>(res);
     }
 
+
+    // 관리자: 특정 회원 상세 조회
+    @GetMapping("/my_page/{memberEmail}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional(readOnly = true)
+    public ApiResult<ReadOneMemberRes> readOneByAdmin(
+            @PathVariable("memberEmail") String memberEmail
+    ) {
+        if (memberEmail == null || memberEmail.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "조회할 회원이 없습니다.");
+        }
+
+        ReadOneMemberReq req = new ReadOneMemberReq();
+        req.setMemberEmail(memberEmail.trim());
+
+        ReadOneMemberRes res = memberService.readOneMember(req);
+        return new ApiResult<>(res);
+    }
 
     //이미지 없이 수정버전
     // ===== 회원 정보 + 프로필 이미지 수정 =====
@@ -132,16 +144,36 @@ public class MemberController {
         return new ApiResult<>(res);
     }
 
+    //티원 프로필 수정용
+    @PostMapping(
+            value = "/profile", // 🔥 프로필 전용
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ApiResult<ModifyMemberRes> modifyProfile(
+            @ModelAttribute @Valid ModifyProfileReq req,
+            @RequestPart(value = "profileFile", required = false) MultipartFile profileFile,
+            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
+    ) {
+
+        ModifyMemberRes res = memberService.modifyProfile(req, profileFile, removeProfile);
+        return new ApiResult<>(res);
+    }
+
     @PostMapping(value = "/delete",
-    consumes = MediaType.APPLICATION_JSON_VALUE,
-    produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<DeleteMemberRes> deleteMember(
-            @RequestBody @Valid DeleteMemberReq req,
-            Authentication auth) {
-        if (req.getMemberEmail() == null || !auth.isAuthenticated()){
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"인증이 필요합니다");
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<DeleteMemberRes> deleteMember(Authentication auth) {
+
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증이 필요합니다");
         }
-        req.setMemberEmail(auth.getName());
+
+        String loginEmail = auth.getName();
+
+        DeleteMemberReq req = new DeleteMemberReq();
+        req.setMemberEmail(loginEmail);
+
         DeleteMemberRes res = memberService.deleteMember(req);
         return new ApiResult<>(res);
     }

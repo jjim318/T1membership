@@ -11,6 +11,7 @@ import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
+import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
@@ -42,6 +43,12 @@ public class MemberServiceImpl implements MemberService {
     private final MemberRepository memberRepository;
     private final ModelMapper modelMapper;
     private final PasswordEncoder passwordEncoder;
+
+    //회원인지 체크
+    @Override
+    public boolean existsByEmail(String email) {
+        return memberRepository.existsByMemberEmail(email);
+    }
 
     @Override
     public JoinMemberRes joinMember(JoinMemberReq joinMemberReq) {
@@ -91,20 +98,44 @@ public class MemberServiceImpl implements MemberService {
     //페이징처리 고민
 
     @Override
-    @PreAuthorize("isAuthenticated() and (hasRole('ADMIN') or #p0.memberEmail == authentication.name)")
+    @PreAuthorize("isAuthenticated()")   // 로그인은 기본
     @Transactional(readOnly = true)
     public ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        String memberId = authentication.getName();
-        boolean isAdmin = authentication.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
 
-        if (!isAdmin && !memberRepository.existsById(memberId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,"본인 정보만 조회할 수 있습니다");
+        // === 1) 인증 정보 ===
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()
+                || "anonymousUser".equals(auth.getPrincipal())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        MemberEntity memberEntity = memberRepository.findById(memberId)
-                .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"회원을 찾을 수 없습니다"));
+        String loginEmail = auth.getName(); // JWT subject (이메일)
+        boolean isAdmin = auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+
+        // === 2) 요청으로 들어온 targetEmail ===
+        String targetEmail = readOneMemberReq.getMemberEmail();
+
+        if (targetEmail == null || targetEmail.isBlank()) {
+            // null 이면 무조건 자기 자신
+            targetEmail = loginEmail;
+        }
+
+        // === 3) 본인 or ADMIN 검증 ===
+        boolean isSelf = loginEmail.equalsIgnoreCase(targetEmail);
+        if (!(isSelf || isAdmin)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "본인 또는 관리자만 정보를 조회할 수 있습니다."
+            );
+        }
+
+        // === 4) 실제 조회는 이메일 기준 ===
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(targetEmail)
+                .orElseThrow(() ->
+                        new ResponseStatusException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."));
+
+        // === 5) DTO 변환 ===
         return ReadOneMemberRes.from(memberEntity);
     }
 
@@ -214,6 +245,88 @@ public class MemberServiceImpl implements MemberService {
         if (ct == null || !(ct.equals("image/png") || ct.equals("image/jpeg") || ct.equals("image/webp"))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "허용되지 않는 이미지 타입입니다.");
         }
+    }
+
+    @Override
+    @Transactional
+    public ModifyMemberRes modifyProfile(ModifyProfileReq req,
+                                         MultipartFile profileFile,
+                                         Boolean removeProfile) {
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+        }
+
+        boolean isAdmin = auth.getAuthorities().stream()
+                .map(granted -> granted.getAuthority())
+                .anyMatch(role -> "ROLE_ADMIN".equals(role) || "ADMIN".equals(role));
+
+        String loginEmail = auth.getName(); // JWT subject = 이메일
+
+        // 일반 회원이면 무조건 본인 이메일로 고정
+        if (!isAdmin) {
+            req.setMemberEmail(loginEmail);
+        }
+
+        String memberEmail = req.getMemberEmail();
+
+        if (!StringUtils.hasText(memberEmail)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
+        }
+
+        // 본인 또는 ADMIN만 허용
+        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
+        }
+
+        // ===== 조회 =====
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
+
+        // ===== 닉네임만 수정 =====
+        memberEntity.setMemberNickName(req.getMemberNickName());
+
+        // =========================
+        //   프로필 이미지 처리
+        // =========================
+
+        // 1) 삭제 요청 → 기존 이미지 제거
+        if (Boolean.TRUE.equals(removeProfile)) {
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);
+                }
+                memberEntity.removeImage(img);
+            }
+            memberEntity.setMemberImage(null);
+        }
+
+        // 2) 새 이미지 업로드 → 기존 것 지우고 새로 1장 등록
+        if (profileFile != null && !profileFile.isEmpty()) {
+            validateImage(profileFile);
+
+            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+            for (ImageEntity img : currentImages) {
+                String fileName = img.getFileName();
+                if (StringUtils.hasText(fileName)) {
+                    fileService.deleteFile(fileName);
+                }
+                memberEntity.removeImage(img);
+            }
+
+            ImageDTO dto = fileService.uploadFile(profileFile, 0);
+            ImageEntity image = ImageEntity.fromDtoForMember(dto, memberEntity);
+            memberEntity.addImage(image);
+
+            memberEntity.setMemberImage(dto.getUrl());
+        }
+
+        memberRepository.save(memberEntity);
+
+        return ModifyMemberRes.from(memberEntity);
     }
 
     @Override
