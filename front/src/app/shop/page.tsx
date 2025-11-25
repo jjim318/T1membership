@@ -10,35 +10,39 @@ import { apiClient } from "@/lib/apiClient";
 // 백엔드 ItemCategory enum
 type ItemCategory = "ALL" | "MD" | "MEMBERSHIP" | "POP";
 
-// 백엔드 ItemSellStatus enum (정확한 값 몰라서 string fallback 추가)
-type ItemSellStatus = "ON_SALE" | "SOLD_OUT" | string;
+// 백엔드 ItemSellStatus → 지금은 SELL 이라서 string 포함
+type ItemSellStatus = "SELL" | "SOLDOUT" | string;
 
-// 백엔드 SearchAllItemRes 에 맞춘 타입
+// 상품 요약
 interface ItemSummary {
     itemNo: number;
     itemName: string;
-    itemPrice: number;   // BigDecimal -> JSON으로 오면 number
+    itemPrice: number;
     itemStock: number;
-    itemCategory: ItemCategory;
+    itemCategory: "MD" | "MEMBERSHIP" | "POP" | "ALL";
     itemSellStatus: ItemSellStatus;
+
+    thumbnailUrl?: string | null;
 }
 
-// 백엔드 PageResponseDTO<E> 에 맞춘 타입
+// PageResponseDTO<SearchAllItemRes>
 interface PageResponse<T> {
+    dtoList: T[];
+    total: number;
     page: number;
     size: number;
-    total: number;
     start: number;
     end: number;
     prev: boolean;
     next: boolean;
-    dtoList: T[];
 }
 
-// 백엔드 ApiResult<T>
+// ApiResult<T> – 형님 백 구조에 맞춤
 interface ApiResult<T> {
-    data: T;
-    message?: string;
+    isSuccess: boolean;
+    resCode: number;
+    resMessage: string;
+    result: T;
 }
 
 // ====== 프론트 전용 타입 (탭 카테고리) ======
@@ -108,14 +112,17 @@ export default function ShopPage() {
                             size,
                             sortBy: "itemNo",
                             direction: "DESC",
-                            // null이면 쿼리에서 빼고 싶으면 조건 처리 가능
                             itemCategory: backendCategory ?? "ALL",
                         },
                     }
                 );
 
-                const pageData = res.data.data;
+// 결과는 항상 res.data.result 안에 있음
+                const pageData = res.data.result;
+
+// dtoList로 아이템 목록 설정
                 setItems(pageData.dtoList);
+
             } catch (error) {
                 console.error(error);
                 setErrorMsg("상품 목록을 불러오지 못했습니다.");
@@ -198,11 +205,12 @@ export default function ShopPage() {
                      나중에 thumbnailUrl 필드 추가되면 여기 교체. */}
                                     <div className="relative h-56 w-full bg-zinc-900">
                                         <Image
-                                            src="/shop/placeholder.png" // public/shop/placeholder.png 준비
+                                            src={item.thumbnailUrl || "/shop/placeholder.png"} // ★ 백에서 온 썸네일 우선 사용
                                             alt={item.itemName}
                                             fill
                                             className="object-cover transition-transform group-hover:scale-105"
                                         />
+
 
                                         {/* 좌상단 카테고리 뱃지 */}
                                         <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
