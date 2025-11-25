@@ -8,9 +8,9 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ModifyMemberReq {
-    private String memberPw;
-    private String memberNickName;
+    private String memberName;
     private String memberEmail;
     private String memberPhone;
-    private String memberAddress;
+    private String memberBirthY;
+    private String memberGender;
 }

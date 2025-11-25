@@ -6,6 +6,7 @@ import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
 import com.t1membership.member.dto.exists.EmailExistsRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
+import com.t1membership.member.dto.modifyMember.ChangePasswordReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
@@ -36,40 +37,40 @@ public class MemberController {
 
     private final MemberService memberService;
 
+    //이메일 검증
     @GetMapping("/exists")
     public ResponseEntity<EmailExistsRes> exists(@RequestParam("email") String email) {
         boolean exists = memberService.existsByEmail(email);
         return ResponseEntity.ok(new EmailExistsRes(exists));
     }
 
-    @PostMapping(value = "/join",
-    consumes = MediaType.APPLICATION_JSON_VALUE, //요청은 application/json 형식만 허용
-    produces = MediaType.APPLICATION_JSON_VALUE) //응답도 JSON 으로 반환
+    @PostMapping(value = "/join", consumes = MediaType.APPLICATION_JSON_VALUE, //요청은 application/json 형식만 허용
+            produces = MediaType.APPLICATION_JSON_VALUE) //응답도 JSON 으로 반환
     public ApiResult<JoinMemberRes> joinMember(@RequestBody @Valid JoinMemberReq req) {
 
         //이메일 형식 + 공백 검증
         if (req.getMemberEmail() == null || req.getMemberEmail().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"이메일은 필수 값입니다");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "이메일은 필수 값입니다");
         }
 
         //이메일 형식 검증
         String email = req.getMemberEmail();
         String emailRegex = "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$"; //이메일 형식 체크
         if (!email.matches(emailRegex)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"올바른 이메일 형식이 아닙니다");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "올바른 이메일 형식이 아닙니다");
         }
 
         //비밀번호 필수 + 길이 검증
         if (req.getMemberPw() == null || req.getMemberPw().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"비밀번호는 필수 입력값입니다");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호는 필수 입력값입니다");
         }
         if (req.getMemberPw().length() < 8 || req.getMemberPw().length() > 12) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"비밀번호는 최소 8자 이상에서 최대 12자 이하여야 합니다");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호는 최소 8자 이상에서 최대 12자 이하여야 합니다");
         }
 
         //비밀번호에 특수문자 넣었는지 검증
-        if (!req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")){
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다");
+        if (!req.getMemberPw().matches(".*[!@#$%^&*(),.?\":{}|<>].*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호에는 특수문자가 최소 1개 이상 포함되어야 합니다");
         }
 
         //서비스로 넘김
@@ -109,9 +110,7 @@ public class MemberController {
     @GetMapping("/my_page/{memberEmail}")
     @PreAuthorize("hasRole('ADMIN')")
     @Transactional(readOnly = true)
-    public ApiResult<ReadOneMemberRes> readOneByAdmin(
-            @PathVariable("memberEmail") String memberEmail
-    ) {
+    public ApiResult<ReadOneMemberRes> readOneByAdmin(@PathVariable("memberEmail") String memberEmail) {
         if (memberEmail == null || memberEmail.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "조회할 회원이 없습니다.");
         }
@@ -123,46 +122,38 @@ public class MemberController {
         return new ApiResult<>(res);
     }
 
-    //이미지 없이 수정버전
-    // ===== 회원 정보 + 프로필 이미지 수정 =====
-    @PostMapping(
-            value = "/modify",
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE
-    )
-    public ApiResult<ModifyMemberRes> modifyMember(
-            @ModelAttribute @Valid ModifyMemberReq req,
-            @RequestPart(value = "profileFile", required = false) MultipartFile profile,
-            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
-    ) throws MemberServiceImpl.MemberIdExistException {
-
-        // profile == null && removeProfile == null  → 텍스트만 수정
-        // profile != null                          → 기존 이미지 삭제 + 새 이미지 등록
-        // removeProfile == true                    → 이미지 삭제(기본이미지 상태로)
-
-        ModifyMemberRes res = memberService.modifyMember(req, profile, removeProfile);
+    // ==============================
+    //   회원 기본정보 변경 (텍스트만)
+    //   이름/성별/생년/전화번호/주소 등
+    // ==============================
+    @PutMapping(value = "/modify", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<ModifyMemberRes> modifyMemberInfo(@RequestBody @Valid ModifyMemberReq req) {
+        ModifyMemberRes res = memberService.modifyMember(req);
         return new ApiResult<>(res);
     }
 
-    //티원 프로필 수정용
-    @PostMapping(
-            value = "/profile", // 🔥 프로필 전용
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE
-    )
-    public ApiResult<ModifyMemberRes> modifyProfile(
-            @ModelAttribute @Valid ModifyProfileReq req,
-            @RequestPart(value = "profileFile", required = false) MultipartFile profileFile,
-            @RequestParam(value = "removeProfile", required = false) Boolean removeProfile
-    ) {
+
+    // ==============================
+    //   프로필 수정 (닉네임 + 이미지)
+    // ==============================
+    @PostMapping(value = "/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<ModifyMemberRes> modifyProfile(@ModelAttribute @Valid ModifyProfileReq req, @RequestPart(value = "profileFile", required = false) MultipartFile profileFile, @RequestParam(value = "removeProfile", required = false) Boolean removeProfile) {
 
         ModifyMemberRes res = memberService.modifyProfile(req, profileFile, removeProfile);
         return new ApiResult<>(res);
     }
 
-    @PostMapping(value = "/delete",
-            consumes = MediaType.APPLICATION_JSON_VALUE,
-            produces = MediaType.APPLICATION_JSON_VALUE)
+
+    // ==============================
+    //   비밀번호 변경 전용
+    // ==============================
+    @PutMapping(value = "/password", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ApiResult<String> changePassword(@Valid @RequestBody ChangePasswordReq req) {
+        memberService.changePassword(req);
+        return new ApiResult<>("비밀번호가 변경되었습니다.");
+    }
+
+    @PostMapping(value = "/delete", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ApiResult<DeleteMemberRes> deleteMember(Authentication auth) {
 
         if (auth == null || !auth.isAuthenticated()) {

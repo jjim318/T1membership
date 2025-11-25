@@ -4,6 +4,7 @@ import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
 import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
+import com.t1membership.member.dto.modifyMember.ChangePasswordReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
@@ -18,8 +19,9 @@ public interface MemberService {
     JoinMemberRes joinMember(JoinMemberReq joinMemberReq);
     List<ReadAllMemberRes> readAllMember();
     ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq);
-    ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq, MultipartFile multipartFile, Boolean removeProfile);
+    ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq);
     ModifyMemberRes modifyProfile(ModifyProfileReq req, MultipartFile profileFile, Boolean removeProfile);
+    void changePassword(ChangePasswordReq req);
     DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq);
     boolean existsByEmail(String email);
 }
