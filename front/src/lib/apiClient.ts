@@ -2,7 +2,7 @@
 import axios from "axios";
 
 export const apiClient = axios.create({
-    baseURL: "http://192.168.0.180:8080", // 형님 백엔드 주소
+    baseURL: "http://localhost:8080", // 형님 백엔드 주소
     withCredentials: false,
 });
 

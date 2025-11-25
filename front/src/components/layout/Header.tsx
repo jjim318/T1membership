@@ -85,7 +85,7 @@ export default function Header() {
                     <Link href="/community" className="hover:text-white">
                         COMMUNITY
                     </Link>
-                    <Link href="/shop/kr" className="hover:text-white">
+                    <Link href="/shop" className="hover:text-white">
                         SHOP
                     </Link>
                     <Link href="/pop" className="hover:text-red-400">
