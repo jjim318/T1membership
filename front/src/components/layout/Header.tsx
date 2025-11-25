@@ -150,7 +150,7 @@ export default function Header() {
                             // 🔒 로그인 후
                             <div className="flex items-center gap-3 text-xs md:text-sm">
                                 <button
-                                    onClick={() => router.push("/mypage/account")}
+                                    onClick={() => router.push("/mypage")}
                                     className="flex items-center gap-2"
                                 >
                                     <Image

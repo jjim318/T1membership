@@ -1,17 +1,18 @@
 // src/types/member.ts
 
-// ✅ 백엔드 공통 응답 래퍼 (T1membership ApiResult 기준)
-export type ApiResult<T> = {
-    isSuccess: boolean;   // 요청 성공 여부
-    resCode: number;      // HTTP와 별개로 사용하는 내부 코드 (200, 400, 500 등)
-    resMessage: string;   // 메시지 ("OK", "ERROR" 등)
-    result: T;            // 실제 데이터
-};
+// 백엔드에서 /member/readOne 으로 내려주는 데이터 형태
+export interface MemberInfo {
+    memberName: string;
+    birthYear?: number;
+    memberPhone?: string;
+    gender?: "MALE" | "FEMALE" | "NONE" | string; // 백엔드 enum에 맞춰서
+    phoneCountryCode?: string;                    // "+82" 같은 값
+}
 
-// ✅ /member/readOne 에서 내려오는 내 회원 정보 타입
-export type MemberInfo = {
-    memberEmail: string;      // 이메일 (아이디)
-    memberName: string;       // 이름
-    memberNickName: string;   // 닉네임
-    memberImage?: string | null;
-};
+// 공통 API 응답 래퍼
+export interface ApiResult<T> {
+    isSuccess: boolean;
+    resCode: number;
+    resMessage: string;
+    result: T;
+}
