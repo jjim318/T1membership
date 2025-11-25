@@ -14,12 +14,10 @@ import java.util.List;
 @AllArgsConstructor
 public class ReadOneMemberRes {
 
-    //private String memberPw;
     private String memberName;
     private String memberNickName;
     private String memberEmail;
     private String memberPhone;
-    private String memberAddress;
     private String memberImage;
 
     public static ReadOneMemberRes from(MemberEntity memberEntity) {
@@ -32,7 +30,6 @@ public class ReadOneMemberRes {
                 .memberName(memberEntity.getMemberName())
                 .memberNickName(memberEntity.getMemberNickName())
                 .memberPhone(memberEntity.getMemberPhone())
-                .memberAddress(memberEntity.getMemberAddress())
                 .memberImage(memberEntity.getMemberImage()) // 🔥 이미지 URL
                 .build();
     }

@@ -17,7 +17,7 @@ public class ReadAllMemberRes {
     private String memberName;
     private String memberNickName;
     private String memberPhone;
-    private String memberAddress;
+    private String memberGender;
 
     private static List<ReadAllMemberRes> memberList;
 

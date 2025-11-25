@@ -9,5 +9,5 @@ import lombok.*;
 @AllArgsConstructor
 public class DeleteMemberReq {
     private String memberEmail;
-    private String currenPw;//탈퇴확인용 비번
+    private String currentPw;//탈퇴확인용 비번
 }

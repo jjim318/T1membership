@@ -14,5 +14,5 @@ public class JoinMemberReq {
     private String memberNickName;
     private String memberBirthY;
     private String memberPhone;
-    private String memberAddress;
+    private String memberGender;
 }

@@ -1,6 +1,8 @@
 package com.t1membership.member.controller;
 
 import com.t1membership.ApiResult;
+import com.t1membership.auth.dto.tokenDto.TokenReq;
+import com.t1membership.auth.service.BlacklistService;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
 import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
 import com.t1membership.member.dto.exists.EmailExistsRes;
@@ -15,8 +17,10 @@ import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
 import com.t1membership.member.service.MemberService;
 import com.t1membership.member.service.MemberServiceImpl;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -33,9 +37,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/member")
 @RequiredArgsConstructor
+@Slf4j
 public class MemberController {
 
     private final MemberService memberService;
+    private final BlacklistService blacklistService;
 
     //이메일 검증
     @GetMapping("/exists")
@@ -154,18 +160,43 @@ public class MemberController {
     }
 
     @PostMapping(value = "/delete", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<DeleteMemberRes> deleteMember(Authentication auth) {
+    public ApiResult<DeleteMemberRes> deleteMember(Authentication auth,
+                                                   @RequestBody @Valid DeleteMemberReq req,
+                                                   HttpServletRequest request) {
 
         if (auth == null || !auth.isAuthenticated()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증이 필요합니다");
         }
 
         String loginEmail = auth.getName();
-
-        DeleteMemberReq req = new DeleteMemberReq();
         req.setMemberEmail(loginEmail);
 
+        // 🔥 1) 회원 탈퇴 비즈니스 로직 수행 (memberRole = BLACKLIST)
         DeleteMemberRes res = memberService.deleteMember(req);
+
+        // 🔥 2) 현재 AccessToken 추출
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String accessToken = authHeader.substring(7);
+
+            // 🔥 3) 토큰 블랙리스트 추가
+            try {
+                TokenReq tokenReq = new TokenReq();
+                tokenReq.setAccessToken(accessToken);
+
+                blacklistService.addToBlacklist(tokenReq);
+
+                log.info("[ 탈퇴 ] AccessToken 블랙리스트 등록 완료");
+
+            } catch (ResponseStatusException ex) {
+                if (ex.getStatusCode() == HttpStatus.NO_CONTENT) {
+                    // 이미 만료된 토큰이거나 이미 등록된 토큰 → 무시해도 됨
+                    log.info("[ 탈퇴 ] 이미 만료되었거나 등록된 토큰");
+                } else {
+                    throw ex;
+                }
+            }
+        }
         return new ApiResult<>(res);
     }
 }

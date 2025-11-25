@@ -16,7 +16,7 @@ public class ModifyMemberRes {
     private String memberEmail;
     private String memberNickName;
     private String memberPhone;
-    private String memberAddress;
+    private String memberGender;
 
     // 🔥 프로필 이미지 URL (없으면 기본이미지)
     private String profileImageUrl;
@@ -38,7 +38,7 @@ public class ModifyMemberRes {
         return ModifyMemberRes.builder()
                 .memberEmail(memberEntity.getMemberEmail())
                 .memberNickName(memberEntity.getMemberNickName())
-                .memberAddress(memberEntity.getMemberAddress())
+                .memberGender(memberEntity.getMemberGender())
                 .memberPhone(memberEntity.getMemberPhone())
                 .profileImageUrl(profileUrl)
                 .build();

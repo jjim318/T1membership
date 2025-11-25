@@ -15,7 +15,7 @@ public class JoinMemberRes {
     private String memberNickName;
     private String memberEmail;
     private String memberPhone;
-    private String memberAddress;
+    private String memberGender;
 
     public static JoinMemberRes from(MemberEntity memberEntity) {
         return JoinMemberRes.builder()

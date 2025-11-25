@@ -140,13 +140,10 @@ public class MemberServiceImpl implements MemberService {
         return ReadOneMemberRes.from(memberEntity);
     }
 
-    // 공통 로직을 private 메서드로 정리한 버전 예시
-// MemberServiceImpl 내부
-
     // ==========================================
-//  회원정보 변경 (이름/성별/생년/연락처/주소 등)
-//  /member/modify (JSON) 에서 사용
-// ==========================================
+    //  회원정보 변경 (이름/성별/생년/연락처/주소 등)
+    //  /member/modify (JSON) 에서 사용
+    // ==========================================
     @Override
     @Transactional
     public ModifyMemberRes modifyMember(ModifyMemberReq req) {
@@ -168,9 +165,9 @@ public class MemberServiceImpl implements MemberService {
 
 
     // ==========================================
-//  프로필 수정 (닉네임 + 이미지)
-//  /member/profile (multipart) 에서 사용
-// ==========================================
+    //  프로필 수정 (닉네임 + 이미지)
+    //  /member/profile (multipart) 에서 사용
+    // ==========================================
     @Override
     @Transactional
     public ModifyMemberRes modifyProfile(ModifyProfileReq req,
@@ -203,8 +200,8 @@ public class MemberServiceImpl implements MemberService {
      * - 공통     : 본인 또는 ADMIN이 아니면 403
      */
     // ==========================================
-//  공통: 수정 가능한 회원 조회
-// ==========================================
+    //  공통: 수정 가능한 회원 조회
+    // ==========================================
     private MemberEntity getUpdatableMember(String requestEmail) {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -240,8 +237,8 @@ public class MemberServiceImpl implements MemberService {
     }
 
     // ==========================================
-//  공통: 프로필 이미지 삭제/업데이트 처리
-// ==========================================
+    //  공통: 프로필 이미지 삭제/업데이트 처리
+    // ==========================================
     private void applyProfileImageUpdate(MemberEntity memberEntity,
                                          MultipartFile file,
                                          Boolean removeProfile) {
@@ -289,12 +286,10 @@ public class MemberServiceImpl implements MemberService {
         }
     }
 
-
-
     // ==========================================
-//  비밀번호 변경 전용
-//  /member/password (JSON) 에서 사용
-// ==========================================
+    //  비밀번호 변경 전용
+    //  /member/password (JSON) 에서 사용
+    // ==========================================
     @Override
     @Transactional
     public void changePassword(ChangePasswordReq req) {
@@ -324,15 +319,12 @@ public class MemberServiceImpl implements MemberService {
         memberRepository.save(member);
     }
 
-
-
-
     @Override
     public DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq) {
 
         //회원의 id(email)과 pw를 받음
         String memberId = deleteMemberReq.getMemberEmail();
-        String currentPw = deleteMemberReq.getCurrenPw();
+        String currentPw = deleteMemberReq.getCurrentPw();
 
         //로그인한 유저의 인증정보 확인
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -352,7 +344,7 @@ public class MemberServiceImpl implements MemberService {
         }
 
         //회원을 찾음 없으면 404
-        MemberEntity memberEntity = memberRepository.findById(memberId).orElseThrow(()
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberId).orElseThrow(()
                 -> new ResponseStatusException(HttpStatus.NOT_FOUND,"회원을 찾을 수 없습니다"));
 
         //비밀번호 검증 틀리면 400
