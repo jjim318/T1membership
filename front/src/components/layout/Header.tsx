@@ -1,58 +1,81 @@
+// src/components/layout/Header.tsx
 "use client";
 
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiClient } from "@/lib/apiClient";
+
+interface MemberInfo {
+    profileImageUrl?: string | null;
+}
 
 export default function Header() {
     const router = useRouter();
 
-    // 로그인 여부
     const [isLogin, setIsLogin] = useState(false);
-    // 클라이언트 마운트 여부 (SSR/Hydration 안전용)
-    const [mounted, setMounted] = useState(false);
+    const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
+    const [cartCount, setCartCount] = useState<number>(0);
+    const [hasNotification, setHasNotification] = useState<boolean>(false);
 
-    // 토큰 확인
     const checkLogin = () => {
         if (typeof window === "undefined") return;
         const token = localStorage.getItem("accessToken");
         setIsLogin(!!token);
     };
 
+    const loadLoginRelatedInfo = async () => {
+        if (typeof window === "undefined") return;
+        const token = localStorage.getItem("accessToken");
+        if (!token) {
+            setProfileImageUrl(null);
+            setCartCount(0);
+            setHasNotification(false);
+            return;
+        }
+
+        try {
+            const memberRes = await apiClient.get("/member/readOne");
+            const memberData: MemberInfo =
+                memberRes.data?.result ?? memberRes.data?.data ?? {};
+
+            setProfileImageUrl(memberData.profileImageUrl ?? null);
+
+            // 아직 백엔드 없으니까 임시값
+            setCartCount(0);
+            setHasNotification(false);
+        } catch (e) {
+            console.error("[Header] loadLoginRelatedInfo 실패", e);
+        }
+    };
+
     useEffect(() => {
         if (typeof window === "undefined") return;
 
-        setMounted(true);   // OK
-        checkLogin();       // OK
+        checkLogin();
+        loadLoginRelatedInfo();
 
-        const handler = () => {
+        const sync = () => {
             checkLogin();
+            loadLoginRelatedInfo();
         };
-        window.addEventListener("loginStateChange", handler);
 
-        const storageHandler = () => {
-            checkLogin();
-        };
-        window.addEventListener("storage", storageHandler);
+        window.addEventListener("loginStateChange", sync);
+        window.addEventListener("storage", sync);
 
         return () => {
-            window.removeEventListener("loginStateChange", handler);
-            window.removeEventListener("storage", storageHandler);
+            window.removeEventListener("loginStateChange", sync);
+            window.removeEventListener("storage", sync);
         };
     }, []);
 
-    const handleLogout = () => {
-        if (typeof window === "undefined") return;
-
-        localStorage.removeItem("accessToken");
-        localStorage.removeItem("refreshToken");
-
-        window.dispatchEvent(new Event("loginStateChange"));
-
-        alert("로그아웃 되었습니다.");
-        setIsLogin(false);
-        router.push("/");
+    const handleProtectedClick = (path: string) => {
+        if (!isLogin) {
+            router.push("/login");
+            return;
+        }
+        router.push(path);
     };
 
     return (
@@ -85,7 +108,7 @@ export default function Header() {
                     <Link href="/community" className="hover:text-white">
                         COMMUNITY
                     </Link>
-                    <Link href="/shop/kr" className="hover:text-white">
+                    <Link href="/shop" className="hover:text-white">
                         SHOP
                     </Link>
                     <Link href="/pop" className="hover:text-red-400">
@@ -94,87 +117,77 @@ export default function Header() {
                 </nav>
             </div>
 
-            {/* 오른쪽 영역 */}
-            <div className="flex items-center gap-4">
-                {/* 🔐 서버 렌더링 때는 안 그리고, 클라이언트 마운트 후에만 렌더 */}
-                {mounted && (
-                    <>
-                        {/* 로그인 된 상태일 때 알림/캘린더/장바구니 */}
-                        {isLogin && (
-                            <div className="hidden md:flex items-center gap-3">
-                                <button>
-                                    <Image
-                                        src="/icons/bell.png"
-                                        alt="알림"
-                                        width={22}
-                                        height={22}
-                                    />
-                                </button>
-                                <button>
-                                    <Image
-                                        src="/icons/calendar.png"
-                                        alt="캘린더"
-                                        width={22}
-                                        height={22}
-                                    />
-                                </button>
-                                <button>
-                                    <Image
-                                        src="/icons/cart.png"
-                                        alt="장바구니"
-                                        width={22}
-                                        height={22}
-                                    />
-                                </button>
-                            </div>
-                        )}
+            {/* 오른쪽: 아이콘 네 개 (항상 렌더, 상태에 따라 뱃지만 변경) */}
+            <div className="flex items-center gap-5 text-white">
+                {/* 알림 */}
+                <button
+                    onClick={() => handleProtectedClick("/notifications")}
+                    className="relative"
+                >
+                    <Image
+                        src="/icons/bell.png"
+                        alt="알림"
+                        width={22}
+                        height={22}
+                    />
+                    {isLogin && hasNotification && (
+                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
+                    )}
+                </button>
 
-                        {/* 로그인 전/후 버튼 */}
-                        {!isLogin ? (
-                            // 🔓 로그인 전
-                            <div className="flex items-center gap-3 text-xs md:text-sm">
-                                <Link
-                                    href="/login"
-                                    className="px-3 py-1 rounded-full border border-zinc-600 hover:border-red-500 hover:text-red-400 transition"
-                                >
-                                    로그인
-                                </Link>
-                                <Link
-                                    href="/join"
-                                    className="px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs md:text-sm font-semibold transition"
-                                >
-                                    회원가입
-                                </Link>
-                            </div>
-                        ) : (
-                            // 🔒 로그인 후
-                            <div className="flex items-center gap-3 text-xs md:text-sm">
-                                <button
-                                    onClick={() => router.push("/mypage")}
-                                    className="flex items-center gap-2"
-                                >
-                                    <Image
-                                        src="/icons/profile.png"
-                                        alt="프로필"
-                                        width={28}
-                                        height={28}
-                                        className="rounded-full border border-zinc-500"
-                                    />
-                                    <span className="hidden md:inline text-zinc-200">
-                                        마이페이지
-                                    </span>
-                                </button>
+                {/* 캘린더 */}
+                <button onClick={() => handleProtectedClick("/schedule")}>
+                    <Image
+                        src="/icons/calendar.png"
+                        alt="캘린더"
+                        width={22}
+                        height={22}
+                    />
+                </button>
 
-                                <button
-                                    onClick={handleLogout}
-                                    className="px-3 py-1 rounded-full border border-zinc-600 hover:border-red-500 hover:text-red-400 transition"
-                                >
-                                    로그아웃
-                                </button>
-                            </div>
-                        )}
-                    </>
-                )}
+                {/* 장바구니 */}
+                <button
+                    onClick={() => handleProtectedClick("/cart")}
+                    className="relative"
+                >
+                    <Image
+                        src="/icons/cart.png"
+                        alt="장바구니"
+                        width={24}
+                        height={24}
+                    />
+                    {isLogin && cartCount > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-[4px] rounded-full bg-red-500 text-[11px] font-semibold flex items-center justify-center">
+                            {cartCount}
+                        </span>
+                    )}
+                </button>
+
+                {/* 프로필 / 로그인 아이콘 */}
+                <button
+                    onClick={() =>
+                        isLogin ? router.push("/mypage") : router.push("/login")
+                    }
+                    className="flex items-center"
+                >
+                    {isLogin && profileImageUrl ? (
+                        <Image
+                            src={profileImageUrl}
+                            alt="프로필"
+                            width={28}
+                            height={28}
+                            className="rounded-full border border-red-400"
+                        />
+                    ) : (
+                        <Image
+                            src="/icons/user.PNG"
+                            alt="프로필"
+                            width={24}
+                            height={24}
+                            className="opacity-90"
+                        />
+                    )}
+                </button>
             </div>
         </header>
     );

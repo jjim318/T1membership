@@ -2,170 +2,312 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiClient } from "@/lib/apiClient";
-import { ApiResult, MemberInfo } from "@/types/member";
 import { useRouter } from "next/navigation";
+import { apiClient } from "@/lib/apiClient";
 import axios from "axios";
 
+// 형님 백엔드 ApiResult 래퍼 타입
+interface ApiResult<T> {
+    isSuccess: boolean;
+    resCode: number;
+    resMessage: string;
+    result: T;
+}
+
+// /member/readOne 응답용 회원 정보
+interface MemberInfo {
+    memberEmail: string;
+    memberName: string;
+    memberGender?: string;
+    memberBirthY?: number | null;
+    memberPhone?: string | null; // "+82 01012345678" 이런 형태라고 가정
+}
+
 export default function MemberEditPage() {
-    const [name, setName] = useState("");
-    const [gender, setGender] = useState("");                 // 성별
-    const [birthYear, setBirthYear] = useState("");
-    const [countryCode, setCountryCode] = useState("+82");    // 국가코드
-    const [phone, setPhone] = useState("");
     const router = useRouter();
 
+    // 상태
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    // 원본 정보
+    const [member, setMember] = useState<MemberInfo | null>(null);
+
+    // 입력값 상태 (티원 화면 기준 4개 + 국가코드)
+    const [name, setName] = useState("");
+    const [gender, setGender] = useState("");
+    const [birthYear, setBirthYear] = useState("");
+    const [countryCode, setCountryCode] = useState("+82");
+    const [phone, setPhone] = useState("");
+
+    // ==============================
+    //   최초 진입 시 회원정보 조회
+    // ==============================
     useEffect(() => {
         const load = async () => {
             try {
-                // 비로그인 상태면 로그인으로
-                if (typeof window !== "undefined") {
-                    const token = localStorage.getItem("accessToken");
-                    if (!token) {
-                        alert("로그인이 필요합니다.");
-                        router.push("/login");
-                        return;
-                    }
+                const token =
+                    typeof window !== "undefined"
+                        ? localStorage.getItem("accessToken")
+                        : null;
+
+                if (!token) {
+                    alert("로그인이 필요합니다.");
+                    router.push("/login");
+                    return;
                 }
 
                 const res = await apiClient.get<ApiResult<MemberInfo>>(
                     "/member/readOne"
                 );
-                console.log("readOne(edit) =", res.data);
+                const data = res.data.result;
 
-                const d = res.data.result;
-                if (!d) {
-                    alert("회원 정보를 찾을 수 없습니다.");
-                    return;
+                setMember(data);
+
+                // 이름
+                setName(data.memberName ?? "");
+
+                // 성별
+                setGender(data.memberGender ?? "");
+
+                // 출생 연도
+                if (data.memberBirthY !== null && data.memberBirthY !== undefined) {
+                    setBirthYear(String(data.memberBirthY));
+                } else {
+                    setBirthYear("");
                 }
 
-                // 기존 정보로 state 초기화
-                setName(d.memberName ?? "");
-                setGender(d.gender ?? "");                           // "FEMALE" / "MALE"
-                setBirthYear(d.birthYear ? String(d.birthYear) : "");
-                setCountryCode(d.phoneCountryCode ?? "+82");
-                setPhone(d.memberPhone ?? "");
-            } catch (e: unknown) {
-                console.error(e);
-
-                // 토큰 만료 등 401 → 로그인 페이지로
-                if (axios.isAxiosError(e) && e.response?.status === 401) {
-                    alert("로그인이 필요합니다. 다시 로그인해 주세요.");
-                    if (typeof window !== "undefined") {
-                        localStorage.removeItem("accessToken");
-                        localStorage.removeItem("refreshToken");
+                // 전화번호 → 국가코드 / 번호 분리 (예: "+82 01012345678")
+                if (data.memberPhone) {
+                    const raw = data.memberPhone.trim();
+                    if (raw.startsWith("+")) {
+                        const parts = raw.split(/\s+/);
+                        const cc = parts[0];
+                        const pn = parts.slice(1).join(" ");
+                        setCountryCode(cc || "+82");
+                        setPhone(pn || "");
+                    } else {
+                        setCountryCode("+82");
+                        setPhone(raw);
                     }
-                    router.push("/login");
-                    return;
+                } else {
+                    setCountryCode("+82");
+                    setPhone("");
                 }
-
-                alert("회원 정보를 불러오지 못했습니다.");
+            } catch (error) {
+                console.error("[MemberEdit] readOne error =", error);
+                if (axios.isAxiosError(error) && error.response?.status === 401) {
+                    alert("다시 로그인 해주세요.");
+                    router.push("/login");
+                } else {
+                    alert("회원 정보를 불러오지 못했습니다.");
+                }
+            } finally {
+                setLoading(false);
             }
         };
 
         load();
     }, [router]);
 
+    // ==============================
+    //   수정하기 버튼 클릭
+    //   → JSON PUT /member/modify
+    // ==============================
     const handleSave = async () => {
-        if (!name || !birthYear || !phone) {
-            alert("필수 정보를 모두 입력해 주세요.");
+        if (!member) return;
+        if (saving) return;
+
+        // 간단 유효성 검사
+        if (!name.trim()) {
+            alert("이름을 입력해주세요.");
+            return;
+        }
+        if (!gender) {
+            alert("성별을 선택해주세요.");
+            return;
+        }
+        if (!birthYear.trim()) {
+            alert("출생 연도를 입력해주세요.");
+            return;
+        }
+        if (!phone.trim()) {
+            alert("전화번호를 입력해주세요.");
             return;
         }
 
-        const form = new FormData();
-        form.append("memberName", name);
-        form.append("gender", gender);                 // 성별
-        form.append("birthYear", birthYear);
-        form.append("phoneCountryCode", countryCode);  // 국가코드
-        form.append("memberPhone", phone);
+        const birthYearNum = Number(birthYear);
+        if (Number.isNaN(birthYearNum)) {
+            alert("출생 연도는 숫자로 입력해주세요.");
+            return;
+        }
 
+        setSaving(true);
         try {
-            await apiClient.post("/member/modify", form, {
-                headers: { "Content-Type": "multipart/form-data" },
-            });
+            const memberPhone = `${countryCode} ${phone}`.trim();
+
+            await apiClient.put(
+                "/member/modify",
+                {
+                    // memberEmail 은 서비스에서 SecurityContext 기준으로 잡음
+                    memberName: name,
+                    memberGender: gender,
+                    memberBirthY: birthYearNum,
+                    memberPhone: memberPhone,
+                },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                }
+            );
+
             alert("회원정보가 수정되었습니다.");
             router.push("/mypage");
-        } catch (e) {
-            console.error(e);
-            alert("수정에 실패했습니다.");
+        } catch (error) {
+            console.error("[MemberEdit] modify error =", error);
+            if (axios.isAxiosError(error)) {
+                const status = error.response?.status;
+                if (status === 400) {
+                    alert("입력값이 잘못되었습니다. 다시 확인해주세요.");
+                } else if (status === 401) {
+                    alert("로그인 정보가 만료되었습니다. 다시 로그인해주세요.");
+                    router.push("/login");
+                } else if (status === 403) {
+                    alert("수정 권한이 없습니다.");
+                } else if (status === 404) {
+                    alert("대상 회원을 찾을 수 없습니다.");
+                } else {
+                    alert("회원정보 수정 중 서버 오류가 발생했습니다.");
+                }
+            } else {
+                alert("회원정보 수정 중 알 수 없는 오류가 발생했습니다.");
+            }
+        } finally {
+            setSaving(false);
         }
     };
 
+    // ==============================
+    //   로딩 상태 / 에러 상태
+    // ==============================
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-black text-white flex items-center justify-center">
+                <span className="text-sm">회원 정보를 불러오는 중입니다…</span>
+            </div>
+        );
+    }
+
+    if (!member) {
+        return (
+            <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <span className="text-sm">
+          회원 정보를 불러오지 못했습니다. 다시 시도해주세요.
+        </span>
+            </div>
+        );
+    }
+
+    // ==============================
+    //   실제 화면 (티원 스타일로 구성)
+    // ==============================
     return (
-        <div className="min-h-screen bg-black text-white pt-20 pb-16">
-            <div className="max-w-xl mx-auto px-6">
+        <div className="min-h-screen bg-black text-white">
+            <div className="max-w-3xl mx-auto px-4 py-10">
+                {/* 제목 */}
                 <h1 className="text-2xl font-bold mb-8">회원정보 변경</h1>
 
                 {/* 이름 */}
-                <Field label="이름 (필수)">
+                <div className="mb-5">
+                    <label className="block text-sm mb-1">
+                        이름 <span className="text-zinc-500">(필수)</span>
+                    </label>
                     <input
+                        className="w-full px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-zinc-400"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500"
+                        placeholder="이름을 입력해주세요."
                     />
-                </Field>
+                </div>
 
                 {/* 성별 */}
-                <Field label="성별 (필수)">
-                    <select
-                        value={gender}
-                        onChange={(e) => setGender(e.target.value)}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500"
-                    >
-                        <option value="">선택 안 함</option>
-                        <option value="FEMALE">여자</option>
-                        <option value="MALE">남자</option>
-                    </select>
-                </Field>
+                <div className="mb-5">
+                    <label className="block text-sm mb-1">
+                        성별 <span className="text-zinc-500">(필수)</span>
+                    </label>
+                    <div className="relative">
+                        <select
+                            className="w-full px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm appearance-none focus:outline-none focus:border-zinc-400"
+                            value={gender}
+                            onChange={(e) => setGender(e.target.value)}
+                        >
+                            <option value="">선택해주세요</option>
+                            <option value="FEMALE">여자</option>
+                            <option value="MALE">남자</option>
+                        </select>
+                        {/* ▼ 아이콘 느낌 (순수 CSS) */}
+                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-zinc-400">
+              ▼
+            </span>
+                    </div>
+                </div>
 
                 {/* 출생 연도 */}
-                <Field label="출생 연도 (필수)">
+                <div className="mb-5">
+                    <label className="block text-sm mb-1">
+                        출생 연도 <span className="text-zinc-500">(필수)</span>
+                    </label>
                     <input
+                        type="number"
+                        className="w-full px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-zinc-400"
                         value={birthYear}
                         onChange={(e) => setBirthYear(e.target.value)}
-                        placeholder="YYYY"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500"
+                        placeholder="예) 1999"
                     />
-                </Field>
+                </div>
 
-                {/* 전화번호: 국가코드 + 번호 */}
-                <Field label="전화번호 (필수)">
+                {/* 전화번호 (국가코드 + 번호) */}
+                <div className="mb-8">
+                    <label className="block text-sm mb-1">
+                        전화번호 <span className="text-zinc-500">(필수)</span>
+                    </label>
                     <div className="flex gap-2">
-                        <select
-                            value={countryCode}
-                            onChange={(e) => setCountryCode(e.target.value)}
-                            className="w-24 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-2 text-sm outline-none focus:border-red-500"
-                        >
-                            <option value="+82">+82</option>
-                            <option value="+81">+81</option>
-                            <option value="+1">+1</option>
-                            {/* 필요하면 더 추가 */}
-                        </select>
+                        {/* 국가코드 드롭다운 */}
+                        <div className="w-32">
+                            <select
+                                className="w-full px-3 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm appearance-none focus:outline-none focus:border-zinc-400"
+                                value={countryCode}
+                                onChange={(e) => setCountryCode(e.target.value)}
+                            >
+                                <option value="+82">+82</option>
+                                <option value="+81">+81</option>
+                                <option value="+1">+1</option>
+                                <option value="+86">+86</option>
+                                {/* 필요하면 더 추가 */}
+                            </select>
+                        </div>
+
+                        {/* 실제 번호 입력 */}
                         <input
+                            className="flex-1 px-4 py-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm focus:outline-none focus:border-zinc-400"
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
                             placeholder="01012345678"
-                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500"
                         />
                     </div>
-                </Field>
+                </div>
 
+                {/* 수정하기 버튼 */}
                 <button
+                    type="button"
+                    className="w-full py-3 rounded-lg bg-[#e51b24] hover:bg-[#ff232d] text-sm font-semibold disabled:opacity-60"
                     onClick={handleSave}
-                    className="w-full mt-6 bg-red-600 hover:bg-red-500 py-3 rounded-lg text-sm font-semibold"
+                    disabled={saving}
                 >
-                    수정하기
+                    {saving ? "수정 중..." : "수정하기"}
                 </button>
             </div>
-        </div>
-    );
-}
-
-function Field(props: { label: string; children: React.ReactNode }) {
-    return (
-        <div className="mb-4">
-            <p className="text-xs mb-1 text-zinc-300">{props.label}</p>
-            {props.children}
         </div>
     );
 }

@@ -14,6 +14,7 @@ interface JoinForm {
     memberBirthY: string;
     memberPhone: string;
     memberAddress: string;
+    memberGender: string; // 🔥 성별 추가 (MALE / FEMALE)
 }
 
 export default function JoinPage() {
@@ -30,6 +31,7 @@ export default function JoinPage() {
         memberBirthY: "",
         memberPhone: "",
         memberAddress: "",
+        memberGender: "", // 초기값: 선택 안 됨
     });
 
     // 동의 체크박스
@@ -55,7 +57,7 @@ export default function JoinPage() {
     };
 
     const handleChange = (
-        e: React.ChangeEvent<HTMLInputElement>,
+        e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>, // 🔥 select 도 처리
     ) => {
         const { name, value } = e.target;
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -72,8 +74,25 @@ export default function JoinPage() {
         }
 
         // 필수 값 간단 검증
-        if (!form.memberEmail || !form.memberPw || !form.memberName || !form.memberNickName) {
+        if (
+            !form.memberEmail ||
+            !form.memberPw ||
+            !form.memberName ||
+            !form.memberNickName
+        ) {
             setErrorMsg("이메일, 비밀번호, 이름, 닉네임은 필수입니다.");
+            return;
+        }
+
+        // 🔥 성별 필수 검증
+        if (!form.memberGender) {
+            setErrorMsg("성별을 선택해주세요.");
+            return;
+        }
+
+        // 출생 연도 간단 검증 (4자리 숫자 여부 정도)
+        if (!/^\d{4}$/.test(form.memberBirthY)) {
+            setErrorMsg("출생 연도를 YYYY 형식으로 입력해주세요.");
             return;
         }
 
@@ -81,7 +100,13 @@ export default function JoinPage() {
         setErrorMsg(null);
 
         try {
-            await apiClient.post("/member/join", form);
+            await apiClient.post("/member/join", {
+                ...form,
+                // 백엔드가 int/Integer 를 받는다면 여기서 숫자로 변환
+                // memberBirthY: Number(form.memberBirthY),
+                // memberGender: form.memberGender (MALE / FEMALE)
+            });
+
             alert("회원가입이 완료되었습니다. 로그인 해 주세요.");
             router.push(`/login?email=${encodeURIComponent(form.memberEmail)}`);
         } catch (err) {
@@ -219,6 +244,24 @@ export default function JoinPage() {
                             placeholder="이름을 입력해주세요"
                             style={inputStyle}
                         />
+                    </Field>
+
+                    {/* 🔥 성별 (필수) */}
+                    <Field label="성별(필수)">
+                        <select
+                            name="memberGender"
+                            value={form.memberGender}
+                            onChange={handleChange}
+                            style={{
+                                ...inputStyle,
+                                appearance: "none",
+                                WebkitAppearance: "none",
+                            }}
+                        >
+                            <option value="">성별을 선택해주세요</option>
+                            <option value="MALE">남성</option>
+                            <option value="FEMALE">여성</option>
+                        </select>
                     </Field>
 
                     {/* 출생 연도 */}
