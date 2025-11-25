@@ -33,6 +33,8 @@ public class MemberEntity extends BaseEntity {
     private String memberPhone;
     @Column(name = "member_birthY", nullable = false)
     private String memberBirthY;
+    @Column(name = "member_Gender", nullable = false)
+    private String memberGender;
     @Column(name = "member_image")
     private String memberImage;
     @Column(name = "member_address", nullable = false)

@@ -9,6 +9,7 @@ import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
 import com.t1membership.member.dto.deleteMember.DeleteMemberRes;
 import com.t1membership.member.dto.joinMember.JoinMemberReq;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
+import com.t1membership.member.dto.modifyMember.ChangePasswordReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberReq;
 import com.t1membership.member.dto.modifyMember.ModifyMemberRes;
 import com.t1membership.member.dto.modifyMember.ModifyProfileReq;
@@ -139,119 +140,72 @@ public class MemberServiceImpl implements MemberService {
         return ReadOneMemberRes.from(memberEntity);
     }
 
+    // 공통 로직을 private 메서드로 정리한 버전 예시
+// MemberServiceImpl 내부
+
+    // ==========================================
+//  회원정보 변경 (이름/성별/생년/연락처/주소 등)
+//  /member/modify (JSON) 에서 사용
+// ==========================================
     @Override
     @Transactional
-    public ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq,
-                                        MultipartFile multipartFile,
-                                        Boolean removeProfile) {
+    public ModifyMemberRes modifyMember(ModifyMemberReq req) {
 
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
-        }
+        // 1) 수정 대상 회원 조회 + 권한 검증
+        MemberEntity memberEntity = getUpdatableMember(req.getMemberEmail());
+        req.setMemberEmail(memberEntity.getMemberEmail());
 
-        //권한 문자열 확인
-        boolean isAdmin = auth.getAuthorities().stream()
-                .map(granted -> granted.getAuthority())
-                .anyMatch(role -> "ROLE_ADMIN".equals(role) || "ADMIN".equals(role));
+        // 2) 일반 정보 변경 (이미지/비밀번호는 절대 건드리지 않음)
+        memberEntity.setMemberName(req.getMemberName());
+        memberEntity.setMemberGender(req.getMemberGender());           // enum이면 enum
+        memberEntity.setMemberBirthY(req.getMemberBirthY());     // int/String, 형님 타입에 맞게
+        memberEntity.setMemberPhone(req.getMemberPhone());
 
-        String loginEmail = auth.getName(); // JWT의 subject/username이 이메일이라고 가정
-
-        //본인 요청의 경우 요청 바디에 이메일을 로그인 이메일로 강제 고정
-        if (!isAdmin) {
-            modifyMemberReq.setMemberEmail(loginEmail);
-        }
-
-        String memberEmail = modifyMemberReq.getMemberEmail();
-
-        //대상 이메일 누락 방어
-        if (!StringUtils.hasText(memberEmail)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
-        }
-
-        //본인 또는 관리자만 허용
-        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
-        }
-
-        //조회
-        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
-                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
-
-        //비밀번호 변경
-        String memberPw = modifyMemberReq.getMemberPw();
-        if (StringUtils.hasText(memberPw)){
-            memberEntity.setMemberPw(passwordEncoder.encode(memberPw));
-        }
-        //일반 정보 변경
-        memberEntity.setMemberAddress(modifyMemberReq.getMemberAddress());
-        memberEntity.setMemberNickName(modifyMemberReq.getMemberNickName());
-        memberEntity.setMemberPhone(modifyMemberReq.getMemberPhone());
-
-        // =========================
-        //   프로필 이미지 처리
-        // =========================
-        // 1) 삭제 요청이 먼저라면 -> 기존 이미지 전부 제거
-        if (Boolean.TRUE.equals(removeProfile)) {
-            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
-            for (ImageEntity img : currentImages) {
-                String fileName = img.getFileName();
-                if (StringUtils.hasText(fileName)) {
-                    fileService.deleteFile(fileName);   // 실제 파일 삭제 (비동기 가능)
-                }
-                memberEntity.removeImage(img);          // 연관관계 제거 (orphanRemoval로 DB row 삭제)
-            }
-            memberEntity.setMemberImage(null);          // 문자열 URL 캐시도 비움
-        }
-
-        // 2) 새 프로필 이미지 업로드 요청이 있으면 → 기존 것들 지우고 새로 1장 등록
-        if (multipartFile != null && !multipartFile.isEmpty()) {
-            validateImage(multipartFile);
-
-            // 기존 이미지 정리 (파일 + DB)
-            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
-            for (ImageEntity img : currentImages) {
-                String fileName = img.getFileName();
-                if (StringUtils.hasText(fileName)) {
-                    fileService.deleteFile(fileName);
-                }
-                memberEntity.removeImage(img);
-            }
-
-            // 새 파일 저장 (프로필은 1장이므로 sortOrder=0 고정)
-            ImageDTO dto = fileService.uploadFile(multipartFile, 0);
-
-            // DTO -> 엔티티 변환 + 멤버 연결
-            ImageEntity image = ImageEntity.fromDtoForMember(dto, memberEntity);
-            memberEntity.addImage(image);
-
-            // 문자열 캐시 필드도 동기화 (있으면)
-            memberEntity.setMemberImage(dto.getUrl());
-        }
-
-        // 영속 엔티티라 save() 호출 안 해도 되지만, 명시적으로 한 번 호출해도 무방
         memberRepository.save(memberEntity);
 
         return ModifyMemberRes.from(memberEntity);
     }
 
-    // 이미지 유효성 검증 (기존 로직 그대로 사용)
-    private void validateImage(MultipartFile file) {
-        long max = 5 * 1024 * 1024L; // 5MB
-        if (file.getSize() > max) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "파일이 너무 큽니다(최대 5MB).");
-        }
-        String ct = file.getContentType();
-        if (ct == null || !(ct.equals("image/png") || ct.equals("image/jpeg") || ct.equals("image/webp"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "허용되지 않는 이미지 타입입니다.");
-        }
-    }
 
+    // ==========================================
+//  프로필 수정 (닉네임 + 이미지)
+//  /member/profile (multipart) 에서 사용
+// ==========================================
     @Override
     @Transactional
     public ModifyMemberRes modifyProfile(ModifyProfileReq req,
                                          MultipartFile profileFile,
                                          Boolean removeProfile) {
+
+        // 1) 수정 대상 회원 조회 + 권한 검증
+        MemberEntity memberEntity = getUpdatableMember(req.getMemberEmail());
+
+        // 비관리자인 경우 실제 이메일을 DTO에도 세팅 (로그 남길 때 편함)
+        req.setMemberEmail(memberEntity.getMemberEmail());
+
+        // 2) 닉네임만 수정
+        memberEntity.setMemberNickName(req.getMemberNickName());
+
+        // 3) 프로필 이미지 처리 (삭제/업로드)
+        applyProfileImageUpdate(memberEntity, profileFile, removeProfile);
+
+        memberRepository.save(memberEntity);
+
+        return ModifyMemberRes.from(memberEntity);
+    }
+
+
+    /**
+     * 🔥 공통: 현재 로그인 사용자 기반으로 "수정 가능한 회원"을 찾아온다.
+     *
+     * - 비관리자 : 무조건 자기 자신만 수정 가능
+     * - 관리자   : 요청 바디에 들어온 memberEmail 기준으로 수정 가능
+     * - 공통     : 본인 또는 ADMIN이 아니면 403
+     */
+    // ==========================================
+//  공통: 수정 가능한 회원 조회
+// ==========================================
+    private MemberEntity getUpdatableMember(String requestEmail) {
 
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
@@ -264,70 +218,114 @@ public class MemberServiceImpl implements MemberService {
 
         String loginEmail = auth.getName(); // JWT subject = 이메일
 
-        // 일반 회원이면 무조건 본인 이메일로 고정
-        if (!isAdmin) {
-            req.setMemberEmail(loginEmail);
+        // ADMIN이면 요청 이메일 우선, 없으면 자기 자신 / USER는 항상 자기 자신
+        String targetEmail;
+        if (isAdmin && StringUtils.hasText(requestEmail)) {
+            targetEmail = requestEmail;
+        } else {
+            targetEmail = loginEmail;
         }
 
-        String memberEmail = req.getMemberEmail();
-
-        if (!StringUtils.hasText(memberEmail)) {
+        if (!StringUtils.hasText(targetEmail)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "대상 이메일이 없습니다.");
         }
 
         // 본인 또는 ADMIN만 허용
-        if (!(isAdmin || loginEmail.equalsIgnoreCase(memberEmail))) {
+        if (!(isAdmin || loginEmail.equalsIgnoreCase(targetEmail))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 또는 관리자만 수정 가능합니다.");
         }
 
-        // ===== 조회 =====
-        MemberEntity memberEntity = memberRepository.findByMemberEmail(memberEmail)
-                .orElseThrow(() -> new UsernameNotFoundException(memberEmail));
+        return memberRepository.findByMemberEmail(targetEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(targetEmail));
+    }
 
-        // ===== 닉네임만 수정 =====
-        memberEntity.setMemberNickName(req.getMemberNickName());
+    // ==========================================
+//  공통: 프로필 이미지 삭제/업데이트 처리
+// ==========================================
+    private void applyProfileImageUpdate(MemberEntity memberEntity,
+                                         MultipartFile file,
+                                         Boolean removeProfile) {
 
-        // =========================
-        //   프로필 이미지 처리
-        // =========================
-
-        // 1) 삭제 요청 → 기존 이미지 제거
+        // 1) 삭제 플래그가 true면 먼저 전부 삭제
         if (Boolean.TRUE.equals(removeProfile)) {
-            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
-            for (ImageEntity img : currentImages) {
-                String fileName = img.getFileName();
-                if (StringUtils.hasText(fileName)) {
-                    fileService.deleteFile(fileName);
-                }
-                memberEntity.removeImage(img);
-            }
-            memberEntity.setMemberImage(null);
+            clearProfileImages(memberEntity);
         }
 
-        // 2) 새 이미지 업로드 → 기존 것 지우고 새로 1장 등록
-        if (profileFile != null && !profileFile.isEmpty()) {
-            validateImage(profileFile);
+        // 2) 새 파일이 올라오면 기존 이미지 제거 후 새로 1장 등록
+        if (file != null && !file.isEmpty()) {
+            validateImage(file);
 
-            List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
-            for (ImageEntity img : currentImages) {
-                String fileName = img.getFileName();
-                if (StringUtils.hasText(fileName)) {
-                    fileService.deleteFile(fileName);
-                }
-                memberEntity.removeImage(img);
-            }
+            clearProfileImages(memberEntity); // 기존 이미지/파일 정리
 
-            ImageDTO dto = fileService.uploadFile(profileFile, 0);
+            ImageDTO dto = fileService.uploadFile(file, 0); // sortOrder = 0 고정
             ImageEntity image = ImageEntity.fromDtoForMember(dto, memberEntity);
             memberEntity.addImage(image);
+            memberEntity.setMemberImage(dto.getUrl());      // 문자열 캐시 동기화
+        }
+    }
 
-            memberEntity.setMemberImage(dto.getUrl());
+    // 기존 이미지 전부 제거 + 파일 삭제
+    private void clearProfileImages(MemberEntity memberEntity) {
+        List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+        for (ImageEntity img : currentImages) {
+            String fileName = img.getFileName();
+            if (StringUtils.hasText(fileName)) {
+                fileService.deleteFile(fileName);   // 스토리지에서 실제 파일 삭제
+            }
+            memberEntity.removeImage(img);          // 연관관계 제거 (orphanRemoval)
+        }
+        memberEntity.setMemberImage(null);          // 캐시 필드도 초기화
+    }
+
+    // 이미지 유효성 검증 (형님 기존 로직 그대로)
+    private void validateImage(MultipartFile file) {
+        long max = 5 * 1024 * 1024L; // 5MB
+        if (file.getSize() > max) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "파일이 너무 큽니다(최대 5MB).");
+        }
+        String ct = file.getContentType();
+        if (ct == null || !(ct.equals("image/png") || ct.equals("image/jpeg") || ct.equals("image/webp"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "허용되지 않는 이미지 타입입니다.");
+        }
+    }
+
+
+
+    // ==========================================
+//  비밀번호 변경 전용
+//  /member/password (JSON) 에서 사용
+// ==========================================
+    @Override
+    @Transactional
+    public void changePassword(ChangePasswordReq req) {
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        memberRepository.save(memberEntity);
+        String email = auth.getName(); // JWT subject = 이메일
 
-        return ModifyMemberRes.from(memberEntity);
+        MemberEntity member = memberRepository.findByMemberEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException(email));
+
+        // 1) 현재 비밀번호 검증
+        if (!passwordEncoder.matches(req.getCurrentPassword(), member.getMemberPw())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다.");
+        }
+
+        // 2) 새 비밀번호 확인
+        if (!req.getNewPassword().equals(req.getConfirmPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "새 비밀번호가 서로 일치하지 않습니다.");
+        }
+
+        // 3) 비밀번호 변경
+        member.setMemberPw(passwordEncoder.encode(req.getNewPassword()));
+        memberRepository.save(member);
     }
+
+
+
 
     @Override
     public DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq) {

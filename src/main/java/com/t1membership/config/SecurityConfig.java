@@ -113,7 +113,9 @@ public class SecurityConfig {
 
                 // === (2) 로그인한 USER 이상만 ===
                 // 마이페이지, 회원 정보 수정  → 로그인한 회원 (USER/ADMIN) 모두 가능
-                .requestMatchers("/member/my_page/**", "/member/modify","/member/profile").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/member/my_page/**", "/member/modify","/member/profile","/member/password")
+                .hasAnyRole("USER", "ADMIN")
+
 
                 // 회원 목록/단건 조회
                 .requestMatchers("/member/readAll").hasRole("ADMIN")              // 전체 목록은 관리자만
