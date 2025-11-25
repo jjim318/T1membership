@@ -27,13 +27,17 @@ export default function PasswordChangePage() {
                 confirmPassword: confirmPw,
             });
             alert("비밀번호가 변경되었습니다.");
-            router.push("/mypage/account");
+            router.push("/mypage");
         } catch (e: unknown) {
             console.error(e);
 
             if (typeof e === "object" && e !== null && "response" in e) {
-                const err = e as { response?: { data?: { message?: string } } };
-                alert(err.response?.data?.message ?? "비밀번호 변경에 실패했습니다.");
+                const err = e as { response?: { data?: { message?: string; resMessage?: string } } };
+                alert(
+                    err.response?.data?.message ??
+                    err.response?.data?.resMessage ??
+                    "비밀번호 변경에 실패했습니다."
+                );
             } else {
                 alert("비밀번호 변경 중 오류가 발생했습니다.");
             }
