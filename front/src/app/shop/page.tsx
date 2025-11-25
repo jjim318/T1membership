@@ -1,0 +1,278 @@
+// src/app/shop/page.tsx
+"use client";
+
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import { apiClient } from "@/lib/apiClient";
+
+// ====== 타입 정의 (백엔드 DTO에 맞춤) ======
+
+// 백엔드 ItemCategory enum
+type ItemCategory = "ALL" | "MD" | "MEMBERSHIP" | "POP";
+
+// 백엔드 ItemSellStatus enum (정확한 값 몰라서 string fallback 추가)
+type ItemSellStatus = "ON_SALE" | "SOLD_OUT" | string;
+
+// 백엔드 SearchAllItemRes 에 맞춘 타입
+interface ItemSummary {
+    itemNo: number;
+    itemName: string;
+    itemPrice: number;   // BigDecimal -> JSON으로 오면 number
+    itemStock: number;
+    itemCategory: ItemCategory;
+    itemSellStatus: ItemSellStatus;
+}
+
+// 백엔드 PageResponseDTO<E> 에 맞춘 타입
+interface PageResponse<T> {
+    page: number;
+    size: number;
+    total: number;
+    start: number;
+    end: number;
+    prev: boolean;
+    next: boolean;
+    dtoList: T[];
+}
+
+// 백엔드 ApiResult<T>
+interface ApiResult<T> {
+    data: T;
+    message?: string;
+}
+
+// ====== 프론트 전용 타입 (탭 카테고리) ======
+type ShopCategory = "상품" | "멤버십&이용권" | "T1 ZONE" | "[멤버십] POP" | "POP";
+
+const categories: ShopCategory[] = [
+    "상품",
+    "멤버십&이용권",
+    "T1 ZONE",
+    "[멤버십] POP",
+    "POP",
+];
+
+function formatPrice(price: number) {
+    return price.toLocaleString("ko-KR") + "원";
+}
+
+// 탭 -> 백엔드 ItemCategory 매핑
+function mapShopCategoryToItemCategory(cat: ShopCategory): ItemCategory | "ALL" | null {
+    switch (cat) {
+        case "상품":
+            return "MD";
+        case "멤버십&이용권":
+            return "MEMBERSHIP";
+        case "[멤버십] POP":
+        case "POP":
+            return "POP";
+        case "T1 ZONE":
+            // 아직 별도 카테고리 없으니까 일단 전체 or null
+            return null;
+        default:
+            return "ALL";
+    }
+}
+
+export default function ShopPage() {
+    const [activeCategory, setActiveCategory] = useState<ShopCategory>("상품");
+
+    const [items, setItems] = useState<ItemSummary[]>([]);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+    // TODO: 페이지네이션 쓰고 싶으면 page 상태도 추가
+    const page = 0;
+    const size = 12;
+
+    // 카테고리가 바뀔 때마다 백엔드에서 다시 조회
+    useEffect(() => {
+        const loadItems = async () => {
+            try {
+                // T1 ZONE 은 아직 데이터 없다고 가정 → 바로 빈 배열
+                const backendCategory = mapShopCategoryToItemCategory(activeCategory);
+
+                if (activeCategory === "T1 ZONE") {
+                    setItems([]);
+                    return;
+                }
+
+                setLoading(true);
+                setErrorMsg(null);
+
+                const res = await apiClient.get<ApiResult<PageResponse<ItemSummary>>>(
+                    "/item",
+                    {
+                        params: {
+                            page,
+                            size,
+                            sortBy: "itemNo",
+                            direction: "DESC",
+                            // null이면 쿼리에서 빼고 싶으면 조건 처리 가능
+                            itemCategory: backendCategory ?? "ALL",
+                        },
+                    }
+                );
+
+                const pageData = res.data.data;
+                setItems(pageData.dtoList);
+            } catch (error) {
+                console.error(error);
+                setErrorMsg("상품 목록을 불러오지 못했습니다.");
+                setItems([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadItems();
+    }, [activeCategory]);
+
+    return (
+        <div className="min-h-screen bg-black text-white">
+            <main className="mx-auto max-w-6xl px-6 pt-8 pb-20">
+                {/* 상단 배너 */}
+                <section className="mb-10">
+                    <div className="relative h-64 w-full overflow-hidden rounded-2xl bg-red-600">
+                        <Image
+                            src="/shop/banner-2025.png"
+                            alt="2025 T1 Membership"
+                            fill
+                            className="object-cover"
+                        />
+                    </div>
+                </section>
+
+                {/* 카테고리 탭 영역 (정렬 버튼 제거) */}
+                <section className="mb-6 border-b border-zinc-800 pb-2">
+                    <div className="flex gap-6 text-sm">
+                        {categories.map((cat) => {
+                            const isActive = cat === activeCategory;
+                            return (
+                                <button
+                                    key={cat}
+                                    onClick={() => setActiveCategory(cat)}
+                                    className={`pb-2 ${
+                                        isActive
+                                            ? "text-white font-semibold border-b-2 border-white"
+                                            : "text-gray-400 hover:text-white"
+                                    }`}
+                                >
+                                    {cat}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </section>
+
+                {/* 로딩/에러 상태 표시 */}
+                {loading && (
+                    <div className="py-10 text-center text-sm text-gray-400">
+                        상품을 불러오는 중입니다...
+                    </div>
+                )}
+                {errorMsg && !loading && (
+                    <div className="py-10 text-center text-sm text-red-400">
+                        {errorMsg}
+                    </div>
+                )}
+
+                {/* 상품 그리드 */}
+                {!loading && !errorMsg && (
+                    <>
+                        <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                            {items.length === 0 && (
+                                <div className="col-span-full py-20 text-center text-sm text-gray-400">
+                                    현재 표시할 상품이 없습니다.
+                                </div>
+                            )}
+
+                            {items.map((item) => (
+                                <article
+                                    key={item.itemNo}
+                                    className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
+                                >
+                                    {/* 썸네일
+                     ⚠️ 지금 SearchAllItemRes에는 이미지 정보가 없으니
+                     일단은 임시 이미지 사용.
+                     나중에 thumbnailUrl 필드 추가되면 여기 교체. */}
+                                    <div className="relative h-56 w-full bg-zinc-900">
+                                        <Image
+                                            src="/shop/placeholder.png" // public/shop/placeholder.png 준비
+                                            alt={item.itemName}
+                                            fill
+                                            className="object-cover transition-transform group-hover:scale-105"
+                                        />
+
+                                        {/* 좌상단 카테고리 뱃지 */}
+                                        <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                            {item.itemCategory === "MD" && "MD"}
+                                            {item.itemCategory === "MEMBERSHIP" && "MEMBERSHIP"}
+                                            {item.itemCategory === "POP" && "POP"}
+                                        </div>
+
+                                        {/* 우상단 태그 NEW / LIMITED
+                       → 백엔드에서 정보가 없으니 일단 생략 / 나중에 확장 */}
+                                        {/* {item.itemSellStatus === "SOLD_OUT" && ...} */}
+                                    </div>
+
+                                    {/* 텍스트 영역 */}
+                                    <div className="flex flex-1 flex-col px-4 py-3">
+                                        {/* 상단 작은 라벨 (예시: 멤버십 전용) */}
+                                        {item.itemCategory === "MEMBERSHIP" && (
+                                            <span className="mb-1 text-[11px] text-amber-300">
+                        멤버십 전용
+                      </span>
+                                        )}
+
+                                        <h2 className="line-clamp-2 text-sm font-semibold">
+                                            {item.itemName}
+                                        </h2>
+
+                                        <div className="mt-2 text-[15px] font-bold">
+                                            {formatPrice(item.itemPrice)}
+                                        </div>
+
+                                        {/* 하단 품절 태그 */}
+                                        <div className="mt-2 text-[11px] text-gray-400">
+                                            {item.itemSellStatus === "SOLD_OUT" && (
+                                                <span className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
+                          품절
+                        </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </article>
+                            ))}
+                        </section>
+
+                        {/* 더보기 버튼 (페이지네이션 연동은 나중에) */}
+                        <section className="mt-10 flex justify-center">
+                            <button className="rounded-full border border-zinc-600 px-10 py-3 text-sm font-medium text-white hover:border-white">
+                                더보기
+                            </button>
+                        </section>
+                    </>
+                )}
+            </main>
+
+            {/* 하단 푸터 */}
+            <footer className="border-t border-zinc-900 bg-black py-10 text-xs text-zinc-400">
+                <div className="mx-auto max-w-6xl px-6 space-y-1 leading-relaxed">
+                    <p>상호명: T1 Membership</p>
+                    <p>대표자: Yang JiMin</p>
+                    <p>주소: 경기도 화성시 어딘가</p>
+                    <p>이메일: t1membership@mbc.com</p>
+                    <p>© 2025 T1 Membership.</p>
+
+                    <div className="mt-4 flex flex-wrap gap-4 text-[11px] text-zinc-500">
+                        <button>이용약관</button>
+                        <button>개인정보처리방침</button>
+                        <button>청소년보호정책</button>
+                        <button>쿠키 정책</button>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    );
+}

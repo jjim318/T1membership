@@ -22,7 +22,7 @@ export default function Header() {
                     <Link href="/story">Story</Link>
                     <Link href="/content">Content</Link>
                     <Link href="/community">Community</Link>
-                    <Link href="/shop/kr">Shop</Link>
+                    <Link href="/shop">Shop</Link>
                     <Link href="/pop">POP</Link>
                 </nav>
             </div>
