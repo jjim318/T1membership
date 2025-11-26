@@ -6,15 +6,63 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
+import axios from "axios";
 
 interface MemberInfo {
     profileImageUrl?: string | null;
 }
 
+// =====================
+// JWT 유틸
+// =====================
+
+interface JwtPayload {
+    sub?: string;
+    roles?: string[];        // ["USER","ADMIN"] 형태
+    memberRole?: string;     // "ADMIN" 형태로 들어갈 수도 있음
+    [key: string]: unknown;
+}
+
+function parseJwt(token: string): JwtPayload | null {
+    try {
+        const parts = token.split(".");
+        if (parts.length !== 3) return null;
+
+        const base64Url = parts[1];
+        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const jsonPayload = decodeURIComponent(
+            atob(base64)
+                .split("")
+                .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+                .join("")
+        );
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        console.error("[Header] JWT 파싱 실패", e);
+        return null;
+    }
+}
+
+function isAdminToken(token: string | null): boolean {
+    if (!token) return false;
+    const payload = parseJwt(token);
+    if (!payload) return false;
+
+    const roles: string[] = payload.roles ?? [];
+    const singleRole = payload.memberRole ?? "";
+
+    return roles.includes("ADMIN") || singleRole === "ADMIN";
+}
+
+// =====================
+// Header 컴포넌트
+// =====================
+
 export default function Header() {
     const router = useRouter();
 
     const [isLogin, setIsLogin] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false); // 🔥 관리자 여부
     const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
     const [cartCount, setCartCount] = useState<number>(0);
     const [hasNotification, setHasNotification] = useState<boolean>(false);
@@ -22,16 +70,23 @@ export default function Header() {
     const checkLogin = () => {
         if (typeof window === "undefined") return;
         const token = localStorage.getItem("accessToken");
-        setIsLogin(!!token);
+        const loggedIn = !!token;
+
+        setIsLogin(loggedIn);
+        setIsAdmin(isAdminToken(token)); // 🔥 토큰에서 ADMIN 여부 계산
+    };
+
+    const resetLoginRelatedState = () => {
+        setProfileImageUrl(null);
+        setCartCount(0);
+        setHasNotification(false);
     };
 
     const loadLoginRelatedInfo = async () => {
         if (typeof window === "undefined") return;
         const token = localStorage.getItem("accessToken");
         if (!token) {
-            setProfileImageUrl(null);
-            setCartCount(0);
-            setHasNotification(false);
+            resetLoginRelatedState();
             return;
         }
 
@@ -46,6 +101,14 @@ export default function Header() {
             setCartCount(0);
             setHasNotification(false);
         } catch (e) {
+            if (axios.isAxiosError(e) && e.response?.status === 401) {
+                // 토큰 만료/무효 → 정리
+                localStorage.removeItem("accessToken");
+                setIsLogin(false);
+                setIsAdmin(false);
+                resetLoginRelatedState();
+                return;
+            }
             console.error("[Header] loadLoginRelatedInfo 실패", e);
         }
     };
@@ -53,14 +116,22 @@ export default function Header() {
     useEffect(() => {
         if (typeof window === "undefined") return;
 
-        checkLogin();
-        loadLoginRelatedInfo();
-
         const sync = () => {
             checkLogin();
-            loadLoginRelatedInfo();
+
+            const token = localStorage.getItem("accessToken");
+            if (!token) {
+                resetLoginRelatedState();
+                return;
+            }
+
+            void loadLoginRelatedInfo();
         };
 
+        // 처음 마운트 시 한 번
+        sync();
+
+        // 로그인/로그아웃 이벤트, storage 변경 시 동기화
         window.addEventListener("loginStateChange", sync);
         window.addEventListener("storage", sync);
 
@@ -117,8 +188,18 @@ export default function Header() {
                 </nav>
             </div>
 
-            {/* 오른쪽: 아이콘 네 개 (항상 렌더, 상태에 따라 뱃지만 변경) */}
+            {/* 오른쪽: 아이콘들 */}
             <div className="flex items-center gap-5 text-white">
+                {/* 🔥 관리자 전용 버튼 (선택 사항) */}
+                {isLogin && isAdmin && (
+                    <button
+                        onClick={() => router.push("/admin")}
+                        className="hidden md:inline-flex text-xs px-3 py-1 rounded-full border border-red-500 hover:bg-red-500/10"
+                    >
+                        ADMIN
+                    </button>
+                )}
+
                 {/* 알림 */}
                 <button
                     onClick={() => handleProtectedClick("/notifications")}
@@ -165,9 +246,20 @@ export default function Header() {
 
                 {/* 프로필 / 로그인 아이콘 */}
                 <button
-                    onClick={() =>
-                        isLogin ? router.push("/mypage") : router.push("/login")
-                    }
+                    onClick={() => {
+                        if (!isLogin) {
+                            router.push("/login");
+                            return;
+                        }
+
+                        // 🔥 로그인 + 관리자이면 바로 /admin 으로
+                        if (isAdmin) {
+                            router.push("/admin");
+                        } else {
+                            // 일반 회원은 마이페이지 홈으로
+                            router.push("/mypage/home");
+                        }
+                    }}
                     className="flex items-center"
                 >
                     {isLogin && profileImageUrl ? (

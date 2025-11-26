@@ -13,13 +13,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     <h1 className="text-xl font-bold mb-6">T1 Admin</h1>
                     <nav className="space-y-2 text-sm">
                         <a href="/admin" className="block hover:text-red-400">대시보드</a>
-                        <a href="/admin/members" className="block hover:text-red-400">회원 관리</a>
+                        <a href="/admin/member" className="block hover:text-red-400">회원 관리</a>
                         <a href="/admin/orders" className="block hover:text-red-400">주문 관리</a>
                         <a href="/admin/items" className="block hover:text-red-400">상품 관리</a>
                     </nav>
                 </aside>
 
-                {/* 본문 */}
+                {/* 본문 영역 */}
                 <main className="flex-1 p-4 md:p-8">
                     {children}
                 </main>
