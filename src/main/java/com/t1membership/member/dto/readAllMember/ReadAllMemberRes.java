@@ -1,5 +1,6 @@
 package com.t1membership.member.dto.readAllMember;
 
+import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import lombok.*;
 
@@ -18,6 +19,7 @@ public class ReadAllMemberRes {
     private String memberNickName;
     private String memberPhone;
     private String memberGender;
+    private MemberRole memberRole;
 
     private static List<ReadAllMemberRes> memberList;
 
@@ -27,6 +29,7 @@ public class ReadAllMemberRes {
                 .memberNickName(member.getMemberNickName())
                 .memberName(member.getMemberName())
                 .memberPhone(member.getMemberPhone())
+                .memberRole(member.getMemberRole())
                 .build();
     }
 

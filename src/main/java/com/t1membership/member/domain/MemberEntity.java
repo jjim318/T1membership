@@ -39,8 +39,6 @@ public class MemberEntity extends BaseEntity {
     private String memberGender;
     @Column(name = "member_image")
     private String memberImage;
-    @Column(name = "member_address", nullable = false)
-    private String memberAddress;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "member_role", nullable = false)
@@ -48,7 +46,6 @@ public class MemberEntity extends BaseEntity {
 
     @OneToMany(mappedBy = "member",  cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderEntity> order = new ArrayList<>();
-
 
     @Builder.Default
     @OneToMany(mappedBy = "member", cascade = CascadeType.ALL, orphanRemoval = true)
