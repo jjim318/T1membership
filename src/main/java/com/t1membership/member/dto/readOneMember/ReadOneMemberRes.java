@@ -1,5 +1,6 @@
 package com.t1membership.member.dto.readOneMember;
 
+import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
 import com.t1membership.member.dto.readAllMember.ReadAllMemberRes;
@@ -19,6 +20,10 @@ public class ReadOneMemberRes {
     private String memberEmail;
     private String memberPhone;
     private String memberImage;
+    private String memberGender;
+    private String memberBirthY;
+
+    private MemberRole memberRole;
 
     public static ReadOneMemberRes from(MemberEntity memberEntity) {
         if (memberEntity == null) {
@@ -31,6 +36,9 @@ public class ReadOneMemberRes {
                 .memberNickName(memberEntity.getMemberNickName())
                 .memberPhone(memberEntity.getMemberPhone())
                 .memberImage(memberEntity.getMemberImage()) // 🔥 이미지 URL
+                .memberRole(memberEntity.getMemberRole())
+                .memberGender(memberEntity.getMemberGender())
+                .memberBirthY(memberEntity.getMemberBirthY())
                 .build();
     }
 

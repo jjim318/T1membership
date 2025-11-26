@@ -23,6 +23,8 @@ public class MemberEntity extends BaseEntity {
     @Column(name = "member_email", nullable = false)
     private String memberEmail;
 
+
+
     @Column(name = "member_pw", nullable = false)
     private String memberPw;
     @Column(name = "member_name", nullable = false)
