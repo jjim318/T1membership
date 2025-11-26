@@ -23,7 +23,7 @@ public class ExistingImageDTO {
 
         return ExistingImageDTO.builder()
                 // ★ 이 부분은 ImageEntity 필드명에 맞게 조정해야 함
-                .fileName(image.getFileName())  // or getImageOriginalName(), getImageUrl()
+                .fileName(image.getUrl())  // or getImageOriginalName(), getImageUrl()
                 .sortOrder(image.getSortOrder())    // image_order 칼럼
                 .build();
     }
