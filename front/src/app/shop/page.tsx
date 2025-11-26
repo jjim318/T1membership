@@ -4,6 +4,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/apiClient";
+import Link from "next/link";
 
 // ====== 타입 정의 (백엔드 DTO에 맞춤) ======
 
@@ -195,14 +196,12 @@ export default function ShopPage() {
                             )}
 
                             {items.map((item) => (
-                                <article
+                                <Link
                                     key={item.itemNo}
+                                    href={`/shop/${item.itemNo}`}   // ★ 상세 페이지로 이동
                                     className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
                                 >
-                                    {/* 썸네일
-                     ⚠️ 지금 SearchAllItemRes에는 이미지 정보가 없으니
-                     일단은 임시 이미지 사용.
-                     나중에 thumbnailUrl 필드 추가되면 여기 교체. */}
+                                    {/* 썸네일*/}
                                     <div className="relative h-56 w-full bg-zinc-900">
                                         <Image
                                             src={item.thumbnailUrl || "/shop/placeholder.png"} // ★ 백에서 온 썸네일 우선 사용
@@ -250,7 +249,7 @@ export default function ShopPage() {
                                             )}
                                         </div>
                                     </div>
-                                </article>
+                                </Link>
                             ))}
                         </section>
 
