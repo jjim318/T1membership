@@ -7,9 +7,10 @@ import Image from "next/image";
 import axios from "axios";
 import Header from "@/components/layout/Header";
 import { apiClient } from "@/lib/apiClient";
+import {logout} from "@/lib/authClient";
 
 interface MemberSummary {
-    memberName: string;
+    memberNickName: string;
     memberEmail: string;
     profileImageUrl?: string | null;
 }
@@ -18,6 +19,9 @@ export default function MyPageHome() {
     const router = useRouter();
     const [member, setMember] = useState<MemberSummary | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // 🔥 로그아웃 모달 on/off
+    const [showLogoutModal, setShowLogoutModal] = useState(false);
 
     useEffect(() => {
         const run = async () => {
@@ -38,7 +42,7 @@ export default function MyPageHome() {
                 const result = raw?.result ?? raw?.data ?? raw;
 
                 const summary: MemberSummary = {
-                    memberName: result.memberName ?? "닉네임 없음",
+                    memberNickName: result.memberNickName ?? "닉네임 없음",
                     memberEmail: result.memberEmail ?? "",
                     profileImageUrl: result.profileImageUrl ?? null,
                 };
@@ -48,6 +52,9 @@ export default function MyPageHome() {
                 if (axios.isAxiosError(e) && e.response?.status === 401) {
                     if (typeof window !== "undefined") {
                         localStorage.removeItem("accessToken");
+                        localStorage.removeItem("refreshToken");
+                        localStorage.removeItem("memberEmail");
+                        window.dispatchEvent(new Event("loginStateChange"));
                     }
                     alert("로그인이 만료되었습니다. 다시 로그인해주세요.");
                     router.replace("/login");
@@ -75,6 +82,18 @@ export default function MyPageHome() {
         </button>
     );
 
+    // 🔥 모달에서 "로그아웃" 버튼 눌렀을 때 실제 로그아웃 처리
+    const handleConfirmLogout = () => {
+        if (typeof window !== "undefined") {
+            localStorage.removeItem("accessToken");
+            localStorage.removeItem("refreshToken");
+            localStorage.removeItem("memberEmail");
+            window.dispatchEvent(new Event("loginStateChange"));
+        }
+        setShowLogoutModal(false);
+        router.replace("/login");
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -96,7 +115,7 @@ export default function MyPageHome() {
             <Header />
 
             <main className="pt-16 pb-12 max-w-3xl mx-auto px-4">
-                {/* 🔥 1·2번째 스샷: 상단 프로필 카드 */}
+                {/* 상단 프로필 카드 */}
                 <section
                     className="bg-zinc-900 rounded-2xl p-4 md:p-6 flex items-center gap-4 cursor-pointer hover:bg-zinc-800 transition"
                     onClick={go("/mypage")} // 프로필 눌렀을 때 내 정보 관리로
@@ -112,14 +131,14 @@ export default function MyPageHome() {
                             />
                         ) : (
                             <span className="text-xl font-bold">
-                                {member.memberName?.[0] ?? "T"}
+                                {member.memberNickName?.[0] ?? "T"}
                             </span>
                         )}
                     </div>
 
                     <div className="flex-1">
                         <div className="text-base font-semibold">
-                            {member.memberName}
+                            {member.memberNickName}
                         </div>
                         <div className="text-xs text-zinc-400 mt-1">
                             {member.memberEmail}
@@ -139,7 +158,7 @@ export default function MyPageHome() {
                     </div>
                 </section>
 
-                {/* 공식 사이트처럼 아래 메뉴들 */}
+                {/* 아래 메뉴 리스트 */}
                 <section className="mt-8 bg-zinc-900 rounded-2xl p-2 text-sm">
                     {menuItem("멤버십 가입하기")}
                     {menuItem("주문 내역", go("/orders"))}
@@ -153,14 +172,39 @@ export default function MyPageHome() {
                     {menuItem("고객센터")}
                     {menuItem("이벤트")}
                     {menuItem("공지사항")}
-                    {menuItem("로그아웃", () => {
-                        if (typeof window !== "undefined") {
-                            localStorage.removeItem("accessToken");
-                        }
-                        router.replace("/login");
-                    })}
+                    {menuItem("로그아웃", () => setShowLogoutModal(true))}
                 </section>
             </main>
+
+            {/* 🔥 로그아웃 확인 모달 */}
+            {showLogoutModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                    <div className="w-full max-w-sm rounded-2xl bg-zinc-900 px-6 py-5 shadow-xl">
+                        <p className="text-center text-sm font-semibold mb-6">
+                            로그아웃 할까요?
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowLogoutModal(false)}
+                                className="flex-1 py-2 rounded-lg bg-zinc-700 text-sm"
+                            >
+                                취소
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    logout();       // ← 반드시 이 함수를 호출해야 서버 로그아웃 처리됨
+                                    setShowLogoutModal(false);
+                                }}
+                                className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-semibold"
+                            >
+                                로그아웃
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

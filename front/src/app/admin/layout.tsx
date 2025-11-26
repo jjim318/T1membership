@@ -9,7 +9,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <AdminGuard>
             <div className="min-h-screen flex bg-zinc-950 text-white">
                 {/* 사이드바 */}
-                <aside className="w-64 border-r border-zinc-800 p-4 hidden md:block">
+                <aside className="w-45 border-r border-zinc-800 p-4 hidden md:block">
                     <h1 className="text-xl font-bold mb-6">T1 Admin</h1>
                     <nav className="space-y-2 text-sm">
                         <a href="/admin" className="block hover:text-red-400">대시보드</a>

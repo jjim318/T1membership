@@ -150,136 +150,149 @@ export default function Header() {
     };
 
     return (
-        <header className="fixed top-0 left-0 z-50 w-full h-14 flex items-center justify-between px-6 bg-black/90 text-white backdrop-blur-sm border-b border-zinc-800">
-            {/* 왼쪽: 로고 + 메뉴 */}
-            <div className="flex items-center gap-6">
-                <Link href="/public" className="flex items-center gap-2">
-                    <Image
-                        src="/icons/t1.png"
-                        alt="T1 Logo"
-                        width={32}
-                        height={32}
-                        className="cursor-pointer"
-                    />
-                    <span className="text-sm font-semibold tracking-[0.2em] text-red-400">
-                        T1 MEMBERSHIP
-                    </span>
-                </Link>
-
-                <nav className="hidden md:flex items-center gap-5 text-sm text-zinc-300">
-                    <Link href="/public" className="hover:text-white">
-                        HOME
-                    </Link>
-                    <Link href="/story" className="hover:text-white">
-                        STORY
-                    </Link>
-                    <Link href="/content" className="hover:text-white">
-                        CONTENT
-                    </Link>
-                    <Link href="/community" className="hover:text-white">
-                        COMMUNITY
-                    </Link>
-                    <Link href="/shop" className="hover:text-white">
-                        SHOP
-                    </Link>
-                    <Link href="/pop" className="hover:text-red-400">
-                        POP
-                    </Link>
-                </nav>
-            </div>
-
-            {/* 오른쪽: 아이콘들 */}
-            <div className="flex items-center gap-5 text-white">
-                {/* 🔥 관리자 전용 버튼 (선택 사항) */}
-                {isLogin && isAdmin && (
-                    <button
-                        onClick={() => router.push("/admin")}
-                        className="hidden md:inline-flex text-xs px-3 py-1 rounded-full border border-red-500 hover:bg-red-500/10"
-                    >
-                        ADMIN
-                    </button>
-                )}
-
-                {/* 알림 */}
-                <button
-                    onClick={() => handleProtectedClick("/notifications")}
-                    className="relative"
-                >
-                    <Image
-                        src="/icons/bell.png"
-                        alt="알림"
-                        width={22}
-                        height={22}
-                    />
-                    {isLogin && hasNotification && (
-                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
-                    )}
-                </button>
-
-                {/* 캘린더 */}
-                <button onClick={() => handleProtectedClick("/schedule")}>
-                    <Image
-                        src="/icons/calendar.png"
-                        alt="캘린더"
-                        width={22}
-                        height={22}
-                    />
-                </button>
-
-                {/* 장바구니 */}
-                <button
-                    onClick={() => handleProtectedClick("/cart")}
-                    className="relative"
-                >
-                    <Image
-                        src="/icons/cart.png"
-                        alt="장바구니"
-                        width={24}
-                        height={24}
-                    />
-                    {isLogin && cartCount > 0 && (
-                        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-[4px] rounded-full bg-red-500 text-[11px] font-semibold flex items-center justify-center">
-                            {cartCount}
-                        </span>
-                    )}
-                </button>
-
-                {/* 프로필 / 로그인 아이콘 */}
-                <button
-                    onClick={() => {
-                        if (!isLogin) {
-                            router.push("/login");
-                            return;
-                        }
-
-                        // 🔥 로그인 + 관리자이면 바로 /admin 으로
-                        if (isAdmin) {
-                            router.push("/admin");
-                        } else {
-                            // 일반 회원은 마이페이지 홈으로
-                            router.push("/mypage/home");
-                        }
-                    }}
-                    className="flex items-center"
-                >
-                    {isLogin && profileImageUrl ? (
+        <header
+            className="
+                fixed top-0 left-0 right-0 z-50
+                bg-black/90 text-white backdrop-blur-sm
+                border-b border-zinc-800
+            "
+        >
+            {/* 안쪽 컨테이너: 폭 제한 + 좌우 여백 */}
+            <div className="mx-auto max-w-6xl px-3 md:px-6 h-14 flex items-center justify-between gap-3">
+                {/* 왼쪽: 로고 + (넓은 화면에서만) 메뉴 */}
+                <div className="flex items-center gap-4 min-w-0">
+                    <Link href="/public" className="flex items-center gap-2 shrink-0">
                         <Image
-                            src={profileImageUrl}
-                            alt="프로필"
-                            width={28}
-                            height={28}
-                            className="rounded-full border border-red-400"
+                            src="/icons/t1.png"
+                            alt="T1 Logo"
+                            width={32}
+                            height={32}
+                            className="cursor-pointer"
                         />
-                    ) : (
+                        <span className="text-xs md:text-sm font-semibold tracking-[0.2em] text-red-400">
+                            T1 MEMBERSHIP
+                        </span>
+                    </Link>
+
+                    {/* 📌 메뉴는 화면이 넓을 때만 (lg 이상) 노출 + flex-wrap */}
+                    <nav className="
+                        hidden lg:flex
+                        flex-wrap items-center
+                        gap-x-4 gap-y-1
+                        text-[11px] xl:text-sm text-zinc-300
+                    ">
+                        <Link href="/public" className="hover:text-white">
+                            HOME
+                        </Link>
+                        <Link href="/story" className="hover:text-white">
+                            STORY
+                        </Link>
+                        <Link href="/content" className="hover:text-white">
+                            CONTENT
+                        </Link>
+                        <Link href="/community" className="hover:text-white">
+                            COMMUNITY
+                        </Link>
+                        <Link href="/shop" className="hover:text-white">
+                            SHOP
+                        </Link>
+                        <Link href="/pop" className="hover:text-red-400">
+                            POP
+                        </Link>
+
+                        {/* 🔥 관리자일 때는 메뉴 옆에 ADMIN 뱃지 */}
+                        {isLogin && isAdmin && (
+                            <button
+                                onClick={() => router.push("/admin")}
+                                className="ml-2 px-3 py-1 rounded-full border border-red-500 text-[10px] xl:text-xs hover:bg-red-500/10"
+                            >
+                                ADMIN
+                            </button>
+                        )}
+                    </nav>
+                </div>
+
+                {/* 오른쪽: 아이콘들 (폭 줄어들면 간격도 조금 줄이기) */}
+                <div className="flex items-center gap-3 md:gap-5 text-white shrink-0">
+                    {/* 🔔 알림 */}
+                    <button
+                        onClick={() => handleProtectedClick("/notifications")}
+                        className="relative"
+                    >
                         <Image
-                            src="/icons/user.PNG"
-                            alt="프로필"
+                            src="/icons/bell.png"
+                            alt="알림"
+                            width={22}
+                            height={22}
+                        />
+                        {isLogin && hasNotification && (
+                            <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500" />
+                        )}
+                    </button>
+
+                    {/* 📅 캘린더 */}
+                    <button onClick={() => handleProtectedClick("/schedule")}>
+                        <Image
+                            src="/icons/calendar.png"
+                            alt="캘린더"
+                            width={22}
+                            height={22}
+                        />
+                    </button>
+
+                    {/* 🛒 장바구니 */}
+                    <button
+                        onClick={() => handleProtectedClick("/cart")}
+                        className="relative"
+                    >
+                        <Image
+                            src="/icons/cart.png"
+                            alt="장바구니"
                             width={24}
                             height={24}
-                            className="opacity-90"
                         />
-                    )}
-                </button>
+                        {isLogin && cartCount > 0 && (
+                            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-[4px] rounded-full bg-red-500 text-[11px] font-semibold flex items-center justify-center">
+                                {cartCount}
+                            </span>
+                        )}
+                    </button>
+
+                    {/* 🙍 프로필 / 로그인 아이콘 */}
+                    <button
+                        onClick={() => {
+                            if (!isLogin) {
+                                router.push("/login");
+                                return;
+                            }
+
+                            if (isAdmin) {
+                                router.push("/admin");
+                            } else {
+                                router.push("/mypage/home");
+                            }
+                        }}
+                        className="flex items-center"
+                    >
+                        {isLogin && profileImageUrl ? (
+                            <Image
+                                src={profileImageUrl}
+                                alt="프로필"
+                                width={28}
+                                height={28}
+                                className="rounded-full border border-red-400"
+                            />
+                        ) : (
+                            <Image
+                                src="/icons/user.PNG"
+                                alt="프로필"
+                                width={24}
+                                height={24}
+                                className="opacity-90"
+                            />
+                        )}
+                    </button>
+                </div>
             </div>
         </header>
     );
