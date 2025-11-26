@@ -178,123 +178,128 @@ export default function AdminMembersPage() {
 
     return (
         // 🔥 admin 레이아웃(main) 안에서 가운데 정렬 + 최대 너비 제한
-        <div className="w-full max-w-5xl mx-auto space-y-6">
-            {/* 타이틀 */}
-            <div className="flex items-center justify-between gap-4">
-                <div>
-                    <h2 className="text-2xl font-bold">회원 관리</h2>
-                    <p className="text-sm text-zinc-400 mt-1">
-                        전체 회원 {members.length.toLocaleString()}명
-                    </p>
-                </div>
-                <button
-                    onClick={fetchMembers}
-                    className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs md:text-sm"
-                    disabled={loading}
-                >
-                    새로고침
-                </button>
-            </div>
+        <div className="pt-16">   {/* 또는 pt-14 써도 됨, 취향 차이 */}
 
-            {/* 검색/필터 */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-3 md:p-4">
-                <div className="flex-1 flex gap-2">
-                    <input
-                        type="text"
-                        className="flex-1 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-sm focus:outline-none focus:border-red-500"
-                        placeholder="이메일 / 닉네임 / 이름으로 검색"
-                        value={keyword}
-                        onChange={(e) => setKeyword(e.target.value)}
-                    />
-                </div>
-
-                <div className="flex items-center gap-2">
-                    <select
-                        className="px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-sm focus:outline-none"
-                        value={roleFilter}
-                        onChange={(e) =>
-                            setRoleFilter(
-                                e.target.value as
-                                    | "ALL"
-                                    | "USER"
-                                    | "ADMIN"
-                                    | "BLACKLIST",
-                            )
-                        }
-                    >
-                        <option value="ALL">전체 역할</option>
-                        <option value="USER">일반회원</option>
-                        <option value="ADMIN">관리자</option>
-                        <option value="BLACKLIST">블랙리스트</option>
-                    </select>
+            {/* admin 레이아웃(main) 안에서 가운데 정렬 + 최대 너비 제한 */}
+            <div className="w-full max-w-5xl mx-auto space-y-6">
+                {/* 타이틀 */}
+                <div className="flex flex-wrap items-center gap-3 md:gap-6">
+                    <div className="flex-1 min-w-[220px]">
+                        <h2 className="text-lg md:text-2xl font-bold">회원 관리</h2>
+                        <p className="text-xs md:text-sm text-zinc-400 mt-1">
+                            전체 회원 {members.length.toLocaleString()}명
+                        </p>
+                    </div>
 
                     <button
-                        onClick={handleResetFilter}
-                        className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs md:text-sm"
+                        onClick={fetchMembers}
+                        className="ml-auto px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs md:text-sm"
+                        disabled={loading}
                     >
-                        초기화
+                        새로고침
                     </button>
                 </div>
-            </div>
 
-            {/* 에러 메시지 */}
-            {errorMsg && (
-                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/40 rounded-lg px-3 py-2">
-                    {errorMsg}
+                {/* 검색/필터 */}
+                <div
+                    className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-3 md:p-4">
+                    <div className="flex-1 flex gap-2">
+                        <input
+                            type="text"
+                            className="flex-1 px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-sm focus:outline-none focus:border-red-500"
+                            placeholder="이메일 / 닉네임 / 이름으로 검색"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <select
+                            className="px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-700 text-sm focus:outline-none"
+                            value={roleFilter}
+                            onChange={(e) =>
+                                setRoleFilter(
+                                    e.target.value as
+                                        | "ALL"
+                                        | "USER"
+                                        | "ADMIN"
+                                        | "BLACKLIST",
+                                )
+                            }
+                        >
+                            <option value="ALL">전체 역할</option>
+                            <option value="USER">일반회원</option>
+                            <option value="ADMIN">관리자</option>
+                            <option value="BLACKLIST">블랙리스트</option>
+                        </select>
+
+                        <button
+                            onClick={handleResetFilter}
+                            className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs md:text-sm"
+                        >
+                            초기화
+                        </button>
+                    </div>
                 </div>
-            )}
 
-            {/* 목록 테이블 */}
-            <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                        <thead className="bg-zinc-900 border-b border-zinc-800">
-                        <tr className="text-left text-zinc-400">
-                            <th className="px-4 py-3">이메일</th>
-                            <th className="px-4 py-3">이름</th>
-                            <th className="px-4 py-3">닉네임</th>
-                            <th className="px-4 py-3">역할</th>
-                            <th className="px-4 py-3">가입일</th>
-                            <th className="px-4 py-3">최근 로그인</th>
-                            <th className="px-4 py-3 text-right">관리</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {loading && members.length === 0 && (
-                            <tr>
-                                <td
-                                    colSpan={7}
-                                    className="px-4 py-6 text-center text-zinc-400"
-                                >
-                                    회원 목록을 불러오는 중입니다...
-                                </td>
+                {/* 에러 메시지 */}
+                {errorMsg && (
+                    <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/40 rounded-lg px-3 py-2">
+                        {errorMsg}
+                    </div>
+                )}
+
+                {/* 목록 테이블 */}
+                <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                            <thead className="bg-zinc-900 border-b border-zinc-800">
+                            <tr className="text-left text-zinc-400">
+                                <th className="px-4 py-3">이메일</th>
+                                <th className="px-4 py-3">이름</th>
+                                <th className="px-4 py-3">닉네임</th>
+                                <th className="px-4 py-3">역할</th>
+                                <th className="px-4 py-3">가입일</th>
+                                <th className="px-4 py-3">최근 로그인</th>
+                                <th className="px-4 py-3 text-right">관리</th>
                             </tr>
-                        )}
+                            </thead>
+                            <tbody>
+                            {loading && members.length === 0 && (
+                                <tr>
+                                    <td
+                                        colSpan={7}
+                                        className="px-4 py-6 text-center text-zinc-400"
+                                    >
+                                        회원 목록을 불러오는 중입니다...
+                                    </td>
+                                </tr>
+                            )}
 
-                        {!loading && filteredMembers.length === 0 && (
-                            <tr>
-                                <td
-                                    colSpan={7}
-                                    className="px-4 py-6 text-center text-zinc-400"
+                            {!loading && filteredMembers.length === 0 && (
+                                <tr>
+                                    <td
+                                        colSpan={7}
+                                        className="px-4 py-6 text-center text-zinc-400"
+                                    >
+                                        조회된 회원이 없습니다.
+                                    </td>
+                                </tr>
+                            )}
+
+                            {filteredMembers.map((m) => (
+                                <tr
+                                    key={m.memberEmail}
+                                    className="border-t border-zinc-800 hover:bg-zinc-900/60"
                                 >
-                                    조회된 회원이 없습니다.
-                                </td>
-                            </tr>
-                        )}
-
-                        {filteredMembers.map((m) => (
-                            <tr
-                                key={m.memberEmail}
-                                className="border-t border-zinc-800 hover:bg-zinc-900/60"
-                            >
-                                <td className="px-4 py-3 font-mono text-xs md:text-sm">
-                                    {m.memberEmail}
-                                </td>
-                                <td className="px-4 py-3">{m.memberName || "-"}</td>
-                                <td className="px-4 py-3">
-                                    {m.memberNickName || "-"}
-                                </td>
-                                <td className="px-4 py-3">
+                                    <td className="px-4 py-3 font-mono text-xs md:text-sm">
+                                        {m.memberEmail}
+                                    </td>
+                                    <td className="px-4 py-3">{m.memberName || "-"}</td>
+                                    <td className="px-4 py-3">
+                                        {m.memberNickName || "-"}
+                                    </td>
+                                    <td className="px-4 py-3">
                                         <span
                                             className={
                                                 "inline-flex items-center px-2 py-1 rounded-full text-xs " +
@@ -303,85 +308,87 @@ export default function AdminMembersPage() {
                                         >
                                             {getRoleLabel(m.memberRole)}
                                         </span>
-                                </td>
-                                <td className="px-4 py-3 text-zinc-400">
-                                    {formatDate(m.createdAt)}
-                                </td>
-                                <td className="px-4 py-3 text-zinc-400">
-                                    {formatDate(m.lastLoginAt)}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                    <button
-                                        className="px-3 py-1 rounded-full border border-zinc-600 hover:border-red-500 hover:text-red-400 text-xs"
-                                        onClick={() =>
-                                            openDetail(m.memberEmail)
-                                        }
-                                    >
-                                        상세 보기
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* 상세 모달 */}
-            {detailOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                    <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-5 shadow-xl">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold">회원 상세 정보</h3>
-                            <button
-                                onClick={() => setDetailOpen(false)}
-                                className="text-zinc-400 hover:text-white text-sm"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        {detailLoading && (
-                            <div className="text-sm text-zinc-400">
-                                상세 정보를 불러오는 중입니다...
-                            </div>
-                        )}
-
-                        {!detailLoading && !detailMember && (
-                            <div className="text-sm text-zinc-400">
-                                상세 정보를 불러오지 못했습니다.
-                            </div>
-                        )}
-
-                        {!detailLoading && detailMember && (
-                            <div className="space-y-2 text-sm">
-                                <Row label="이메일" value={detailMember.memberEmail} />
-                                <Row label="이름" value={detailMember.memberName} />
-                                <Row label="닉네임" value={detailMember.memberNickName} />
-                                <Row label="연락처" value={detailMember.memberPhone} />
-                                <Row label="성별" value={detailMember.memberGender} />
-                                <Row label="출생 연도" value={detailMember.memberBirthY} />
-                                <Row
-                                    label="역할"
-                                    value={getRoleLabel(detailMember.memberRole)}
-                                />
-                            </div>
-                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-zinc-400">
+                                        {formatDate(m.createdAt)}
+                                    </td>
+                                    <td className="px-4 py-3 text-zinc-400">
+                                        {formatDate(m.lastLoginAt)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button
+                                            className="px-3 py-1 rounded-full border border-zinc-600 hover:border-red-500 hover:text-red-400 text-xs"
+                                            onClick={() =>
+                                                openDetail(m.memberEmail)
+                                            }
+                                        >
+                                            상세 보기
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            )}
-        </div>
-    );
-}
-
-// 상세 행
-function Row({ label, value }: { label: string; value?: string | null }) {
-    return (
-        <div className="flex justify-between gap-4">
-            <div className="text-zinc-400">{label}</div>
-            <div className="text-zinc-100 text-right break-all">
-                {value && value.trim() !== "" ? value : "-"}
             </div>
-        </div>
-    );
+
+                {/* 상세 모달 */}
+                {detailOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                        <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-2xl p-5 shadow-xl">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold">회원 상세 정보</h3>
+                                <button
+                                    onClick={() => setDetailOpen(false)}
+                                    className="text-zinc-400 hover:text-white text-sm"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {detailLoading && (
+                                <div className="text-sm text-zinc-400">
+                                    상세 정보를 불러오는 중입니다...
+                                </div>
+                            )}
+
+                            {!detailLoading && !detailMember && (
+                                <div className="text-sm text-zinc-400">
+                                    상세 정보를 불러오지 못했습니다.
+                                </div>
+                            )}
+
+                            {!detailLoading && detailMember && (
+                                <div className="space-y-2 text-sm">
+                                    <Row label="이메일" value={detailMember.memberEmail}/>
+                                    <Row label="이름" value={detailMember.memberName}/>
+                                    <Row label="닉네임" value={detailMember.memberNickName}/>
+                                    <Row label="연락처" value={detailMember.memberPhone}/>
+                                    <Row label="성별" value={detailMember.memberGender}/>
+                                    <Row label="출생 연도" value={detailMember.memberBirthY}/>
+                                    <Row
+                                        label="역할"
+                                        value={getRoleLabel(detailMember.memberRole)}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+            );
+            }
+
+            // 상세 행
+            function Row({label, value}: {label: string; value?: string | null}) {
+                return (
+                <div className="flex justify-between gap-4">
+                <div className="text-zinc-400">{label}</div>
+    <div className="text-zinc-100 text-right break-all">
+        {value && value.trim() !== "" ? value : "-"}
+    </div>
+</div>
+)
+    ;
 }

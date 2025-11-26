@@ -13,7 +13,6 @@ interface JoinForm {
     memberName: string;
     memberBirthY: string;
     memberPhone: string;
-    memberAddress: string;
     memberGender: string; // 🔥 성별 추가 (MALE / FEMALE)
 }
 
@@ -30,7 +29,6 @@ export default function JoinPage() {
         memberName: "",
         memberBirthY: "",
         memberPhone: "",
-        memberAddress: "",
         memberGender: "", // 초기값: 선택 안 됨
     });
 
@@ -298,17 +296,6 @@ export default function JoinPage() {
                                 style={{ ...inputStyle, flex: 1 }}
                             />
                         </div>
-                    </Field>
-
-                    {/* 주소 (선택) */}
-                    <Field label="주소(선택)">
-                        <input
-                            name="memberAddress"
-                            value={form.memberAddress}
-                            onChange={handleChange}
-                            placeholder="주소를 입력해주세요"
-                            style={inputStyle}
-                        />
                     </Field>
 
                     {/* 약관 동의 */}
