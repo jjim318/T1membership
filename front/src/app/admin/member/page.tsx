@@ -81,7 +81,8 @@ export default function AdminMembersPage() {
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const [keyword, setKeyword] = useState("");
-    const [roleFilter, setRoleFilter] = useState<"ALL" | "USER" | "ADMIN" | "BLACKLIST">("ALL");
+    const [roleFilter, setRoleFilter] =
+        useState<"ALL" | "USER" | "ADMIN" | "BLACKLIST">("ALL");
 
     const [detailOpen, setDetailOpen] = useState(false);
     const [detailLoading, setDetailLoading] = useState(false);
@@ -93,7 +94,9 @@ export default function AdminMembersPage() {
         setErrorMsg(null);
 
         try {
-            const res = await apiClient.get<ApiResult<ReadAllMemberRes[]>>("/member/readAll");
+            const res = await apiClient.get<ApiResult<ReadAllMemberRes[]>>(
+                "/member/readAll",
+            );
             const body = res.data;
             const list = body.result ?? [];
             setMembers(list);
@@ -128,7 +131,9 @@ export default function AdminMembersPage() {
             if (roleFilter !== "ALL") {
                 const r = m.memberRole ?? "";
                 if (roleFilter === "USER") {
-                    if (r === "ADMIN" || r === "ROLE_ADMIN" || r === "BLACKLIST") return false;
+                    if (r === "ADMIN" || r === "ROLE_ADMIN" || r === "BLACKLIST") {
+                        return false;
+                    }
                 } else if (roleFilter === "ADMIN") {
                     if (!(r === "ADMIN" || r === "ROLE_ADMIN")) return false;
                 } else if (roleFilter === "BLACKLIST") {
@@ -172,7 +177,8 @@ export default function AdminMembersPage() {
     };
 
     return (
-        <div className="space-y-6">
+        // 🔥 admin 레이아웃(main) 안에서 가운데 정렬 + 최대 너비 제한
+        <div className="w-full max-w-5xl mx-auto space-y-6">
             {/* 타이틀 */}
             <div className="flex items-center justify-between gap-4">
                 <div>
@@ -208,7 +214,11 @@ export default function AdminMembersPage() {
                         value={roleFilter}
                         onChange={(e) =>
                             setRoleFilter(
-                                e.target.value as "ALL" | "USER" | "ADMIN" | "BLACKLIST",
+                                e.target.value as
+                                    | "ALL"
+                                    | "USER"
+                                    | "ADMIN"
+                                    | "BLACKLIST",
                             )
                         }
                     >
@@ -281,7 +291,9 @@ export default function AdminMembersPage() {
                                     {m.memberEmail}
                                 </td>
                                 <td className="px-4 py-3">{m.memberName || "-"}</td>
-                                <td className="px-4 py-3">{m.memberNickName || "-"}</td>
+                                <td className="px-4 py-3">
+                                    {m.memberNickName || "-"}
+                                </td>
                                 <td className="px-4 py-3">
                                         <span
                                             className={
@@ -301,7 +313,9 @@ export default function AdminMembersPage() {
                                 <td className="px-4 py-3 text-right">
                                     <button
                                         className="px-3 py-1 rounded-full border border-zinc-600 hover:border-red-500 hover:text-red-400 text-xs"
-                                        onClick={() => openDetail(m.memberEmail)}
+                                        onClick={() =>
+                                            openDetail(m.memberEmail)
+                                        }
                                     >
                                         상세 보기
                                     </button>
@@ -345,7 +359,6 @@ export default function AdminMembersPage() {
                                 <Row label="이름" value={detailMember.memberName} />
                                 <Row label="닉네임" value={detailMember.memberNickName} />
                                 <Row label="연락처" value={detailMember.memberPhone} />
-                                <Row label="주소" value={detailMember.memberAddress} />
                                 <Row label="성별" value={detailMember.memberGender} />
                                 <Row label="출생 연도" value={detailMember.memberBirthY} />
                                 <Row

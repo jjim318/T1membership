@@ -14,8 +14,12 @@ interface TokenPayload {
     memberEmail: string;
 }
 
+// 🔥 ApiResult를 프로젝트 공통 형태로 맞춤
 interface ApiResult<T> {
-    data: T;
+    isSuccess: boolean;
+    resCode: number;
+    resMessage: string;
+    result: T;
 }
 
 interface EmailExistsRes {
@@ -50,18 +54,25 @@ export default function LoginPage() {
 
         try {
             // ✅ 이메일 존재 여부 확인 API 호출
-            const res = await apiClient.get<EmailExistsRes>(
-                `/member/exists`,
-                { params: { email } },
-            );
+            const res = await apiClient.get("/member/exists", { params: { email } });
 
-            if (res.data.exists) {
-                // 이미 가입된 회원 → 비밀번호 단계로
+            let body: EmailExistsRes;
+
+            // 백엔드가 ApiResult로 내려주면 result가 있음
+            if (res.data && typeof res.data === "object" && "result" in res.data) {
+                body = res.data.result;
+            }
+            // 백엔드가 단일 JSON으로 내려주면 여기 타게 됨
+            else {
+                body = res.data;
+            }
+
+            if (body.exists) {
                 setStep("PASSWORD");
             } else {
-                // 가입 안 된 이메일 → 회원가입 모달 오픈
                 setShowSignupModal(true);
             }
+
         } catch (err) {
             console.error("이메일 체크 실패:", err);
             setErrorMsg("이메일 확인 중 오류가 발생했습니다.");
@@ -103,7 +114,7 @@ export default function LoginPage() {
 
             const raw = res.data;
             const payload: TokenPayload =
-                (raw as ApiResult<TokenPayload>).data ?? (raw as TokenPayload);
+                (raw as ApiResult<TokenPayload>).result ?? (raw as TokenPayload);
 
             const { accessToken, refreshToken, memberEmail } = payload;
 
@@ -114,10 +125,12 @@ export default function LoginPage() {
             if (typeof window !== "undefined") {
                 localStorage.setItem("accessToken", accessToken);
 
-                // keepLogin 체크되었을 때만 refresh 저장하게 하고 싶으면 조건으로 감싸면 됨
-                if (refreshToken && keepLogin) {
+                if (refreshToken) {
                     localStorage.setItem("refreshToken", refreshToken);
                 }
+
+                // keepLogin 선택 여부는 따로 저장해서 필요할 때 사용
+                localStorage.setItem("keepLogin", keepLogin ? "Y" : "N");
 
                 if (memberEmail) {
                     localStorage.setItem("memberEmail", memberEmail);
@@ -127,11 +140,14 @@ export default function LoginPage() {
             }
 
             alert("로그인 성공!");
-            router.push("/mypage");
+            router.push("/public");
         } catch (err) {
             console.error("로그인 실패:", err);
             if (axios.isAxiosError(err)) {
+                // 백엔드 ApiResult 형태면 여기서도 result/message 꺼내서 보여줄 수 있음
                 const msg =
+                    (err.response?.data as { message?: string; resMessage?: string })
+                        ?.resMessage ??
                     (err.response?.data as { message?: string })?.message ??
                     "이메일 또는 비밀번호가 올바르지 않습니다.";
                 setErrorMsg(msg);

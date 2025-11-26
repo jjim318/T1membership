@@ -1,67 +1,113 @@
 // src/components/admin/AdminGuard.tsx
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { apiClient } from "@/lib/apiClient";
-import axios from "axios";
 
-interface ReadOneMemberRes {
-    memberEmail: string;
-    memberRole?: string; // "USER" | "ADMIN" | "BLACKLIST"
+// =====================
+// JWT 유틸 타입/함수
+// =====================
+
+interface JwtPayload {
+    sub?: string;
+    roles?: string[];        // ["USER","ADMIN"] 형태
+    memberRole?: string;     // "ADMIN" 형태로 들어갈 수도 있음
+    [key: string]: unknown;  // ✅ any → unknown 으로 변경
 }
 
-interface ApiResult<T> {
-    isSuccess: boolean;
-    resCode: number;
-    resMessage: string;
-    result: T;
+/**
+ * accessToken 의 payload 부분을 파싱해서 객체로 반환
+ */
+function parseJwt(token: string): JwtPayload | null {
+    try {
+        const parts = token.split(".");
+        if (parts.length !== 3) {
+            console.error("[AdminGuard] JWT 형식이 잘못되었습니다.");
+            return null;
+        }
+
+        const payload = parts[1];
+        // base64url → base64 변환
+        const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+
+        const decoded =
+            typeof window !== "undefined"
+                ? window.atob(base64)
+                : Buffer.from(base64, "base64").toString("binary");
+
+        const json = decodeURIComponent(
+            decoded
+                .split("")
+                .map((c) => {
+                    return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+                })
+                .join("")
+        );
+
+        return JSON.parse(json) as JwtPayload;
+    } catch (e) {
+        console.error("[AdminGuard] JWT 파싱 실패", e);
+        return null;
+    }
 }
+
+/**
+ * 토큰이 ADMIN 권한을 가지고 있는지 여부
+ */
+function isAdminToken(token: string | null): boolean {
+    if (!token) return false;
+
+    const payload = parseJwt(token);
+    if (!payload) return false;
+
+    const roles: string[] = payload.roles ?? [];
+    const singleRole = payload.memberRole ?? "";
+
+    return roles.includes("ADMIN") || singleRole === "ADMIN";
+}
+
+// =====================
+// AdminGuard 컴포넌트
+// =====================
 
 export default function AdminGuard({ children }: { children: ReactNode }) {
     const router = useRouter();
-    const [checked, setChecked] = useState(false);
+
+    const [checking, setChecking] = useState(true);
     const [allowed, setAllowed] = useState(false);
 
     useEffect(() => {
-        const run = async () => {
-            try {
-                const res = await apiClient.get<ApiResult<ReadOneMemberRes>>(
-                    "/member/readOne",
-                );
+        const verify = () => {
+            if (typeof window === "undefined") return;
 
-                const body = res.data;
-                const member = body.result;
+            const token = localStorage.getItem("accessToken");
 
-                const role = member.memberRole;
-
-                if (role === "ADMIN" || role === "ROLE_ADMIN") {
-                    setAllowed(true);
-                } else {
-                    alert("관리자만 접근 가능합니다.");
-                    router.replace("/");
-                }
-            } catch (e) {
-                if (axios.isAxiosError(e) && e.response?.status === 401) {
-                    alert("로그인이 필요합니다.");
-                    router.replace("/login");
-                } else {
-                    console.error("[AdminGuard] 권한 확인 오류", e);
-                    alert("관리자 권한 확인 중 오류가 발생했습니다.");
-                    router.replace("/");
-                }
-            } finally {
-                setChecked(true);
+            // 토큰 없으면 로그인 페이지로
+            if (!token) {
+                router.replace("/login");
+                return;
             }
+
+            // JWT payload 에서 ADMIN 권한 체크
+            const admin = isAdminToken(token);
+
+            if (!admin) {
+                // 관리자 아니면 홈으로 튕김
+                router.replace("/");
+                return;
+            }
+
+            setAllowed(true);
         };
 
-        run();
+        verify();
+        setChecking(false);
     }, [router]);
 
-    if (!checked) {
+    if (checking) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-black text-white">
-                관리자 권한 확인 중...
+            <div className="min-h-screen bg-black flex items-center justify-center text-white">
+                관리자 확인 중...
             </div>
         );
     }
