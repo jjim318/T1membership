@@ -18,8 +18,8 @@ interface MemberInfo {
 
 interface JwtPayload {
     sub?: string;
-    roles?: string[];        // ["USER","ADMIN"] 형태
-    memberRole?: string;     // "ADMIN" 형태로 들어갈 수도 있음
+    roles?: string[];        // ["USER","ADMIN"]
+    memberRole?: string;     // "ADMIN" 같은 단일 스트링일 수도 있음
     [key: string]: unknown;
 }
 
@@ -49,9 +49,9 @@ function isAdminToken(token: string | null): boolean {
     if (!payload) return false;
 
     const roles: string[] = payload.roles ?? [];
-    const singleRole = payload.memberRole ?? "";
+    const single = payload.memberRole ?? "";
 
-    return roles.includes("ADMIN") || singleRole === "ADMIN";
+    return roles.includes("ADMIN") || single === "ADMIN";
 }
 
 // =====================
@@ -62,7 +62,7 @@ export default function Header() {
     const router = useRouter();
 
     const [isLogin, setIsLogin] = useState(false);
-    const [isAdmin, setIsAdmin] = useState(false); // 🔥 관리자 여부
+    const [isAdmin, setIsAdmin] = useState(false);
     const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
     const [cartCount, setCartCount] = useState<number>(0);
     const [hasNotification, setHasNotification] = useState<boolean>(false);
@@ -73,7 +73,7 @@ export default function Header() {
         const loggedIn = !!token;
 
         setIsLogin(loggedIn);
-        setIsAdmin(isAdminToken(token)); // 🔥 토큰에서 ADMIN 여부 계산
+        setIsAdmin(isAdminToken(token));
     };
 
     const resetLoginRelatedState = () => {
@@ -97,12 +97,11 @@ export default function Header() {
 
             setProfileImageUrl(memberData.profileImageUrl ?? null);
 
-            // 아직 백엔드 없으니까 임시값
+            // 아직 백엔드 연동 전이므로 임시
             setCartCount(0);
             setHasNotification(false);
         } catch (e) {
             if (axios.isAxiosError(e) && e.response?.status === 401) {
-                // 토큰 만료/무효 → 정리
                 localStorage.removeItem("accessToken");
                 setIsLogin(false);
                 setIsAdmin(false);
@@ -128,10 +127,8 @@ export default function Header() {
             void loadLoginRelatedInfo();
         };
 
-        // 처음 마운트 시 한 번
         sync();
 
-        // 로그인/로그아웃 이벤트, storage 변경 시 동기화
         window.addEventListener("loginStateChange", sync);
         window.addEventListener("storage", sync);
 
@@ -157,9 +154,8 @@ export default function Header() {
                 border-b border-zinc-800
             "
         >
-            {/* 안쪽 컨테이너: 폭 제한 + 좌우 여백 */}
             <div className="mx-auto max-w-6xl px-3 md:px-6 h-14 flex items-center justify-between gap-3">
-                {/* 왼쪽: 로고 + (넓은 화면에서만) 메뉴 */}
+                {/* 왼쪽: 로고 + 메뉴 */}
                 <div className="flex items-center gap-4 min-w-0">
                     <Link href="/public" className="flex items-center gap-2 shrink-0">
                         <Image
@@ -174,13 +170,14 @@ export default function Header() {
                         </span>
                     </Link>
 
-                    {/* 📌 메뉴는 화면이 넓을 때만 (lg 이상) 노출 + flex-wrap */}
-                    <nav className="
-                        hidden lg:flex
-                        flex-wrap items-center
-                        gap-x-4 gap-y-1
-                        text-[11px] xl:text-sm text-zinc-300
-                    ">
+                    <nav
+                        className="
+                            hidden lg:flex
+                            flex-wrap items-center
+                            gap-x-4 gap-y-1
+                            text-[11px] xl:text-sm text-zinc-300
+                        "
+                    >
                         <Link href="/public" className="hover:text-white">
                             HOME
                         </Link>
@@ -199,21 +196,27 @@ export default function Header() {
                         <Link href="/pop" className="hover:text-red-400">
                             POP
                         </Link>
-
-                        {/* 🔥 관리자일 때는 메뉴 옆에 ADMIN 뱃지 */}
-                        {isLogin && isAdmin && (
-                            <button
-                                onClick={() => router.push("/admin")}
-                                className="ml-2 px-3 py-1 rounded-full border border-red-500 text-[10px] xl:text-xs hover:bg-red-500/10"
-                            >
-                                ADMIN
-                            </button>
-                        )}
                     </nav>
                 </div>
 
-                {/* 오른쪽: 아이콘들 (폭 줄어들면 간격도 조금 줄이기) */}
+                {/* 오른쪽: 아이콘들 */}
                 <div className="flex items-center gap-3 md:gap-5 text-white shrink-0">
+
+                    {/* 🔥 ADMIN 버튼 (종 왼쪽) */}
+                    {isLogin && isAdmin && (
+                        <button
+                            onClick={() => router.push("/admin")}
+                            className="
+                                px-3 py-[4px]
+                                rounded-full border border-red-500
+                                text-[10px] md:text-xs
+                                hover:bg-red-500/10
+                            "
+                        >
+                            ADMIN
+                        </button>
+                    )}
+
                     {/* 🔔 알림 */}
                     <button
                         onClick={() => handleProtectedClick("/notifications")}
@@ -252,13 +255,19 @@ export default function Header() {
                             height={24}
                         />
                         {isLogin && cartCount > 0 && (
-                            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-[4px] rounded-full bg-red-500 text-[11px] font-semibold flex items-center justify-center">
+                            <span className="
+                                absolute -top-1 -right-1
+                                min-w-[18px] h-[18px] px-[4px]
+                                rounded-full bg-red-500
+                                text-[11px] font-semibold
+                                flex items-center justify-center
+                            ">
                                 {cartCount}
                             </span>
                         )}
                     </button>
 
-                    {/* 🙍 프로필 / 로그인 아이콘 */}
+                    {/* 🙍 프로필 */}
                     <button
                         onClick={() => {
                             if (!isLogin) {
@@ -266,11 +275,8 @@ export default function Header() {
                                 return;
                             }
 
-                            if (isAdmin) {
-                                router.push("/admin");
-                            } else {
-                                router.push("/mypage/home");
-                            }
+                            if (isAdmin) router.push("/admin");
+                            else router.push("/mypage/home");
                         }}
                         className="flex items-center"
                     >
