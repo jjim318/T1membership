@@ -6,7 +6,8 @@ import axios, {
     InternalAxiosRequestConfig,
 } from "axios";
 
-const BASE_URL = "http://192.168.0.180:8080"; // 형님 백엔드 주소
+const BASE_URL =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 // === 공통 ApiResult / 토큰 타입 ===
 interface ApiResult<T> {
@@ -36,17 +37,9 @@ apiClient.interceptors.request.use(
                 ? localStorage.getItem("accessToken")
                 : null;
 
-        // 디버그 로그 보고 싶으면 주석 해제
-        // console.log("[요청 전] 토큰 raw =", token);
-
         if (token) {
-            // eslint-disable-next-line no-param-reassign
             config.headers = config.headers ?? {};
-            // eslint-disable-next-line no-param-reassign
             config.headers.Authorization = `Bearer ${token}`;
-            // console.log("[요청 전] Authorization =", config.headers.Authorization);
-        } else {
-            // console.log("[요청 전] Authorization 추가 안함 (토큰 없음)");
         }
 
         return config;
@@ -99,9 +92,8 @@ async function refreshAccessToken(): Promise<string> {
         throw new Error("리프레시 토큰이 없습니다.");
     }
 
-    // 🔥 형님 백엔드의 /auth/refresh 스펙에 맞게 보냄
-    // TokenReq { accessToken, refreshToken } 라고 가정
-    const res = await axios.post<ApiResult<TokenPayload>>(
+    // 🔥 서버는 ApiResult가 아니라 TokenRes 그대로 줌
+    const res = await axios.post<TokenPayload>(
         `${BASE_URL}/auth/refresh`,
         {
             accessToken,
@@ -109,7 +101,7 @@ async function refreshAccessToken(): Promise<string> {
         },
     );
 
-    const tokens = res.data.result;
+    const tokens = res.data; // ✅ result 말고 data 자체
 
     if (typeof window !== "undefined") {
         localStorage.setItem("accessToken", tokens.accessToken);
@@ -120,7 +112,6 @@ async function refreshAccessToken(): Promise<string> {
         window.dispatchEvent(new Event("loginStateChange"));
     }
 
-    // apiClient 기본 헤더도 업데이트
     apiClient.defaults.headers.common.Authorization = `Bearer ${tokens.accessToken}`;
 
     return tokens.accessToken;
@@ -142,7 +133,6 @@ apiClient.interceptors.response.use(
         const isAuthUrl =
             url.includes("/auth/login") || url.includes("/auth/refresh");
 
-        // accessToken 만료 → refresh 시도
         if (status === 401 && !originalConfig._retry && !isAuthUrl) {
             if (typeof window === "undefined") {
                 return Promise.reject(error);
@@ -151,7 +141,6 @@ apiClient.interceptors.response.use(
             originalConfig._retry = true;
 
             if (isRefreshing) {
-                // 이미 다른 요청이 refresh 중이면 큐에 적재
                 return new Promise((resolve, reject) => {
                     failedQueue.push({ resolve, reject, config: originalConfig });
                 });
@@ -177,7 +166,6 @@ apiClient.interceptors.response.use(
                 isRefreshing = false;
                 processQueue(refreshError, null);
 
-                // refresh 자체도 실패 → 완전 로그아웃
                 if (typeof window !== "undefined") {
                     localStorage.removeItem("accessToken");
                     localStorage.removeItem("refreshToken");
@@ -189,7 +177,6 @@ apiClient.interceptors.response.use(
             }
         }
 
-        // 그 외 에러는 그대로
         return Promise.reject(error);
     },
 );

@@ -213,7 +213,7 @@ export default function MemberEditPage() {
     //   실제 화면 (티원 스타일로 구성)
     // ==============================
     return (
-        <div className="min-h-screen bg-black text-white">
+        <div className="min-h-screen bg-black text-white pt-16">
             <div className="max-w-3xl mx-auto px-4 py-10">
                 {/* 제목 */}
                 <h1 className="text-2xl font-bold mb-8">회원정보 변경</h1>
