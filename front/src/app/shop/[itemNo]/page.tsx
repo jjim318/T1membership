@@ -1,7 +1,7 @@
 // src/app/shop/[itemNo]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,6 +11,7 @@ import { apiClient } from "@/lib/apiClient";
 type ItemCategory = "MD" | "MEMBERSHIP" | "POP" | "ALL";
 type ItemSellStatus = "SELL" | "SOLD_OUT" | string;
 type PurchaseMode = "CART" | "BUY";
+type OptionKind = "SIZE" | "PLAYER" | "QTY_ONLY";
 
 interface ExistingImageDTO {
     fileName: string;
@@ -34,119 +35,116 @@ interface ApiResult<T> {
     result: T;
 }
 
+type SizeOption = {
+    value: string;
+    label: string;
+    price: number;
+    soldOut: boolean;
+};
+
+type PlayerOption = {
+    value: string;
+    label: string;
+    price: number;
+    soldOut: boolean;
+};
+
+// ===== 상품별 옵션 타입 맵핑 =====
+// 1: 저지(SIZE), 2: 선수 인형(PLAYER), 3: 티켓 홀더(QTY_ONLY) 이런 식으로 가정
+const OPTION_KIND_TABLE: Record<number, OptionKind> = {
+    1: "SIZE",      // 저지
+    2: "PLAYER",    // 선수 인형
+    3: "QTY_ONLY",  // 티켓 홀더
+};
+
+// ===== 상품별 사이즈 옵션 테이블 (저지 등) =====
+const SIZE_TABLE: Record<number, SizeOption[]> = {
+    1: [
+        { value: "S",  label: "S",  price: 189000, soldOut: false },
+        { value: "M",  label: "M",  price: 189000, soldOut: true },
+        { value: "L",  label: "L",  price: 189000, soldOut: false },
+        { value: "XL", label: "XL", price: 189000, soldOut: false },
+        { value: "2XL",label: "2XL",price: 189000, soldOut: false },
+    ],
+    // 다른 저지 상품 생기면 여기 추가
+};
+
+// ===== 상품별 PLAYER 옵션 테이블 (선수 인형 등) =====
+const PLAYER_TABLE: Record<number, PlayerOption[]> = {
+    2: [
+        { value: "DORAN",    label: "DORAN",    price: 25000, soldOut: true },
+        { value: "ONER",     label: "ONER",     price: 25000, soldOut: true },
+        { value: "FAKER",    label: "FAKER",    price: 25000, soldOut: true },
+        { value: "GUMAYUSI", label: "GUMAYUSI", price: 25000, soldOut: true },
+        { value: "KERIA",    label: "KERIA",    price: 25000, soldOut: true },
+        { value: "SMASH",    label: "SMASH",    price: 25000, soldOut: false },
+    ],
+    // 다른 인형 상품 생기면 여기 추가
+};
+
+// JWT(accessToken)에서 이메일(sub or memberEmail) 추출
+function extractEmailFromJwt(token: string | null): string | null {
+    if (!token) return null;
+    try {
+        const parts = token.split(".");
+        if (parts.length < 2) return null;
+
+        const payloadPart = parts[1]
+            .replace(/-/g, "+")
+            .replace(/_/g, "/");
+
+        const padded = payloadPart.padEnd(
+            Math.ceil(payloadPart.length / 4) * 4,
+            "=",
+        );
+
+        const json = atob(padded);
+        const payload = JSON.parse(json);
+
+        // 형님 JWT 는 sub에 이메일이 있을 가능성이 큼
+        return payload.sub ?? payload.memberEmail ?? null;
+    } catch (e) {
+        console.error("JWT decode 실패 =", e);
+        return null;
+    }
+}
+
+
 export default function ShopDetailPage() {
     const params = useParams<{ itemNo: string }>();
     const router = useRouter();
-
     const itemNo = Number(params?.itemNo);
 
     const [item, setItem] = useState<ItemDetail | null>(null);
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    // 상세 배송 옵션 아코디언 열림/닫힘
+    // 상세 배송 옵션
     const [showShippingDetail, setShowShippingDetail] = useState(false);
 
     // 장바구니/구매 로딩 상태
     const [cartLoading, setCartLoading] = useState(false);
 
-    // ====== 옵션 선택 모달 상태 ======
+    // ===== 옵션 선택 모달 상태 =====
     const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
     const [selectedSize, setSelectedSize] = useState<string | null>(null);
-    const [showSizeList, setShowSizeList] = useState(false);
+    const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+    const [showOptionList, setShowOptionList] = useState(false); // SIZE & PLAYER 공용
     const [quantity, setQuantity] = useState(1);
     const [optionError, setOptionError] = useState<string | null>(null);
 
-    // ====== 멤버십 전용 안내 모달 ======
+    // ===== 멤버십 전용 안내 모달 =====
     const [showMembershipModal, setShowMembershipModal] = useState(false);
+
+    // 🔥 로그인 필요 모달
+    const [showLoginRequiredModal, setShowLoginRequiredModal] = useState(false);
 
     // TODO: 실제 로그인/멤버십 여부로 교체
     const isMembershipUser = false;
 
-    // ====== 예시용 사이즈 데이터 (형님 DB 값으로 교체하면 됨) ======
-    const sizes = [
-        { value: "S", label: "S", price: 189000, soldOut: false },
-        { value: "M", label: "M", price: 189000, soldOut: true },
-        { value: "L", label: "L", price: 189000, soldOut: false },
-        { value: "XL", label: "XL", price: 189000, soldOut: false },
-        { value: "2XL", label: "2XL", price: 189000, soldOut: false },
-    ];
-
-    // ====== 하단 버튼 클릭 → 옵션 모달 오픈 ======
-    const openOptionModal = () => {
-        if (isSoldOut) return;
-
-        setIsOptionModalOpen(true);
-        setOptionError(null);
-        setShowSizeList(false);
-        setSelectedSize(null);
-        setQuantity(1);
-    };
-
-    const closeOptionModal = () => {
-        setIsOptionModalOpen(false);
-    };
-
-    // ====== 수량 조절 ======
-    const increaseQty = () => setQuantity((q) => q + 1);
-    const decreaseQty = () => setQuantity((q) => (q > 1 ? q - 1 : 1));
-
-    // ====== 옵션 선택 후 실제 액션 처리 ======
-    const handleConfirmWithOptions = async (mode: PurchaseMode) => {
-        if (!selectedSize) {
-            setOptionError("size를 선택해주세요.");
-            return;
-        }
-
-        if (!item) {
-            setOptionError("상품 정보를 불러오지 못했습니다.");
-            return;
-        }
-
-        try {
-            setCartLoading(true);
-            setOptionError(null);
-
-            if (mode === "CART") {
-                // ✅ 장바구니 담기 (실제 itemNo 사용)
-                await apiClient.post<ApiResult<unknown>>("/cart", {
-                    itemNo: item.itemNo,
-                    size: selectedSize,
-                    quantity,
-                });
-
-                setIsOptionModalOpen(false);
-                router.push("/shop/cart");
-            } else {
-                // ✅ 바로 구매
-                if (!isMembershipUser) {
-                    // 멤버십 회원이 아니면 안내 모달
-                    setShowMembershipModal(true);
-                    return;
-                }
-
-                // 멤버십 회원이면 실제 주문 생성 후 결제 페이지로 이동
-                const res = await apiClient.post<ApiResult<{ orderNo: number }>>(
-                    "/order/create-single",
-                    {
-                        itemNo: item.itemNo,
-                        size: selectedSize,
-                        quantity,
-                    },
-                );
-
-                const orderNo = res.data.result.orderNo;
-                setIsOptionModalOpen(false);
-                router.push(`/order/checkout/${orderNo}`);
-            }
-        } catch (e) {
-            console.error(e);
-            setOptionError("요청 처리 중 오류가 발생했습니다.");
-            alert("요청 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
-        } finally {
-            setCartLoading(false);
-        }
-    };
+    // 🔥 장바구니 토스트
+    const [showCartToast, setShowCartToast] = useState(false);
+    const cartToastTimerRef = useRef<number | null>(null);
 
     // ===== 데이터 로딩 =====
     useEffect(() => {
@@ -176,6 +174,15 @@ export default function ShopDetailPage() {
         load();
     }, [itemNo]);
 
+    // 🔥 토스트 타이머 정리
+    useEffect(() => {
+        return () => {
+            if (cartToastTimerRef.current) {
+                window.clearTimeout(cartToastTimerRef.current);
+            }
+        };
+    }, []);
+
     // ===== 로딩/에러 분기 =====
     if (loading) {
         return (
@@ -196,7 +203,9 @@ export default function ShopDetailPage() {
         );
     }
 
-    // ===== 이미지 정리 =====
+    // ===== 여기부터는 item 이 확실히 존재 =====
+
+    // 이미지 정리
     const sortedImages = [...(item.images ?? [])].sort(
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
     );
@@ -218,10 +227,261 @@ export default function ShopDetailPage() {
 
     const isSoldOut =
         item.itemSellStatus === "SOLD_OUT" || item.itemStock <= 0;
-    const isMembershipOnly = item.itemCategory === "MEMBERSHIP";
+    const isMembershipOnly =
+        item.itemCategory === "MD" || item.itemCategory === "MEMBERSHIP";
+
+
+    // 이 상품이 어떤 옵션 구조인지
+    const optionKind: OptionKind =
+        OPTION_KIND_TABLE[item.itemNo] ?? "SIZE";
+
+    const sizeOptions: SizeOption[] = SIZE_TABLE[item.itemNo] ?? [];
+    const playerOptions: PlayerOption[] = PLAYER_TABLE[item.itemNo] ?? [];
+
+    const optionTitle =
+        optionKind === "SIZE"
+            ? "size 선택"
+            : optionKind === "PLAYER"
+                ? "PLAYER 선택"
+                : "수량 선택";
+
+    // ===== 모달 열기/닫기 =====
+    const openOptionModal = () => {
+        if (isSoldOut) return;
+
+        setIsOptionModalOpen(true);
+        setOptionError(null);
+        setShowOptionList(false);
+        setSelectedSize(null);
+        setSelectedPlayer(null);
+        setQuantity(1);
+    };
+
+    const closeOptionModal = () => {
+        setIsOptionModalOpen(false);
+    };
+
+    // ===== 수량 조절 =====
+    const increaseQty = () => {
+        if (optionKind === "PLAYER") return; // 인형은 1개 제한
+        setQuantity((q) => q + 1);
+    };
+
+    const decreaseQty = () => {
+        if (optionKind === "PLAYER") return; // 인형은 1개 제한
+        setQuantity((q) => (q > 1 ? q - 1 : 1));
+    };
+
+    const handleConfirmWithOptions = async (mode: PurchaseMode) => {
+        if (!item) {
+            setOptionError("상품 정보를 불러오지 못했습니다.");
+            return;
+        }
+
+        // === 로그인 여부 체크 (토큰) ===
+        const hasToken =
+            typeof window !== "undefined" &&
+            !!localStorage.getItem("accessToken");
+
+        if (!hasToken) {
+            setShowLoginRequiredModal(true);
+            return;
+        }
+
+// 🔥 1차: localStorage 에서 이메일 꺼내기
+        let memberEmail =
+            typeof window !== "undefined"
+                ? localStorage.getItem("memberEmail")
+                : null;
+
+// 🔥 2차: 그래도 없으면 JWT 에서 추출해서 채워넣기
+        if (!memberEmail && typeof window !== "undefined") {
+            const token = localStorage.getItem("accessToken");
+            const fromJwt = extractEmailFromJwt(token);
+            if (fromJwt) {
+                memberEmail = fromJwt;
+                localStorage.setItem("memberEmail", fromJwt); // 다음부터는 바로 사용 가능
+                console.log("JWT에서 memberEmail 복구 =", fromJwt);
+            }
+        }
+
+        if (!memberEmail) {
+            console.warn("memberEmail 이 없어서 로그인 모달 오픈");
+            setShowLoginRequiredModal(true);
+            return;
+        }
+
+
+        // === 필수 옵션 체크 ===
+        if (optionKind === "SIZE" && !selectedSize) {
+            setOptionError("size를 선택해주세요.");
+            return;
+        }
+        if (optionKind === "PLAYER" && !selectedPlayer) {
+            setOptionError("PLAYER를 선택해주세요.");
+            return;
+        }
+
+        const qty = optionKind === "PLAYER" ? 1 : quantity;
+
+        // 👉 AddCartItemReq 에 맞는 최소 payload (itemNo + quantity)
+        const optionValue =
+            optionKind === "SIZE"
+                ? selectedSize
+                : optionKind === "PLAYER"
+                    ? selectedPlayer
+                    : null;
+
+        const optionLabel =
+            optionKind === "SIZE" && selectedSize
+                ? `size / ${selectedSize}`
+                : optionKind === "PLAYER" && selectedPlayer
+                    ? `PLAYER / ${selectedPlayer}`
+                    : null;
+
+        const cartPayload = {
+            itemNo: item.itemNo,
+            quantity: qty,
+            optionKind,          // "SIZE" | "PLAYER" | "QTY_ONLY"
+            optionValue,         // "S", "M", "FAKER" 같은 실제 값
+            optionLabel,         // 화면에 바로 보여줄 한글 라벨
+        };
+
+
+        try {
+            setCartLoading(true);
+            setOptionError(null);
+
+            if (mode === "CART") {
+                const url = `/cart/${encodeURIComponent(memberEmail)}/items`;
+
+                const res = await apiClient.post<ApiResult<unknown>>(
+                    url,
+                    cartPayload,
+                );
+
+                console.log("✅ CART 성공 res =", res.data);
+
+                // 🔥 혹시 isSuccess 안 찍히면 여기서 바로 return 해서 토스트 안 뜰 수 있으니
+                //  지금은 그냥 무조건 토스트 띄우게 둔다.
+                // if (!res.data.isSuccess) { ... } 이런 거 넣지 말자.
+
+                // 모달 닫기
+                setIsOptionModalOpen(false);
+
+                // 🔥 토스트 켜기
+                setShowCartToast(true);
+                console.log("✅ showCartToast=true 로 변경");
+
+                // 이전 타이머 있으면 제거
+                if (cartToastTimerRef.current !== null) {
+                    window.clearTimeout(cartToastTimerRef.current);
+                }
+
+                // 3초 뒤 자동으로 닫기
+                cartToastTimerRef.current = window.setTimeout(() => {
+                    console.log("⏰ 토스트 자동 종료");
+                    setShowCartToast(false);
+                }, 3000);
+
+                return;
+            }
+
+            // === 아래는 BUY 로직 (기존 그대로) ===
+            if (!isMembershipUser) {
+                setShowMembershipModal(true);
+                return;
+            }
+
+            const orderPayload: any = {
+                itemNo: item.itemNo,
+                quantity: qty,
+            };
+            // 필요하면 옵션 정보도 여기에 추가
+
+            const res = await apiClient.post<
+                ApiResult<{ orderNo: number }>
+            >("/order/create-single", orderPayload);
+
+            const orderNo = res.data.result.orderNo;
+            setIsOptionModalOpen(false);
+            router.push(`/order/checkout/${orderNo}`);
+        } catch (e: any) {
+            console.error("장바구니 추가 실패 =", e);
+            if (e.response) {
+                console.error("status =", e.response.status);
+                console.error("data   =", e.response.data);
+            }
+            setOptionError("요청 처리 중 오류가 발생했습니다.");
+            alert("장바구니 담기 중 오류가 발생했습니다. (콘솔 로그 확인)");
+        } finally {
+            setCartLoading(false);
+        }
+    };
+
+
+
+    // ===== 금액 계산 (옵션 타입별로 단가 결정) =====
+    const calcTotalPrice = (): number => {
+        let unitPrice = item.itemPrice;
+
+        if (optionKind === "SIZE" && selectedSize) {
+            const opt = sizeOptions.find((s) => s.value === selectedSize);
+            if (opt) unitPrice = opt.price;
+        }
+
+        if (optionKind === "PLAYER" && selectedPlayer) {
+            const opt = playerOptions.find((p) => p.value === selectedPlayer);
+            if (opt) unitPrice = opt.price;
+        }
+
+        const qty = optionKind === "PLAYER" ? 1 : quantity;
+        return unitPrice * qty;
+    };
+
+    const hasSelection =
+        (optionKind === "SIZE" && !!selectedSize) ||
+        (optionKind === "PLAYER" && !!selectedPlayer) ||
+        optionKind === "QTY_ONLY";
 
     return (
         <div className="min-h-screen bg-black text-white">
+
+            {/* 🔥 장바구니 토스트 (좌측 하단) */}
+            {showCartToast && (
+                <div
+                    className="fixed" // 위치 관련 tailwind 다 빼버림
+                    style={{
+                        left: 16,          // px 기준
+                        bottom: 16,
+                        top: "auto",       // 혹시 남아있는 top:0 을 확실히 무효화
+                        zIndex: 9999,
+                    }}
+                >
+                    <div
+                        className="flex items-center gap-4 rounded-md px-4 py-3 text-sm shadow-lg"
+                        style={{
+                            backgroundColor: "#ffffff",
+                            color: "#111111",
+                        }}
+                    >
+                        <span>장바구니에 상품을 담았어요.</span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowCartToast(false);
+                                router.push("/shop/cart");
+                            }}
+                            style={{ color: "#0b74de", fontWeight: 600 }}
+                        >
+                            보러가기
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
+
             {/* 내용이 고정 푸터에 가리지 않도록 아래쪽 패딩 넉넉히 */}
             <main className="mx-auto max-w-4xl px-4 pb-28 pt-6">
                 {/* 상단: 뒤로가기 + 공유 */}
@@ -258,10 +518,6 @@ export default function ShopDetailPage() {
                     <h1 className="text-lg font-semibold leading-snug">
                         {item.itemName}
                     </h1>
-
-                    <p className="mt-1 text-xs text-zinc-400">
-                        {isSoldOut ? "판매종료" : "판매중"}
-                    </p>
 
                     <p className="mt-3 text-2xl font-bold">
                         {item.itemPrice.toLocaleString("ko-KR")}원
@@ -373,9 +629,9 @@ export default function ShopDetailPage() {
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-5 py-4 shadow-xl border border-zinc-700">
                         {/* 헤더 */}
                         <div className="mb-3 flex items-center justify-between">
-                            <span className="text-sm text-zinc-300">
-                                size 선택
-                            </span>
+                <span className="text-sm text-zinc-300">
+                    {optionTitle}
+                </span>
                             <button
                                 type="button"
                                 onClick={closeOptionModal}
@@ -385,90 +641,159 @@ export default function ShopDetailPage() {
                             </button>
                         </div>
 
-                        {/* Size 선택 영역 */}
-                        <div className="mb-4">
-                            <button
-                                type="button"
-                                onClick={() => setShowSizeList((v) => !v)}
-                                className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-                            >
-                                <span>
-                                    {selectedSize
-                                        ? `size / ${selectedSize}`
-                                        : "size 선택"}
-                                </span>
-                                <span className="text-xs text-zinc-400">▼</span>
-                            </button>
+                        {/* ===== 옵션 선택 영역 (SIZE / PLAYER) ===== */}
+                        {optionKind === "SIZE" && (
+                            <div className="mb-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowOptionList((v) => !v)}
+                                    className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                                >
+                        <span>
+                            {selectedSize
+                                ? `size / ${selectedSize}`
+                                : "size 선택"}
+                        </span>
+                                    <span className="text-xs text-zinc-400">▼</span>
+                                </button>
 
-                            {showSizeList && (
-                                <div className="mt-2 space-y-1">
-                                    {sizes.map((s) => (
-                                        <button
-                                            key={s.value}
-                                            type="button"
-                                            disabled={s.soldOut}
-                                            onClick={() => {
-                                                if (s.soldOut) return;
-                                                setSelectedSize(s.value);
-                                                setShowSizeList(false);
-                                            }}
-                                            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                                                s.soldOut
-                                                    ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
-                                                    : selectedSize === s.value
-                                                        ? "border-red-500 bg-zinc-800 text-white"
-                                                        : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-                                            }`}
-                                        >
-                                            <span>
-                                                {s.label}
-                                                {s.soldOut && " [품절]"}
-                                            </span>
-                                            <span>
-                                                {s.price.toLocaleString("ko-KR")}
-                                                원
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                {showOptionList && (
+                                    <div className="mt-2 space-y-1">
+                                        {sizeOptions.map((s) => (
+                                            <button
+                                                key={s.value}
+                                                type="button"
+                                                disabled={s.soldOut}
+                                                onClick={() => {
+                                                    if (s.soldOut) return;
+                                                    setSelectedSize(s.value);
+                                                    setShowOptionList(false);
+                                                }}
+                                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                                                    s.soldOut
+                                                        ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
+                                                        : selectedSize === s.value
+                                                            ? "border-red-500 bg-zinc-800 text-white"
+                                                            : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                }`}
+                                            >
+                                    <span>
+                                        {s.label}
+                                        {s.soldOut && " [품절]"}
+                                    </span>
+                                                <span>
+                                        {s.price.toLocaleString("ko-KR")}원
+                                    </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
-                        {/* 선택된 옵션 / 수량 */}
-                        {selectedSize && (
+                        {optionKind === "PLAYER" && (
+                            <div className="mb-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowOptionList((v) => !v)}
+                                    className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                                >
+                        <span>
+                            {selectedPlayer
+                                ? `PLAYER / ${selectedPlayer}`
+                                : "PLAYER 선택"}
+                        </span>
+                                    <span className="text-xs text-zinc-400">▼</span>
+                                </button>
+
+                                {showOptionList && (
+                                    <div className="mt-2 space-y-1">
+                                        {playerOptions.map((p) => (
+                                            <button
+                                                key={p.value}
+                                                type="button"
+                                                disabled={p.soldOut}
+                                                onClick={() => {
+                                                    if (p.soldOut) return;
+                                                    setSelectedPlayer(p.value);
+                                                    setShowOptionList(false);
+                                                    setQuantity(1); // 인당 1개 고정
+                                                }}
+                                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                                                    p.soldOut
+                                                        ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
+                                                        : selectedPlayer === p.value
+                                                            ? "border-red-500 bg-zinc-800 text-white"
+                                                            : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                }`}
+                                            >
+                                    <span>
+                                        {p.label}
+                                        {p.soldOut && " [품절]"}
+                                    </span>
+                                                <span>
+                                        {p.price.toLocaleString("ko-KR")}원
+                                    </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* QTY_ONLY는 별도 옵션 선택 UI 없음 (바로 아래 카드에서 처리) */}
+
+                        {/* ===== 선택된 옵션 / 수량 & 금액 ===== */}
+                        {hasSelection && (
                             <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-3">
                                 <div className="mb-2 flex items-center justify-between text-sm text-zinc-100">
-                                    <span>size / {selectedSize}</span>
+                        <span>
+                            {optionKind === "SIZE" &&
+                                selectedSize &&
+                                `size / ${selectedSize}`}
+                            {optionKind === "PLAYER" &&
+                                selectedPlayer &&
+                                `PLAYER / ${selectedPlayer}`}
+                            {optionKind === "QTY_ONLY" && item.itemName}
+                        </span>
                                 </div>
+
                                 <div className="flex items-center justify-between">
                                     {/* 수량 조절 */}
                                     <div className="inline-flex items-center rounded-md border border-zinc-700">
                                         <button
                                             type="button"
                                             onClick={decreaseQty}
-                                            className="px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800"
+                                            disabled={optionKind === "PLAYER"}
+                                            className={`px-3 py-1 text-sm ${
+                                                optionKind === "PLAYER"
+                                                    ? "text-zinc-500 cursor-not-allowed"
+                                                    : "text-zinc-300 hover:bg-zinc-800"
+                                            }`}
                                         >
                                             -
                                         </button>
                                         <span className="px-4 py-1 text-sm text-white">
-                                            {quantity}
-                                        </span>
+                                {optionKind === "PLAYER" ? 1 : quantity}
+                            </span>
                                         <button
                                             type="button"
                                             onClick={increaseQty}
-                                            className="px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-800"
+                                            disabled={optionKind === "PLAYER"}
+                                            className={`px-3 py-1 text-sm ${
+                                                optionKind === "PLAYER"
+                                                    ? "text-zinc-500 cursor-not-allowed"
+                                                    : "text-zinc-300 hover:bg-zinc-800"
+                                            }`}
                                         >
                                             +
                                         </button>
                                     </div>
 
-                                    {/* 금액 (예시: 모든 사이즈 동일가) */}
+                                    {/* 금액 */}
                                     <span className="text-sm font-semibold text-white">
-                                        {(sizes[0].price * quantity).toLocaleString(
-                                            "ko-KR",
-                                        )}
-                                        원
-                                    </span>
+                            {calcTotalPrice().toLocaleString("ko-KR")}원
+                        </span>
                                 </div>
                             </div>
                         )}
@@ -480,14 +805,19 @@ export default function ShopDetailPage() {
                             </p>
                         )}
 
+                        {/* 🔥 PLAYER 전용 안내 문구 (버튼 위, 맨 아래쪽) */}
+                        {optionKind === "PLAYER" && (
+                            <p className="mb-3 text-[11px] text-zinc-400 text-left">
+                                1인당 각 옵션별로 1개까지 구매할 수 있어요.
+                            </p>
+                        )}
+
                         {/* 모달 하단 버튼: 장바구니 / 바로구매 */}
                         <div className="mt-2 flex gap-3">
                             <button
                                 type="button"
                                 disabled={cartLoading}
-                                onClick={() =>
-                                    handleConfirmWithOptions("CART")
-                                }
+                                onClick={() => handleConfirmWithOptions("CART")}
                                 className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
                                     cartLoading
                                         ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
@@ -509,6 +839,7 @@ export default function ShopDetailPage() {
                 </div>
             )}
 
+
             {/* ================== 멤버십 전용 안내 모달 ================== */}
             {showMembershipModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -526,10 +857,45 @@ export default function ShopDetailPage() {
                             </button>
                             <button
                                 type="button"
-                                onClick={() => router.push("/membership/join")}
+                                onClick={() =>
+                                    router.push("/membership/join")
+                                }
                                 className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500"
                             >
                                 멤버십 가입
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🔥 로그인 필요 모달 */}
+            {showLoginRequiredModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                    <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-6 py-5 shadow-xl border border-zinc-700">
+                        <p className="mb-2 text-center text-sm font-semibold text-zinc-100">
+                            로그인이 필요해요
+                        </p>
+                        <p className="mb-6 text-center text-xs text-zinc-300">
+                            로그인 후 구매할 수 있어요.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowLoginRequiredModal(false)}
+                                className="flex-1 rounded-xl bg-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-600"
+                            >
+                                취소
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowLoginRequiredModal(false);
+                                    router.push("/login");
+                                }}
+                                className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                            >
+                                로그인
                             </button>
                         </div>
                     </div>
@@ -576,6 +942,27 @@ export default function ShopDetailPage() {
                     )}
                 </div>
             </footer>
+
+            {/* 🔥 장바구니 토스트 (좌측 하단) */}
+            {/*{showCartToast && (*/}
+            {/*    <div className="fixed left-4 bottom-4 z-[9999] pointer-events-auto">*/}
+            {/*        <div className="flex items-center gap-4 rounded-md bg-zinc-50 px-4 py-3 text-sm text-zinc-900 shadow-lg border border-zinc-200">*/}
+            {/*            <span>장바구니에 상품을 담았어요.</span>*/}
+            {/*            <button*/}
+            {/*                type="button"*/}
+            {/*                onClick={() => {*/}
+            {/*                    setShowCartToast(false);      // 수동 닫기*/}
+            {/*                    router.push("/shop/cart");    // 장바구니로 이동*/}
+            {/*                }}*/}
+            {/*                className="text-sm font-semibold text-sky-600 hover:underline"*/}
+            {/*            >*/}
+            {/*                보러가기*/}
+            {/*            </button>*/}
+            {/*        </div>*/}
+            {/*    </div>*/}
+            {/*)}*/}
+
         </div>
     );
 }
+

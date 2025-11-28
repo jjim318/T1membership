@@ -245,7 +245,7 @@ export default function Header() {
 
                     {/* 🛒 장바구니 */}
                     <button
-                        onClick={() => handleProtectedClick("/cart")}
+                        onClick={() => handleProtectedClick("/shop/cart")}
                         className="relative"
                     >
                         <Image

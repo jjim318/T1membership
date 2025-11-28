@@ -14,17 +14,18 @@ export default function RootLayout({
                                    }: {
     children: React.ReactNode;
 }) {
-    // 여기서 모든 페이지의 공통 뼈대를 만든다
     return (
         <html lang="ko">
-        <body>
-        {/* 위에 항상 보이는 메뉴바 */}
+        <body className="bg-black text-white">
+        {/* 항상 맨 위 고정 헤더 */}
         <Header />
 
-        {/* 페이지마다 달라지는 내용이 들어가는 자리 */}
-        <main>{children}</main>
+        {/* 🔥 고정 헤더 높이만큼 전체 페이지 위를 띄워줌 */}
+        <main className="pt-16">
+            {children}
+        </main>
 
-        {/* 맨 아래 공통 영역 */}
+        {/* 공통 푸터 */}
         <Footer />
         </body>
         </html>
