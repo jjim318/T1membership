@@ -10,5 +10,6 @@ import lombok.*;
 public class DeleteCartItemRes {
 
     private Long itemNo;
+    private Long cartNo;
 
 }

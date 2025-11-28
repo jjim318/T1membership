@@ -33,4 +33,22 @@ public interface CartRepository extends JpaRepository<CartEntity, Long> {
             @Param("memberEmail") String memberEmail,
             @Param("itemNos") List<Long> itemNos
     );
+
+    // com.t1membership.cart.repository.CartRepository
+
+    Optional<CartEntity> findByMember_MemberEmailAndItem_ItemNoAndOptionValue(
+            String memberEmail,
+            Long itemNo,
+            String optionValue
+    );
+
+    Optional<CartEntity> findByMember_MemberEmailAndItem_ItemNoAndOptionValueIsNull(
+            String memberEmail,
+            Long itemNo
+    );
+
+    // 삭제/수정용: cartId + memberEmail 로 한 줄만 찾기
+    Optional<CartEntity> findByCartNoAndMember_MemberEmail(Long cartId, String memberEmail);
+
+
 }

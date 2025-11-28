@@ -14,15 +14,24 @@ import lombok.*;
 @ToString
 @Table(
         name = "t1_cart",
-        uniqueConstraints = @UniqueConstraint(
-                name = "ux_cart_member_item",
-                columnNames = {"member_email", "item_no"}
-        ),
-        indexes = {
-                @Index(name = "idx_cart_member", columnList = "member_email"),
-                @Index(name = "idx_cart_item", columnList = "item_no")
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "ux_cart_member_item_option",
+                        columnNames = {"member_email", "item_no", "option_value"}
+                )
         }
 )
+//@Table(
+//        name = "t1_cart",
+//        uniqueConstraints = @UniqueConstraint(
+//                name = "ux_cart_member_item_option",
+//                columnNames = {"member_email", "item_no", "option_value"}
+//        ),
+//        indexes = {
+//                @Index(name = "idx_cart_member", columnList = "member_email"),
+//                @Index(name = "idx_cart_item", columnList = "item_no")
+//        }
+//)
 public class CartEntity {
 
     @Id
@@ -41,5 +50,15 @@ public class CartEntity {
     @Column(name = "item_quantity", nullable = false)
     @Builder.Default
     private int itemQuantity = 1;
+
+    // 🔥 옵션 구분용 필드
+    @Column(name = "option_kind")
+    private String optionKind;      // SIZE / PLAYER / QTY_ONLY
+
+    @Column(name = "option_value")
+    private String optionValue;     // S, M, FAKER ...
+
+    @Column(name = "option_label")
+    private String optionLabel;     // "size / S", "PLAYER / FAKER" 등
 
 }
