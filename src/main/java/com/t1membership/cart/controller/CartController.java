@@ -7,11 +7,14 @@ import com.t1membership.cart.dto.deleteCartItem.DeleteCartItemReq;
 import com.t1membership.cart.dto.deleteCartItem.DeleteCartItemRes;
 import com.t1membership.cart.dto.prepareOrder.PrepareOrderReq;
 import com.t1membership.cart.dto.prepareOrder.PrepareOrderRes;
+import com.t1membership.cart.dto.readCart.CartItemRes;
 import com.t1membership.cart.dto.updateCartItemQuantity.UpdateCartItemQuantityReq;
 import com.t1membership.cart.dto.updateCartItemQuantity.UpdateCartItemQuantityRes;
 import com.t1membership.cart.service.CartService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/cart")
@@ -29,15 +32,20 @@ public class CartController {
     }
 
     // 삭제
-    @DeleteMapping("/{memberEmail}/items/{itemNo}")
-    public ApiResult<DeleteCartItemRes> deleteCartItem(@PathVariable String memberEmail,
-                                                       @PathVariable Long itemNo) {
+    // /cart/{memberEmail}/items/{cartNo}
+    @DeleteMapping("/{memberEmail}/items/{cartNo}")
+    public ApiResult<DeleteCartItemRes> deleteCartItem(
+            @PathVariable String memberEmail,
+            @PathVariable Long cartNo
+    ) {
         DeleteCartItemReq deleteReq = DeleteCartItemReq.builder()
-                .itemNo(itemNo)
+                .cartNo(cartNo)   // 🔥 itemNo 말고 cartNo 셋팅
                 .build();
-        var deleteRes = cartService.deleteCartItem(memberEmail, deleteReq);
+
+        DeleteCartItemRes deleteRes = cartService.deleteCartItem(memberEmail, deleteReq);
         return new ApiResult<>(deleteRes);
     }
+
 
     // 수량 변경
     @PutMapping("/{memberEmail}/items/{itemNo}")
@@ -54,4 +62,12 @@ public class CartController {
         var postRes = cartService.prepareOrder(postReq);
         return new ApiResult<>(postRes);
     }
+
+    @GetMapping
+    public ApiResult<List<CartItemRes>> readMyCart() {
+        var result = cartService.readMyCart();
+        return new ApiResult<>(result);
+    }
+
+
 }

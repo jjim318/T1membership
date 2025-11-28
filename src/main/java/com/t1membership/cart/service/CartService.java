@@ -6,8 +6,11 @@ import com.t1membership.cart.dto.deleteCartItem.DeleteCartItemReq;
 import com.t1membership.cart.dto.deleteCartItem.DeleteCartItemRes;
 import com.t1membership.cart.dto.prepareOrder.PrepareOrderReq;
 import com.t1membership.cart.dto.prepareOrder.PrepareOrderRes;
+import com.t1membership.cart.dto.readCart.CartItemRes;
 import com.t1membership.cart.dto.updateCartItemQuantity.UpdateCartItemQuantityReq;
 import com.t1membership.cart.dto.updateCartItemQuantity.UpdateCartItemQuantityRes;
+
+import java.util.List;
 
 public interface CartService {
 
@@ -18,4 +21,7 @@ public interface CartService {
     UpdateCartItemQuantityRes updateQuantity(String memberEmail, Long itemNo, UpdateCartItemQuantityReq updateCartItemQuantityReq);
 
     PrepareOrderRes prepareOrder(PrepareOrderReq prepareOrderReq);
+
+    List<CartItemRes> readMyCart();
+
 }
