@@ -99,7 +99,8 @@ public class SecurityConfig {
                         "/member/join",
                         "/member/exists",
                         "/v3/api-docs/**",
-                        "/webjars/**"
+                        "/webjars/**",
+                        "/main/feed"
                 ).permitAll()
 
                 // 게시판/아이템/댓글 조회 (GET)

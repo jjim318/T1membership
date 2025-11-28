@@ -74,4 +74,5 @@ public class PageResponseDTO<E> { // <E> E 엔티티용 변수명 (변할 수 �
         this.prev = this.start > 1;
         this.next = total > this.end * this.size;
     }
+
 }
