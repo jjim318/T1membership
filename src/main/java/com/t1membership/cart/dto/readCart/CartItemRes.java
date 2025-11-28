@@ -35,6 +35,24 @@ public class CartItemRes {
         BigDecimal unitPrice = item.getItemPrice();
         BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(line.getItemQuantity()));
 
+        // 🔥 옵션 문구 만들기
+        String label = line.getOptionLabel();   // DB에 이미 저장돼 있으면 이거 우선
+        if (label == null || label.isBlank()) {
+            String value = line.getOptionValue();   // S, M, FAKER ...
+            if (value != null && !value.isBlank()) {
+                label = value;
+                // 만약 "SIZE / S" 처럼 kind 도 같이 보여주고 싶으면:
+                 String kind = line.getOptionKind();
+                 if (kind != null && !kind.isBlank()) {
+                     label = kind + " / " + value;
+                 } else {
+                     label = value;
+                 }
+            } else {
+                label = null; // 진짜 아무 정보도 없으면 null 유지
+            }
+        }
+
         return CartItemRes.builder()
                 .itemNo(item.getItemNo())
                 .cartNo(line.getCartNo())

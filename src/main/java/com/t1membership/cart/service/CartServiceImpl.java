@@ -327,35 +327,58 @@ public class CartServiceImpl implements CartService {
                     BigDecimal unitPrice = item.getItemPrice();
                     BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(qty));
 
+                    // 🔥 멤버십 전용 여부 (형님이 원래 쓰던 로직 그대로 유지)
                     boolean membershipOnly = false;
-
                     if (item.getItemCategory() != null) {
                         var cat = item.getItemCategory();
-
-                        // 🔥 MD + MEMBERSHIP 둘 다 멤버십 전용으로 취급
                         membershipOnly =
                                 "MD".equalsIgnoreCase(cat.toString()) ||
                                         "MEMBERSHIP".equalsIgnoreCase(cat.toString());
                     }
 
-
                     boolean soldOut = item.getItemStock() <= 0;
+
+                    // 🔥 옵션 라벨 만들기 (엔티티에 있으면 그거 쓰고, 없으면 kind/value 조합)
+                    String optionLabel = buildOptionLabel(line);
 
                     return CartItemRes.builder()
                             .itemNo(item.getItemNo())
                             .cartNo(line.getCartNo())
                             .itemName(item.getItemName())
-                            .thumbnail(resolveThumbnail(item))  // 🔥 썸네일 추출
+                            .thumbnail(resolveThumbnail(item))   // ✅ 다시 이거 사용
                             .quantity(qty)
                             .unitPrice(unitPrice)
                             .lineTotal(lineTotal)
                             .membershipOnly(membershipOnly)
                             .soldOut(soldOut)
-                            .optionLabel(null)                  // 옵션은 나중에 구조 잡으면 채우기
+                            .optionLabel(optionLabel)            // ✅ 옵션 문자열 세팅
                             .build();
                 })
                 .toList();
     }
+//헬퍼메서드
+// 옵션 문자열 생성
+private String buildOptionLabel(CartEntity line) {
+    String label = line.getOptionLabel();
+    if (label != null && !label.isBlank()) {
+        return label;
+    }
+
+    String kind = line.getOptionKind();    // SIZE / PLAYER ...
+    String value = line.getOptionValue();  // XL / FAKER ...
+
+    boolean hasKind  = kind != null && !kind.isBlank();
+    boolean hasValue = value != null && !value.isBlank();
+
+    if (!hasKind && !hasValue) return null;
+    if (!hasKind) return value;
+    if (!hasValue) return kind;
+
+    // 예: "size / XL", "PLAYER / SMASH"
+    return kind + " / " + value;
+}
+
+
 
 
     // ========== 🔥 썸네일 추출 유틸 ==========
