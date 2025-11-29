@@ -195,62 +195,68 @@ export default function ShopPage() {
                                 </div>
                             )}
 
-                            {items.map((item) => (
-                                <Link
-                                    key={item.itemNo}
-                                    href={`/shop/${item.itemNo}`}   // ★ 상세 페이지로 이동
-                                    className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
-                                >
-                                    {/* 썸네일*/}
-                                    <div className="relative h-56 w-full bg-zinc-900">
-                                        <Image
-                                            src={item.thumbnailUrl || "/shop/placeholder.png"} // ★ 백에서 온 썸네일 우선 사용
-                                            alt={item.itemName}
-                                            fill
-                                            className="object-cover transition-transform group-hover:scale-105"
-                                        />
+                            {items.map((item) => {
+                                console.log("[DEBUG] itemCategory =", item.itemCategory, "for itemNo =", item.itemNo);
+
+                                return (
+                                    <Link
+                                        key={item.itemNo}
+                                        href={`/shop/${item.itemNo}`}   // ★ 상세 페이지로 이동
+                                        className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
+                                    >
+                                        {/* 썸네일*/}
+                                        <div className="relative h-56 w-full bg-zinc-900">
+                                            <Image
+                                                src={item.thumbnailUrl || "/shop/placeholder.png"} // ★ 백에서 온 썸네일 우선 사용
+                                                alt={item.itemName}
+                                                fill
+                                                className="object-cover transition-transform group-hover:scale-105"
+                                            />
 
 
-                                        {/* 좌상단 카테고리 뱃지 */}
-                                        <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
-                                            {item.itemCategory === "MD" && "MD"}
-                                            {item.itemCategory === "MEMBERSHIP" && "MEMBERSHIP"}
-                                            {item.itemCategory === "POP" && "POP"}
+                                            {/* 좌상단 카테고리 뱃지 */}
+                                            <div
+                                                className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                                {item.itemCategory === "MD" && "MD"}
+                                                {item.itemCategory === "MEMBERSHIP" && "MEMBERSHIP"}
+                                                {item.itemCategory === "POP" && "POP"}
+                                            </div>
+
+                                            {/* 우상단 태그 NEW / LIMITED
+                           → 백엔드에서 정보가 없으니 일단 생략 / 나중에 확장 */}
+                                            {/* {item.itemSellStatus === "SOLD_OUT" && ...} */}
                                         </div>
 
-                                        {/* 우상단 태그 NEW / LIMITED
-                       → 백엔드에서 정보가 없으니 일단 생략 / 나중에 확장 */}
-                                        {/* {item.itemSellStatus === "SOLD_OUT" && ...} */}
-                                    </div>
-
-                                    {/* 텍스트 영역 */}
-                                    <div className="flex flex-1 flex-col px-4 py-3">
-                                        {/* 상단 작은 라벨 (예시: 멤버십 전용) */}
-                                        {item.itemCategory === "MEMBERSHIP" && (
-                                            <span className="mb-1 text-[11px] text-amber-300">
-                        멤버십 전용
-                      </span>
-                                        )}
-
-                                        <h2 className="line-clamp-2 text-sm font-semibold">
-                                            {item.itemName}
-                                        </h2>
-
-                                        <div className="mt-2 text-[15px] font-bold">
-                                            {formatPrice(item.itemPrice)}
-                                        </div>
-
-                                        {/* 하단 품절 태그 */}
-                                        <div className="mt-2 text-[11px] text-gray-400">
-                                            {item.itemSellStatus === "SOLD_OUT" && (
-                                                <span className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
-                          품절
-                        </span>
+                                        {/* 텍스트 영역 */}
+                                        <div className="flex flex-1 flex-col px-4 py-3">
+                                            {/* 상단 작은 라벨 (예시: 멤버십 전용) */}
+                                            {item.itemCategory === "MEMBERSHIP" && (
+                                                <span className="mb-1 text-[11px] text-amber-300">
+                            멤버십 전용
+                          </span>
                                             )}
+
+                                            <h2 className="line-clamp-2 text-sm font-semibold">
+                                                {item.itemName}
+                                            </h2>
+
+                                            <div className="mt-2 text-[15px] font-bold">
+                                                {formatPrice(item.itemPrice)}
+                                            </div>
+
+                                            {/* 하단 품절 태그 */}
+                                            <div className="mt-2 text-[11px] text-gray-400">
+                                                {item.itemSellStatus === "SOLD_OUT" && (
+                                                    <span
+                                                        className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
+                              품절
+                            </span>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                </Link>
-                            ))}
+                                    </Link>
+                                );
+                            })}
                         </section>
 
                         {/* 더보기 버튼 (페이지네이션 연동은 나중에) */}

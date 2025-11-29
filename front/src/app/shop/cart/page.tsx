@@ -272,126 +272,124 @@ export default function CartPage() {
 
                 {/* 상품 리스트 */}
                 <section className="space-y-6">
-                    {items.map((item) => {
-                        const isMembershipItem = item.membershipOnly;
+                    {items.map((item) => (
+                        <div
+                            key={item.cartNo}
+                            className="flex gap-4 border-b border-zinc-800 pb-10"
+                        >
+                            {/* 체크박스 */}
+                            <div className="pt-3">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedIds.includes(item.cartNo)}
+                                    onChange={() => toggleOne(item.cartNo)}
+                                    className="h-3 w-3 rounded-sm border border-zinc-500 bg-black accent-red-600"
+                                />
+                            </div>
 
-                        return (
-                            <div
-                                key={item.cartNo}
-                                className="flex gap-4 border-b border-zinc-800 pb-10"
-                            >
-                                {/* 체크박스 */}
-                                <div className="pt-3">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedIds.includes(item.cartNo)}
-                                        onChange={() => toggleOne(item.cartNo)}
-                                        className="h-3 w-3 rounded-sm border border-zinc-500 bg-black accent-red-600"
+                            {/* 🔥 왼쪽: 썸네일 - 문구 - 수량박스 */}
+                            {/* 🔥 왼쪽: 썸네일 - 수량박스만 남김 */}
+                            <div className="flex w-32 flex-col gap-2">
+                                {/* 썸네일 */}
+                                <div className="relative h-24 w-24 overflow-hidden rounded-md bg-zinc-900">
+                                    <Image
+                                        src={
+                                            item.thumbnail.startsWith("http") ||
+                                            item.thumbnail.startsWith("/")
+                                                ? item.thumbnail
+                                                : `/${item.thumbnail}`
+                                        }
+                                        alt={item.itemName}
+                                        fill
+                                        sizes="96px"
+                                        className="object-cover"
                                     />
                                 </div>
 
-                                {/* 본문 */}
-                                <div className="flex-1">
-                                    <div className="flex gap-4">
-                                        {/* 🔥 왼쪽 컬럼: 썸네일 + 그 바로 아래 수량 박스 */}
-                                        <div className="flex flex-col items-start">
-                                            {/* 썸네일 */}
-                                            <div className="relative h-24 w-24 overflow-hidden rounded-md bg-zinc-900">
-                                                <Image
-                                                    src={
-                                                        item.thumbnail.startsWith("http") ||
-                                                        item.thumbnail.startsWith("/")
-                                                            ? item.thumbnail
-                                                            : `/${item.thumbnail}`
-                                                    }
-                                                    alt={item.itemName}
-                                                    fill
-                                                    sizes="96px"
-                                                    className="object-cover"
-                                                />
-                                            </div>
-
-                                            {/* 🔥 수량 박스: 썸네일 바로 아래 */}
-                                            <div className="mt-3 inline-flex h-8 w-[110px] items-center justify-between rounded-full border border-zinc-700 bg-black">
-                                                <button
-                                                    type="button"
-                                                    className="flex h-full w-8 items-center justify-center text-xs text-zinc-300 hover:bg-zinc-800"
-                                                    onClick={() => updateQuantity(item, -1)}
-                                                >
-                                                    -
-                                                </button>
-                                                <span className="text-xs text-white">
-                                {item.quantity}
-                            </span>
-                                                <button
-                                                    type="button"
-                                                    className="flex h-full w-8 items-center justify-center text-xs text-zinc-300 hover:bg-zinc-800"
-                                                    onClick={() => updateQuantity(item, +1)}
-                                                >
-                                                    +
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* 🔥 오른쪽 컬럼: 상품명 / 옵션 / 멤버십 문구 / 금액 */}
-                                        <div className="flex-1 flex flex-col justify-between">
-                                            {/* 위쪽: 상품명 + X 버튼 + 옵션 + 멤버십 문구 */}
-                                            <div>
-                                                {/* 1) 상품명 + X 버튼 */}
-                                                <div className="flex items-start justify-between">
-                                                    <div>
-                                                        <p className="text-sm font-semibold text-zinc-100 leading-tight">
-                                                            {item.itemName}
-                                                        </p>
-
-                                                        {/* 2) 옵션 라벨 (예: Navy / XL) */}
-                                                        {item.optionLabel && (
-                                                            <p className="mt-1 text-xs text-zinc-400">
-                                                                {item.optionLabel}
-                                                            </p>
-                                                        )}
-                                                    </div>
-
-                                                    <button
-                                                        type="button"
-                                                        className="text-lg text-zinc-500 hover:text-zinc-200"
-                                                        onClick={() => confirmDelete(item)}
-                                                    >
-                                                        ×
-                                                    </button>
-                                                </div>
-
-                                                {/* 3) 멤버십 문구 + 가입 버튼 (상품명 바로 아래 줄) */}
-                                                {isMembershipItem && (
-                                                    <div className="mt-2 flex items-center justify-between">
-                                    <span className="text-[11px] text-red-500">
-                                        멤버십 가입 후 구매할 수 있는 상품이에요.
-                                    </span>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => router.push("/membership/join")}
-                                                            className="text-[11px] font-semibold text-red-300 hover:text-red-200"
-                                                        >
-                                                            가입하기 &gt;
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* 아래쪽: 금액 (오른쪽 정렬) */}
-                                            <div className="mt-3 flex justify-end">
-                                                <p className="text-sm font-semibold">
-                                                    {item.lineTotal.toLocaleString("ko-KR")}원
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
+                                {/* 수량 박스 */}
+                                <div className="mt-1 inline-flex h-8 w-[110px] items-center justify-between rounded-full border border-zinc-700 bg-black">
+                                    <button
+                                        type="button"
+                                        className="flex h-full w-8 items-center justify-center text-xs text-zinc-300 hover:bg-zinc-800"
+                                        onClick={() => updateQuantity(item, -1)}
+                                    >
+                                        -
+                                    </button>
+                                    <span className="text-xs text-white">
+            {item.quantity}
+        </span>
+                                    <button
+                                        type="button"
+                                        className="flex h-full w-8 items-center justify-center text-xs text-zinc-300 hover:bg-zinc-800"
+                                        onClick={() => updateQuantity(item, +1)}
+                                    >
+                                        +
+                                    </button>
                                 </div>
                             </div>
-                        );
-                    })}
 
+                            {/* 🔥 오른쪽: 삭제버튼 - 멤버십문구+가입하기 - 가격 */}
+                            <div className="flex flex-1 flex-col justify-between">
+
+                                {/* 상품명 + 삭제 버튼 */}
+                                <div className="flex items-start justify-between">
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-semibold text-zinc-100 leading-tight">
+                                            {item.itemName}
+                                        </p>
+                                        {item.optionLabel && (
+                                            <p className="text-xs text-zinc-400">
+                                                {item.optionLabel}
+                                            </p>
+                                        )}
+                                        {item.soldOut && (
+                                            <p className="text-[11px] text-red-400">품절</p>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        className="text-lg text-zinc-500 hover:text-zinc-200"
+                                        onClick={() => confirmDelete(item)}
+                                        aria-label="장바구니에서 삭제"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+
+                                {/* 🔥 멤버십 문구 + 가입하기 버튼을 같은 줄로 배치 */}
+                                {item.membershipOnly && (
+                                    <div className="mt-3 flex items-center justify-between">
+            <span className="text-[11px] text-red-500 whitespace-nowrap">
+                멤버십 가입 후 구매할 수 있는 상품이에요.
+            </span>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => router.push("/membership/join")}
+                                            className="text-[11px] font-semibold text-red-300 hover:text-red-200"
+                                        >
+                                            가입하기 &gt;
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* 가격 */}
+                                <div className="mt-3 flex justify-end">
+                                    <p className="text-sm font-semibold">
+                                        {item.lineTotal.toLocaleString("ko-KR")}원
+                                    </p>
+                                </div>
+                            </div>
+
+                        </div>
+                    ))}
+
+                    {items.length === 0 && (
+                        <p className="py-16 text-center text-sm text-zinc-400">
+                            장바구니에 담긴 상품이 없습니다.
+                        </p>
+                    )}
                 </section>
 
 
