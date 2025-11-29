@@ -6,4 +6,3 @@ public enum MembershipPayType {
     RECURRING,  // 정기결제 (매월 자동 결제)
     NO_MEMBERSHIP
 }
-
