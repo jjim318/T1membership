@@ -229,11 +229,11 @@ export default function ShopPage() {
 
                                         {/* 텍스트 영역 */}
                                         <div className="flex flex-1 flex-col px-4 py-3">
-                                            {/* 상단 작은 라벨 (예시: 멤버십 전용) */}
-                                            {item.itemCategory === "MEMBERSHIP" && (
+                                            {/* 상단 작은 라벨 : 이제 MD 상품에만 붙음 */}
+                                            {item.itemCategory === "MD" && (
                                                 <span className="mb-1 text-[11px] text-amber-300">
-                            멤버십 전용
-                          </span>
+                                                  멤버십 전용
+                                                </span>
                                             )}
 
                                             <h2 className="line-clamp-2 text-sm font-semibold">
@@ -247,13 +247,13 @@ export default function ShopPage() {
                                             {/* 하단 품절 태그 */}
                                             <div className="mt-2 text-[11px] text-gray-400">
                                                 {item.itemSellStatus === "SOLD_OUT" && (
-                                                    <span
-                                                        className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
-                              품절
-                            </span>
+                                                    <span className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
+                                                      품절
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>
+
                                     </Link>
                                 );
                             })}

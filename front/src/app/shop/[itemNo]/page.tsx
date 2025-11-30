@@ -19,7 +19,7 @@ interface ExistingImageDTO {
     sortOrder: number | null;
 }
 
-// 🔥 상세 이미지용 타입 (url 추가)
+// 상세 이미지용 타입 (url 추가)
 type DetailImage = ExistingImageDTO & { url: string };
 
 interface ItemDetail {
@@ -103,7 +103,6 @@ function extractEmailFromJwt(token: string | null): string | null {
         const json = atob(padded);
         const payload = JSON.parse(json);
 
-        // 형님 JWT 는 sub에 이메일이 있을 가능성이 큼
         return payload.sub ?? payload.memberEmail ?? null;
     } catch (e) {
         console.error("JWT decode 실패 =", e);
@@ -137,16 +136,13 @@ export default function ShopDetailPage() {
     // ===== 멤버십 전용 안내 모달 =====
     const [showMembershipModal, setShowMembershipModal] = useState(false);
 
-    // 🔥 로그인 필요 모달
-    const [showLoginRequiredModal, setShowLoginRequiredModal] =
-        useState(false);
+    // 로그인 필요 모달
+    const [showLoginRequiredModal, setShowLoginRequiredModal] = useState(false);
 
     // TODO: 실제 로그인/멤버십 여부로 교체
     const isMembershipUser = false;
-    const isMembershipItem = item?.itemCategory === "MEMBERSHIP";
 
-
-    // 🔥 장바구니 토스트
+    // 장바구니 토스트
     const [showCartToast, setShowCartToast] = useState(false);
     const cartToastTimerRef = useRef<number | null>(null);
 
@@ -178,7 +174,7 @@ export default function ShopDetailPage() {
         load();
     }, [itemNo]);
 
-    // 🔥 토스트 타이머 정리
+    // 토스트 타이머 정리
     useEffect(() => {
         return () => {
             if (cartToastTimerRef.current) {
@@ -208,6 +204,8 @@ export default function ShopDetailPage() {
     }
 
     // ===== 여기부터는 item 이 확실히 존재 =====
+    const isMembershipItem = item.itemCategory === "MEMBERSHIP";
+    const isPopItem = item.itemCategory === "POP";
 
     // 이미지 정리
     const sortedImages = [...(item.images ?? [])].sort(
@@ -221,8 +219,8 @@ export default function ShopDetailPage() {
             : `/${rawThumb}`;
 
     const detailImages: DetailImage[] = (isMembershipItem
-            ? sortedImages          // 🔥 멤버십이면 0번(= image_order 1)도 포함
-            : sortedImages.slice(1) // 굿즈는 기존처럼 0번을 썸네일로 빼고 나머지만
+            ? sortedImages // 멤버십이면 0번 포함
+            : sortedImages.slice(1) // 나머지는 0번은 썸네일, 나머지는 상세
     ).map((img) => {
         const raw = img.fileName;
         const url =
@@ -232,15 +230,20 @@ export default function ShopDetailPage() {
         return { ...img, url };
     });
 
-
     const isSoldOut =
         item.itemSellStatus === "SOLD_OUT" || item.itemStock <= 0;
-    const isMembershipOnly =
-        item.itemCategory === "MD" || item.itemCategory === "MEMBERSHIP";
+
+    // 👉 MD만 멤버십 전용 상품
+    const isMembershipOnly = item.itemCategory === "MD";
 
     // 이 상품이 어떤 옵션 구조인지
-    const optionKind: OptionKind =
-        OPTION_KIND_TABLE[item.itemNo] ?? "SIZE";
+    let optionKind: OptionKind;
+    if (isPopItem) {
+        // POP 이용권은 수량만 선택
+        optionKind = "QTY_ONLY";
+    } else {
+        optionKind = OPTION_KIND_TABLE[item.itemNo] ?? "SIZE";
+    }
 
     const sizeOptions: SizeOption[] = SIZE_TABLE[item.itemNo] ?? [];
     const playerOptions: PlayerOption[] = PLAYER_TABLE[item.itemNo] ?? [];
@@ -252,15 +255,9 @@ export default function ShopDetailPage() {
                 ? "PLAYER 선택"
                 : "수량 선택";
 
-    // 🔥 여기서 멤버십 상품이면, 굿즈용 레이아웃 안 쓰고
-    //    아래 MembershipDetailBody 로 바로 분기
-    if (item.itemCategory === "MEMBERSHIP") {
-        return (
-            <MembershipDetailBody
-                item={item}
-                detailImages={detailImages}
-            />
-        );
+    // 멤버십 상품이면 별도 레이아웃
+    if (isMembershipItem) {
+        return <MembershipDetailBody item={item} detailImages={detailImages} />;
     }
 
     // ===== 모달 열기/닫기 =====
@@ -306,19 +303,19 @@ export default function ShopDetailPage() {
             return;
         }
 
-        // 🔥 1차: localStorage 에서 이메일 꺼내기
+        // 1차: localStorage 에서 이메일
         let memberEmail =
             typeof window !== "undefined"
                 ? localStorage.getItem("memberEmail")
                 : null;
 
-        // 🔥 2차: 그래도 없으면 JWT 에서 추출해서 채워넣기
+        // 2차: JWT 에서 꺼내기
         if (!memberEmail && typeof window !== "undefined") {
             const token = localStorage.getItem("accessToken");
             const fromJwt = extractEmailFromJwt(token);
             if (fromJwt) {
                 memberEmail = fromJwt;
-                localStorage.setItem("memberEmail", fromJwt); // 다음부터는 바로 사용 가능
+                localStorage.setItem("memberEmail", fromJwt);
                 console.log("JWT에서 memberEmail 복구 =", fromJwt);
             }
         }
@@ -341,7 +338,6 @@ export default function ShopDetailPage() {
 
         const qty = optionKind === "PLAYER" ? 1 : quantity;
 
-        // 👉 AddCartItemReq 에 맞는 최소 payload (itemNo + quantity)
         const optionValue =
             optionKind === "SIZE"
                 ? selectedSize
@@ -359,16 +355,18 @@ export default function ShopDetailPage() {
         const cartPayload = {
             itemNo: item.itemNo,
             quantity: qty,
-            optionKind, // "SIZE" | "PLAYER" | "QTY_ONLY"
-            optionValue, // "S", "M", "FAKER" 같은 실제 값
-            optionLabel, // 화면에 바로 보여줄 한글 라벨
+            optionKind,
+            optionValue,
+            optionLabel,
         };
 
         try {
             setCartLoading(true);
             setOptionError(null);
 
-            if (mode === "CART") {
+            // POP 에서는 CART 모드 자체를 안 쓰지만,
+            // 혹시라도 호출되면 그냥 무시
+            if (mode === "CART" && !isPopItem) {
                 const url = `/cart/${encodeURIComponent(memberEmail)}/items`;
 
                 const res = await apiClient.post<ApiResult<unknown>>(
@@ -378,19 +376,14 @@ export default function ShopDetailPage() {
 
                 console.log("✅ CART 성공 res =", res.data);
 
-                // 모달 닫기
                 setIsOptionModalOpen(false);
 
-                // 🔥 토스트 켜기
                 setShowCartToast(true);
-                console.log("✅ showCartToast=true 로 변경");
 
-                // 이전 타이머 있으면 제거
                 if (cartToastTimerRef.current !== null) {
                     window.clearTimeout(cartToastTimerRef.current);
                 }
 
-                // 3초 뒤 자동으로 닫기
                 cartToastTimerRef.current = window.setTimeout(() => {
                     console.log("⏰ 토스트 자동 종료");
                     setShowCartToast(false);
@@ -399,8 +392,10 @@ export default function ShopDetailPage() {
                 return;
             }
 
-            // === 아래는 BUY 로직 (기존 그대로) ===
-            if (!isMembershipUser) {
+            // === BUY 로직 ===
+            // 👉 MD 상품(멤버십 전용)만 멤버십 체크
+            const isMembershipOnlyItem = item.itemCategory === "MD";
+            if (isMembershipOnlyItem && !isMembershipUser) {
                 setShowMembershipModal(true);
                 return;
             }
@@ -419,15 +414,13 @@ export default function ShopDetailPage() {
             setIsOptionModalOpen(false);
             router.push(`/order/checkout/${orderNo}`);
         } catch (e: any) {
-            console.error("장바구니 추가 실패 =", e);
+            console.error("요청 실패 =", e);
             if (e.response) {
                 console.error("status =", e.response.status);
                 console.error("data   =", e.response.data);
             }
             setOptionError("요청 처리 중 오류가 발생했습니다.");
-            alert(
-                "장바구니 담기 중 오류가 발생했습니다. (콘솔 로그 확인)",
-            );
+            alert("요청 처리 중 오류가 발생했습니다. (콘솔 로그 확인)");
         } finally {
             setCartLoading(false);
         }
@@ -458,7 +451,7 @@ export default function ShopDetailPage() {
 
     return (
         <div className="min-h-screen bg-black text-white">
-            {/* 🔥 장바구니 토스트 (좌측 하단) */}
+            {/* 장바구니 토스트 (좌측 하단) */}
             {showCartToast && (
                 <div
                     className="fixed"
@@ -522,17 +515,36 @@ export default function ShopDetailPage() {
                     </div>
                 </section>
 
-                {/* ===== 썸네일 아래 영역 ===== */}
+                {/* 썸네일 아래 영역 */}
                 <section className="mb-8 border-b border-zinc-800 pb-6">
-                    <h1 className="text-lg font-semibold leading-snug">
-                        {item.itemName}
-                    </h1>
+                    {isPopItem ? (
+                        <>
+                            <p className="text-xs text-zinc-400">
+                                POP 구독형 이용권
+                            </p>
+                            <h1 className="mt-2 text-lg font-semibold leading-snug">
+                                {item.itemName}
+                            </h1>
+                            <p className="mt-3 text-2xl font-bold">
+                                {item.itemPrice.toLocaleString("ko-KR")}원
+                                <span className="ml-1 text-sm font-normal text-zinc-300">
+                                    /월 (세금 포함가)
+                                </span>
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <h1 className="text-lg font-semibold leading-snug">
+                                {item.itemName}
+                            </h1>
 
-                    <p className="mt-3 text-2xl font-bold">
-                        {item.itemPrice.toLocaleString("ko-KR")}원
-                    </p>
+                            <p className="mt-3 text-2xl font-bold">
+                                {item.itemPrice.toLocaleString("ko-KR")}원
+                            </p>
+                        </>
+                    )}
 
-                    {/* 멤버십 전용 배너 (MD/MEMBERSHIP 공통) */}
+                    {/* 멤버십 전용 배너 (MD만) */}
                     {isMembershipOnly && (
                         <div className="mt-4 flex items-center justify-between rounded-md bg-red-900/80 px-4 py-3 text-xs">
                             <div className="flex items-center gap-2">
@@ -545,75 +557,79 @@ export default function ShopDetailPage() {
                         </div>
                     )}
 
-                    {/* ===== 배송 정보 + 상세 배송 옵션 아코디언 ===== */}
-                    <div className="mt-6 text-xs">
-                        <div className="flex items-center justify-between">
-                            <div className="flex gap-4">
-                                <span className="text-zinc-400">
-                                    배송 정보
-                                </span>
+                    {/* 배송 관련 문구: POP이 아닐 때만 표시 */}
+                    {!isPopItem && (
+                        <div className="mt-6 text-xs">
+                            <div className="flex items-center justify-between">
+                                <div className="flex gap-4">
+                                    <span className="text-zinc-400">
+                                        배송 정보
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setShowShippingDetail(
+                                                (prev) => !prev,
+                                            )
+                                        }
+                                        className="text-zinc-100 hover:text-white"
+                                    >
+                                        상세 배송 옵션
+                                    </button>
+                                </div>
+
                                 <button
                                     type="button"
                                     onClick={() =>
                                         setShowShippingDetail((prev) => !prev)
                                     }
-                                    className="text-zinc-100 hover:text-white"
+                                    aria-label="상세 배송 옵션 열기"
+                                    className="text-zinc-400 text-lg"
                                 >
-                                    상세 배송 옵션
+                                    {showShippingDetail ? "▴" : "▾"}
                                 </button>
                             </div>
 
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    setShowShippingDetail((prev) => !prev)
-                                }
-                                aria-label="상세 배송 옵션 열기"
-                                className="text-zinc-400 text-lg"
-                            >
-                                {showShippingDetail ? "▴" : "▾"}
-                            </button>
+                            {showShippingDetail && (
+                                <div className="mt-4 space-y-4 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-[11px] leading-relaxed text-zinc-300">
+                                    <div>
+                                        <p className="text-xs font-semibold text-white">
+                                            국내 배송
+                                        </p>
+                                        <p className="mt-1">
+                                            CJ대한통운 / 기본 3,000원, 도서산간
+                                            6,000원
+                                            <br />
+                                            (50,000원 이상 구매 시 무료 배송)
+                                        </p>
+                                        <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
+                                            출고 이후 3영업일 소요 예상
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <p className="text-xs font-semibold text-white">
+                                            해외 배송
+                                        </p>
+                                        <p className="mt-1">
+                                            DHL / 배송 국가 및 무게에 따라
+                                            배송비가 책정됩니다.
+                                        </p>
+                                        <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
+                                            출고 이후 5영업일 이상 소요 예상
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <p className="mt-3 text-[11px] text-zinc-400">
+                                국내·해외 배송이 가능한 상품이에요.
+                            </p>
                         </div>
-
-                        {showShippingDetail && (
-                            <div className="mt-4 space-y-4 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-[11px] leading-relaxed text-zinc-300">
-                                <div>
-                                    <p className="text-xs font-semibold text-white">
-                                        국내 배송
-                                    </p>
-                                    <p className="mt-1">
-                                        CJ대한통운 / 기본 3,000원, 도서산간
-                                        6,000원
-                                        <br />
-                                        (50,000원 이상 구매 시 무료 배송)
-                                    </p>
-                                    <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
-                                        출고 이후 3영업일 소요 예상
-                                    </p>
-                                </div>
-
-                                <div>
-                                    <p className="text-xs font-semibold text-white">
-                                        해외 배송
-                                    </p>
-                                    <p className="mt-1">
-                                        DHL / 배송 국가 및 무게에 따라
-                                        배송비가 책정됩니다.
-                                    </p>
-                                    <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
-                                        출고 이후 5영업일 이상 소요 예상
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-                        <p className="mt-3 text-[11px] text-zinc-400">
-                            국내·해외 배송이 가능한 상품이에요.
-                        </p>
-                    </div>
+                    )}
                 </section>
 
-                {/* ===== 상품 상세설명 이미지 ===== */}
+                {/* 상품 상세설명 이미지 */}
                 <section className="mt-10 space-y-6 pb-4">
                     {detailImages.map((img) => (
                         <div
@@ -630,9 +646,39 @@ export default function ShopDetailPage() {
                         </div>
                     ))}
                 </section>
+
+                {/* POP 전용 유의사항 */}
+                {isPopItem && (
+                    <section className="mt-8 pb-10 text-[11px] leading-relaxed text-zinc-400">
+                        <p className="mb-2 font-semibold text-zinc-200">
+                            유의 사항
+                        </p>
+                        <ul className="space-y-1 list-disc pl-4">
+                            <li>
+                                이용권 구매 후 POP에 입장하였거나, 첫 결제 후 7일이
+                                지나면 구매확정 처리됩니다.
+                            </li>
+                            <li>구매확정 이후 청약철회가 불가합니다.</li>
+                            <li>
+                                다인권 이용권 구매 시, 선택한 모든 인원의 POP
+                                입장이 아닌 최초 입장 기준으로 사용 처리됩니다.
+                            </li>
+                            <li>
+                                더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할
+                                수 있습니다. 정기 결제를 해지하더라도 이용 기간
+                                마지막 날까지 이용이 가능하며, 이용 기간 종료 후
+                                해지 처리됩니다.
+                            </li>
+                            <li>
+                                멤버십 전용 상품의 경우, 구매확정되지 않은 멤버십은
+                                이용권 결제완료 시 구매확정 처리됩니다.
+                            </li>
+                        </ul>
+                    </section>
+                )}
             </main>
 
-            {/* ================== 옵션 선택 모달 ================== */}
+            {/* 옵션 선택 모달 */}
             {isOptionModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-5 py-4 shadow-xl border border-zinc-700">
@@ -650,7 +696,7 @@ export default function ShopDetailPage() {
                             </button>
                         </div>
 
-                        {/* ===== 옵션 선택 영역 (SIZE / PLAYER) ===== */}
+                        {/* 옵션 선택 영역 (SIZE / PLAYER) */}
                         {optionKind === "SIZE" && (
                             <div className="mb-4">
                                 <button
@@ -768,7 +814,7 @@ export default function ShopDetailPage() {
 
                         {/* QTY_ONLY는 별도 옵션 선택 UI 없음 */}
 
-                        {/* ===== 선택된 옵션 / 수량 & 금액 ===== */}
+                        {/* 선택된 옵션 / 수량 & 금액 */}
                         {hasSelection && (
                             <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-3">
                                 <div className="mb-2 flex items-center justify-between text-sm text-zinc-100">
@@ -840,45 +886,60 @@ export default function ShopDetailPage() {
                             </p>
                         )}
 
-                        {/* 🔥 PLAYER 전용 안내 문구 */}
+                        {/* PLAYER 전용 안내 문구 */}
                         {optionKind === "PLAYER" && (
                             <p className="mb-3 text-[11px] text-zinc-400 text-left">
                                 1인당 각 옵션별로 1개까지 구매할 수 있어요.
                             </p>
                         )}
 
-                        {/* 모달 하단 버튼: 장바구니 / 바로구매 */}
-                        <div className="mt-2 flex gap-3">
-                            <button
-                                type="button"
-                                disabled={cartLoading}
-                                onClick={() =>
-                                    handleConfirmWithOptions("CART")
-                                }
-                                className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
-                                    cartLoading
-                                        ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
-                                        : "border-zinc-500 text-white bg-black hover:bg-zinc-900"
-                                }`}
-                            >
-                                장바구니
-                            </button>
-                            <button
-                                type="button"
-                                disabled={cartLoading}
-                                onClick={() =>
-                                    handleConfirmWithOptions("BUY")
-                                }
-                                className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500"
-                            >
-                                바로 구매
-                            </button>
-                        </div>
+                        {/* 모달 하단 버튼: POP이면 구매 하나, 나머진 장바구니 + 구매 */}
+                        {isPopItem ? (
+                            <div className="mt-2">
+                                <button
+                                    type="button"
+                                    disabled={cartLoading}
+                                    onClick={() =>
+                                        handleConfirmWithOptions("BUY")
+                                    }
+                                    className="w-full rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                                >
+                                    구매하기
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="mt-2 flex gap-3">
+                                <button
+                                    type="button"
+                                    disabled={cartLoading}
+                                    onClick={() =>
+                                        handleConfirmWithOptions("CART")
+                                    }
+                                    className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                                        cartLoading
+                                            ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
+                                            : "border-zinc-500 text-white bg-black hover:bg-zinc-900"
+                                    }`}
+                                >
+                                    장바구니
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={cartLoading}
+                                    onClick={() =>
+                                        handleConfirmWithOptions("BUY")
+                                    }
+                                    className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                                >
+                                    바로 구매
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
 
-            {/* ================== 멤버십 전용 안내 모달 ================== */}
+            {/* 멤버십 전용 안내 모달 */}
             {showMembershipModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-6 py-5 shadow-xl border border-zinc-700">
@@ -907,7 +968,7 @@ export default function ShopDetailPage() {
                 </div>
             )}
 
-            {/* 🔥 로그인 필요 모달 */}
+            {/* 로그인 필요 모달 */}
             {showLoginRequiredModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-6 py-5 shadow-xl border border-zinc-700">
@@ -942,7 +1003,7 @@ export default function ShopDetailPage() {
                 </div>
             )}
 
-            {/* ================== 하단 고정 푸터 ================== */}
+            {/* 하단 고정 푸터 */}
             <footer className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-800 bg-black/95 backdrop-blur-sm">
                 <div className="mx-auto max-w-4xl px-4 py-3">
                     {isSoldOut ? (
@@ -952,6 +1013,16 @@ export default function ShopDetailPage() {
                             className="w-full rounded-xl py-3 text-sm font-semibold text-center bg-zinc-700 text-zinc-400 cursor-not-allowed"
                         >
                             품절
+                        </button>
+                    ) : isPopItem ? (
+                        // 🔥 POP : 장바구니 없이 구매하기만
+                        <button
+                            type="button"
+                            disabled={cartLoading}
+                            onClick={openOptionModal}
+                            className="w-full rounded-xl py-3 text-sm font-semibold text-center bg-red-600 text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                        >
+                            구매하기
                         </button>
                     ) : (
                         <div className="flex gap-3">
@@ -974,7 +1045,7 @@ export default function ShopDetailPage() {
                                 type="button"
                                 disabled={cartLoading}
                                 onClick={openOptionModal}
-                                className="flex-1 rounded-xl py-3 text-sm font-semibold text-center bg-red-600 text-white hover:bg-red-500"
+                                className="flex-1 rounded-xl py-3 text-sm font-semibold text-center bg-red-600 text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
                             >
                                 구매하기
                             </button>
@@ -1007,24 +1078,19 @@ function MembershipDetailBody({
 
     const thumbnailImage = detailImages[0];
     const otherImages = detailImages.slice(1);
-    // KRW 가격은 백에서 내려오는 값
     const priceKRW = item.itemPrice;
 
-    // 🔥 membershipPayType 에 따라 USD 가격 자동 결정
     const payType = (item.membershipPayType || "").toUpperCase();
 
-    let priceUSD = 6.30; // 기본값: 정기(RECURRING)
+    let priceUSD = 6.3; // 기본값: 정기(RECURRING)
 
-    if (item.membershipPayType === "ONE_TIME") {
-        priceUSD = 6.50; // 단건
+    if (payType === "ONE_TIME") {
+        priceUSD = 6.5;
     }
 
-    if (item.membershipPayType === "YEARLY") {
-        priceUSD = 60.00; // 예: 연간권 - 형님 바꾸고 싶은 값 직접 수정 가능
+    if (payType === "YEARLY") {
+        priceUSD = 60.0;
     }
-
-// NO_MEMBERSHIP 는 일반 상품 → USD 필요없으면 기본 유지하거나 숨기면 됨
-
 
     return (
         <main className="min-h-screen bg-black text-zinc-100">
@@ -1035,7 +1101,7 @@ function MembershipDetailBody({
                         멤버십 가입하기
                     </h1>
 
-                    {/* 결제 단위 드롭다운 (아코디언) */}
+                    {/* 결제 단위 드롭다운 */}
                     <div className="relative text-xs">
                         <button
                             type="button"
@@ -1112,7 +1178,7 @@ function MembershipDetailBody({
                     </div>
                 )}
 
-                {/* 옵션 선택 + 정기결제 카드 (좌측 정렬) */}
+                {/* 옵션 선택 + 정기결제 카드 */}
                 <div className="mt-16 w-full max-w-3xl">
                     <p className="mb-3 text-xs font-semibold text-zinc-200">
                         옵션 선택
@@ -1126,13 +1192,14 @@ function MembershipDetailBody({
                             </h2>
                             <p className="text-xs text-zinc-300">
                                 {currency === "KRW"
-                                    ? `${priceKRW.toLocaleString("ko-KR")}원/1개월`
+                                    ? `${priceKRW.toLocaleString(
+                                        "ko-KR",
+                                    )}원/1개월`
                                     : `$${priceUSD.toFixed(2)}/1개월`}
                             </p>
-
                         </div>
 
-                        {/* 혜택 목록 – 일단 하드코딩 */}
+                        {/* 혜택 목록 */}
                         <ul className="mt-4 space-y-2 text-xs text-zinc-300">
                             <li className="flex items-center gap-2">
                                 <span className="inline-block h-3 w-3 rounded-sm bg-zinc-600" />
@@ -1156,7 +1223,7 @@ function MembershipDetailBody({
                             </li>
                         </ul>
 
-                        {/* 버튼들: 모양만 */}
+                        {/* 버튼들 */}
                         <div className="mt-6 space-y-2">
                             <button
                                 type="button"
@@ -1174,7 +1241,7 @@ function MembershipDetailBody({
                     </div>
                 </div>
 
-                {/* 유의사항 – 전부 좌측 정렬 */}
+                {/* 유의사항 */}
                 <section className="mt-10 w-full max-w-3xl text-left text-[11px] leading-relaxed text-zinc-400">
                     <p className="mb-2 font-semibold text-zinc-300">
                         유의사항
@@ -1186,12 +1253,13 @@ function MembershipDetailBody({
                     <p>· 구매 확정 이후 청약 철회가 불가합니다.</p>
                     <p>
                         · 더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할 수
-                        있습니다. 정기 결제를 해지하더라도 이용 기간 마지막 날까지
-                        이용이 가능하며, 이용 기간 종료 후 해지 처리됩니다.
+                        있습니다. 정기 결제를 해지하더라도 이용 기간 마지막
+                        날까지 이용이 가능하며, 이용 기간 종료 후 해지
+                        처리됩니다.
                     </p>
                 </section>
 
-                {/* 하단 전체 멤버십 보기 – 이건 중앙 정렬 유지 */}
+                {/* 하단 전체 멤버십 보기 */}
                 <div className="mt-12 flex w-full justify-center border-t border-zinc-800 pt-8">
                     <button
                         type="button"
