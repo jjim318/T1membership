@@ -2,6 +2,7 @@ package com.t1membership.item.dto.searchAllItem;
 
 import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.Player;
+import com.t1membership.item.constant.PopPlanType;
 import lombok.*;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +31,8 @@ public class SearchAllItemReq {
     private ItemCategory itemCategory = ItemCategory.ALL; // 🔥 기본값
 
     private Player popPlayer;
+
+    private PopPlanType popPlanType;
 
 
     public Pageable toPageable() {
