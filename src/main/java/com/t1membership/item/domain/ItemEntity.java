@@ -102,5 +102,21 @@ public class ItemEntity extends BaseEntity {
         image.setItem(null);
     }
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "pop_plan_type")
+    private PopPlanType popPlanType;
+
+    @Column(name = "pop_program_code")
+    private String popProgramCode;
+
+    /**
+     * 이 상품이 "멤버십 가입자만 구매 가능"한지 여부
+     * - [멤버십] POP → true
+     * - 일반 POP → false
+     * - 일반 MD인데 나중에 멤버십 전용으로 풀고 싶을 때도 true
+     */
+    @Column(name = "membership_only", nullable = false)
+    private boolean membershipOnly = false;
+
 
 }

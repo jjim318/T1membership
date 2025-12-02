@@ -221,49 +221,72 @@ public class ItemServiceImpl implements ItemService {
     }
 
     // =========================
-    // 전체 조회(페이지)
-    // =========================
+// 전체 조회(페이지)
+// =========================
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<SearchAllItemRes> searchAllItem(SearchAllItemReq req) {
 
         var pageable = req.toPageable();
 
-        // 🔥 필터 파라미터 (있다고 가정)
-        var category  = req.getItemCategory(); // MD / MEMBERSHIP / POP / ALL
-        var popPlayer = req.getPopPlayer();    // POP일 때만 의미 있음
+        // 🔥 필터 파라미터
+        var category    = req.getItemCategory();  // MD / MEMBERSHIP / POP / ALL
+        var popPlayer   = req.getPopPlayer();     // POP일 때만 의미
+        var popPlanType = req.getPopPlanType();   // GENERAL / MEMBERSHIP_ONLY ...
 
         Page<ItemEntity> page;
 
         // 1) 카테고리가 지정된 경우
         if (category != null && category != ItemCategory.ALL) {
 
-            // 1-1) 멤버십 전용: 활성 멤버십만
+            // 1-1) 멤버십 전용: 지금은 그냥 MEMBERSHIP 카테고리 전체
             if (category == ItemCategory.MEMBERSHIP) {
-                // 🔥 membershipActive 조건 제거
+
                 page = itemRepository.findAllByItemCategory(
                         ItemCategory.MEMBERSHIP,
                         pageable
                 );
+
             } else if (category == ItemCategory.POP) {
 
-                // 선수별 POP
-                if (popPlayer != null) {
-                    // ⚠ 여기서는 List → PageImpl 로 한번 감쌉니다.
+                // 🔥 POP 카테고리일 때는 popPlanType / popPlayer 조합으로 세분화
+
+                // 1) POP + PlanType + Player
+                if (popPlanType != null && popPlayer != null) {
+                    var list = itemRepository.findByItemCategoryAndPopPlanTypeAndPopPlayer(
+                            ItemCategory.POP,
+                            popPlanType,
+                            popPlayer
+                    );
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+
+                // 2) POP + PlanType만 (예: [멤버십]POP 탭 vs 일반 POP 탭)
+                else if (popPlanType != null) {
+                    var list = itemRepository.findByItemCategoryAndPopPlanType(
+                            ItemCategory.POP,
+                            popPlanType
+                    );
+                    page = new PageImpl<>(list, pageable, list.size());
+                }
+
+                // 3) POP + Player만 (기존 로직)
+                else if (popPlayer != null) {
                     var list = itemRepository.findByItemCategoryAndPopPlayer(
                             ItemCategory.POP,
                             popPlayer
                     );
                     page = new PageImpl<>(list, pageable, list.size());
                 }
-                // POP 전체
+
+                // 4) POP 전체
                 else {
                     var list = itemRepository.findByItemCategory(ItemCategory.POP);
                     page = new PageImpl<>(list, pageable, list.size());
                 }
 
-                // 1-3) MD 같은 나머지 카테고리
             } else {
+                // 1-3) MD 같은 나머지 카테고리
                 page = itemRepository.findAllByItemCategory(category, pageable);
             }
 
@@ -275,7 +298,7 @@ public class ItemServiceImpl implements ItemService {
         // 엔티티 → 응답 DTO 매핑
         var content = page.map(SearchAllItemRes::from).getContent();
 
-        //  SearchAllItemReq → PageRequestDTO 변환(어댑터)
+        // SearchAllItemReq → PageRequestDTO 변환(어댑터)
         PageRequestDTO pr = PageRequestDTO.builder()
                 .page(req.getPage())
                 .size(req.getSize())
@@ -288,6 +311,7 @@ public class ItemServiceImpl implements ItemService {
                 .total((int) page.getTotalElements())
                 .build();
     }
+
 
 
 

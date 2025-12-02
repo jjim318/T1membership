@@ -2,6 +2,7 @@ package com.t1membership.item.dto.searchAllItem;
 
 import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.ItemSellStatus;
+import com.t1membership.item.constant.PopPlanType;
 import com.t1membership.item.domain.ItemEntity;
 import lombok.*;
 
@@ -24,6 +25,9 @@ public class SearchAllItemRes {
     // ★ 썸네일 URL 추가
     private String thumbnailUrl;
 
+    private Boolean membershipOnly;  // boolean 말고 Boolean 써도 됨 (nullable 허용)
+    private PopPlanType popPlanType;
+
     public static SearchAllItemRes from(ItemEntity entity) {
 
         // ★ 첫 번째 이미지의 imageUrl을 썸네일로 사용
@@ -41,6 +45,8 @@ public class SearchAllItemRes {
                 .itemCategory(entity.getItemCategory())
                 .itemSellStatus(entity.getItemSellStatus())
                 .thumbnailUrl(thumbnailUrl)
+                .membershipOnly(entity.isMembershipOnly())
+                .popPlanType(entity.getPopPlanType())
                 .build();
     }
 }
