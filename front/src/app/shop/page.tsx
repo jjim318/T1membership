@@ -14,6 +14,9 @@ type ItemCategory = "ALL" | "MD" | "MEMBERSHIP" | "POP";
 // 백엔드 ItemSellStatus → 지금은 SELL 이라서 string 포함
 type ItemSellStatus = "SELL" | "SOLDOUT" | string;
 
+// 🔥 백엔드 PopPlanType enum과 맞춤 (필요한 값만)
+type PopPlanType = "GENERAL" | "MEMBERSHIP_ONLY" | string;
+
 // 상품 요약
 interface ItemSummary {
     itemNo: number;
@@ -24,6 +27,10 @@ interface ItemSummary {
     itemSellStatus: ItemSellStatus;
 
     thumbnailUrl?: string | null;
+
+    // 🔥 선택: 백엔드에서 보내주면 자동 매핑됨
+    popPlanType?: PopPlanType;
+    membershipOnly?: boolean;
 }
 
 // PageResponseDTO<SearchAllItemRes>
@@ -47,7 +54,12 @@ interface ApiResult<T> {
 }
 
 // ====== 프론트 전용 타입 (탭 카테고리) ======
-type ShopCategory = "상품" | "멤버십&이용권" | "T1 ZONE" | "[멤버십] POP" | "POP";
+type ShopCategory =
+    | "상품"
+    | "멤버십&이용권"
+    | "T1 ZONE"
+    | "[멤버십] POP"
+    | "POP";
 
 const categories: ShopCategory[] = [
     "상품",
@@ -79,6 +91,21 @@ function mapShopCategoryToItemCategory(cat: ShopCategory): ItemCategory | "ALL" 
     }
 }
 
+// 🔥 탭 -> 백엔드 PopPlanType 매핑
+function mapShopCategoryToPopPlanType(cat: ShopCategory): PopPlanType | undefined {
+    switch (cat) {
+        case "[멤버십] POP":
+            // 멤버십 전용 POP
+            return "MEMBERSHIP_ONLY";
+        case "POP":
+            // 일반 POP
+            return "GENERAL";
+        default:
+            // 다른 탭은 POP 플랜 타입 안 보냄
+            return undefined;
+    }
+}
+
 export default function ShopPage() {
     const [activeCategory, setActiveCategory] = useState<ShopCategory>("상품");
 
@@ -96,6 +123,7 @@ export default function ShopPage() {
             try {
                 // T1 ZONE 은 아직 데이터 없다고 가정 → 바로 빈 배열
                 const backendCategory = mapShopCategoryToItemCategory(activeCategory);
+                const popPlanType = mapShopCategoryToPopPlanType(activeCategory);
 
                 if (activeCategory === "T1 ZONE") {
                     setItems([]);
@@ -105,23 +133,28 @@ export default function ShopPage() {
                 setLoading(true);
                 setErrorMsg(null);
 
+                // 🔥 params 객체를 먼저 만든 다음, popPlanType이 있을 때만 추가
+                const params: Record<string, any> = {
+                    page,
+                    size,
+                    sortBy: "itemNo",
+                    direction: "DESC",
+                    itemCategory: backendCategory ?? "ALL",
+                };
+
+                if (popPlanType) {
+                    params.popPlanType = popPlanType;
+                }
+
                 const res = await apiClient.get<ApiResult<PageResponse<ItemSummary>>>(
                     "/item",
-                    {
-                        params: {
-                            page,
-                            size,
-                            sortBy: "itemNo",
-                            direction: "DESC",
-                            itemCategory: backendCategory ?? "ALL",
-                        },
-                    }
+                    { params }
                 );
 
-// 결과는 항상 res.data.result 안에 있음
+                // 결과는 항상 res.data.result 안에 있음
                 const pageData = res.data.result;
 
-// dtoList로 아이템 목록 설정
+                // dtoList로 아이템 목록 설정
                 setItems(pageData.dtoList);
 
             } catch (error) {
@@ -196,43 +229,48 @@ export default function ShopPage() {
                             )}
 
                             {items.map((item) => {
-                                console.log("[DEBUG] itemCategory =", item.itemCategory, "for itemNo =", item.itemNo);
+                                console.log(
+                                    "[DEBUG] itemCategory =",
+                                    item.itemCategory,
+                                    "popPlanType =",
+                                    item.popPlanType,
+                                    "for itemNo =",
+                                    item.itemNo
+                                );
 
                                 return (
                                     <Link
                                         key={item.itemNo}
-                                        href={`/shop/${item.itemNo}`}   // ★ 상세 페이지로 이동
+                                        href={`/shop/${item.itemNo}`} // ★ 상세 페이지로 이동
                                         className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
                                     >
                                         {/* 썸네일*/}
                                         <div className="relative h-56 w-full bg-zinc-900">
                                             <Image
-                                                src={item.thumbnailUrl || "/shop/placeholder.png"} // ★ 백에서 온 썸네일 우선 사용
+                                                src={
+                                                    item.thumbnailUrl ||
+                                                    "/shop/placeholder.png"
+                                                } // ★ 백에서 온 썸네일 우선 사용
                                                 alt={item.itemName}
                                                 fill
                                                 className="object-cover transition-transform group-hover:scale-105"
                                             />
 
-
                                             {/* 좌상단 카테고리 뱃지 */}
-                                            <div
-                                                className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                            <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
                                                 {item.itemCategory === "MD" && "MD"}
-                                                {item.itemCategory === "MEMBERSHIP" && "MEMBERSHIP"}
+                                                {item.itemCategory === "MEMBERSHIP" &&
+                                                    "MEMBERSHIP"}
                                                 {item.itemCategory === "POP" && "POP"}
                                             </div>
-
-                                            {/* 우상단 태그 NEW / LIMITED
-                           → 백엔드에서 정보가 없으니 일단 생략 / 나중에 확장 */}
-                                            {/* {item.itemSellStatus === "SOLD_OUT" && ...} */}
                                         </div>
 
                                         {/* 텍스트 영역 */}
                                         <div className="flex flex-1 flex-col px-4 py-3">
-                                            {/* 상단 작은 라벨 : 이제 MD 상품에만 붙음 */}
-                                            {item.itemCategory === "MD" && (
+                                            {/* 상단 작은 라벨 : 지금은 MD 상품에만 붙음 */}
+                                            {(item.membershipOnly) && (
                                                 <span className="mb-1 text-[11px] text-amber-300">
-                                                  멤버십 전용
+                                                    멤버십 전용
                                                 </span>
                                             )}
 
@@ -248,12 +286,11 @@ export default function ShopPage() {
                                             <div className="mt-2 text-[11px] text-gray-400">
                                                 {item.itemSellStatus === "SOLD_OUT" && (
                                                     <span className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
-                                                      품절
+                                                        품절
                                                     </span>
                                                 )}
                                             </div>
                                         </div>
-
                                     </Link>
                                 );
                             })}
