@@ -240,12 +240,11 @@ public class ItemServiceImpl implements ItemService {
 
             // 1-1) 멤버십 전용: 활성 멤버십만
             if (category == ItemCategory.MEMBERSHIP) {
-                page = itemRepository.findByItemCategoryAndMembershipActiveIsTrue(
+                // 🔥 membershipActive 조건 제거
+                page = itemRepository.findAllByItemCategory(
                         ItemCategory.MEMBERSHIP,
                         pageable
                 );
-
-                // 1-2) POP 전용: 선수별 / 전체
             } else if (category == ItemCategory.POP) {
 
                 // 선수별 POP
