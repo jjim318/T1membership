@@ -69,4 +69,7 @@ public class BoardEntity extends BaseEntity {
         image.setBoard(null);
     }
 
+    @Column(name = "category_code")
+    private String categoryCode;    // Thind, 온네상이T1, Greeting 등등 
+
 }

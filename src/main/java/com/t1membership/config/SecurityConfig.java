@@ -113,23 +113,23 @@ public class SecurityConfig {
                 // === (2) 로그인한 USER / ADMIN 전용 ===
                 // 회원 단건 조회 (마이페이지에서 사용)
                 .requestMatchers("/member/readOne")
-                .hasAnyRole("USER", "ADMIN")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 비밀번호 변경
                 .requestMatchers("/member/password")
-                .hasAnyRole("USER", "ADMIN")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 프로필 수정 (닉네임 + 이미지)
                 .requestMatchers("/member/profile")
-                .hasAnyRole("USER", "ADMIN")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 회원 기본 정보 수정 (이름/성별/연락처/주소 등)
                 .requestMatchers("/member/modify")
-                .hasAnyRole("USER", "ADMIN")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 마이페이지(기타 하위 경로)
                 .requestMatchers("/member/my_page/**")
-                .hasAnyRole("USER", "ADMIN")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 회원 주문 관련 (사용자)
                 .requestMatchers("/order/**")
@@ -145,11 +145,11 @@ public class SecurityConfig {
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")
-                .hasAnyRole("USER")
+                .hasAnyRole("USER", "ADMIN_CONTENT")
                 .requestMatchers(HttpMethod.PUT, "/board/**")
-                .hasAnyRole("USER")
+                .hasAnyRole("USER", "ADMIN_CONTENT")
                 .requestMatchers(HttpMethod.DELETE, "/board/**")
-                .hasAnyRole("USER")
+                .hasAnyRole("USER", "ADMIN_CONTENT")
 
                 // Toss 결제 (본인 인증 필수)
                 .requestMatchers("/api/pay/toss/**")
@@ -157,18 +157,18 @@ public class SecurityConfig {
 
                 // === (3) 관리자 전용 ===
                 .requestMatchers("/member/readAll")
-                .hasAnyRole("ADMIN")
+                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
 
                 .requestMatchers("/admin/**")
-                .hasAnyRole("ADMIN")
+                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
 
                 // 상품 등록/수정/삭제
                 .requestMatchers(HttpMethod.POST, "/item")
-                .hasAnyRole("ADMIN")
+                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
                 .requestMatchers(HttpMethod.PUT, "/item/**")
-                .hasAnyRole("ADMIN")
+                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
                 .requestMatchers(HttpMethod.DELETE, "/item/**")
-                .hasAnyRole("ADMIN")
+                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
 
                 // === (4) 나머지는 인증만 필요 ===
                 .anyRequest().authenticated()
