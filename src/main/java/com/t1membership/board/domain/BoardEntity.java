@@ -52,12 +52,18 @@ public class BoardEntity extends BaseEntity {
     @Column(nullable = false)
     private boolean isSecret = false;
 
+    // 🔥 컨텐츠 전용: 영상 URL (일반 게시글은 null)
+    @Column(name = "video_url")
+    private String videoUrl;
+
+    // 🔥 컨텐츠 전용: 영상 길이 (예: "12:34", "01:02:03")
+    @Column(name = "duration")
+    private String duration;
 
     @Builder.Default
     @OneToMany(mappedBy = "board", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC, uuid ASC") // 08.27 추가
     private List<ImageEntity> images = new ArrayList<>(); // 이미지
-
 
     public void addImage(ImageEntity image) {
         images.add(image);

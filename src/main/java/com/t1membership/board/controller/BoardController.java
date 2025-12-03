@@ -66,7 +66,7 @@ public class BoardController {
         // 1) CONTENT 게시판에 들어갈 본문(요약) 구성
         String content = (summary != null && !summary.isBlank())
                 ? summary
-                : ("영상 URL: " + videoUrl);
+                : "";   // 🔥 이제는 영상 URL을 여기 안 넣고, 전용 필드로 뺌
 
         // 2) CreateBoardReq 로 매핑 (BoardType.CONTENT 고정)
         CreateBoardReq req = CreateBoardReq.builder()
@@ -76,6 +76,9 @@ public class BoardController {
                 .notice(false)                     // 컨텐츠는 공지 X
                 .isSecret(false)                   // 필요하면 isPublic 반대로 활용 가능
                 .categoryCode(categoryCode)        // BoardEntity.categoryCode 로 들어감
+                // 🔥 컨텐츠 전용 필드 전달
+                .videoUrl(videoUrl)
+                .duration(duration)
                 .build();
 
         // 3) 썸네일을 Board 이미지로 재사용
@@ -92,14 +95,13 @@ public class BoardController {
             return new ApiResult<>(res);
         } catch (Exception e) {
             log.error("[BoardContent] create content error", e);
-            // 형님 전역 예외 핸들러가 이미 있다면 여기서 굳이 ResponseStatusException 안 던져도 되는데,
-            // 500을 명시적으로 리턴하고 싶으면 이렇게:
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "컨텐츠 등록 중 서버 오류가 발생했습니다."
             );
         }
     }
+
 
 
     // ====== 게시글 등록 (텍스트 + 새 이미지들) ======

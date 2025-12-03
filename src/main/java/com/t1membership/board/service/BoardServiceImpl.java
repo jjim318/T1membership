@@ -110,7 +110,6 @@ public class BoardServiceImpl implements BoardService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "내용은 필수입니다.");
         }
 
-
         // 공지 작성은 관리자만
         if (Boolean.TRUE.equals(req.getNotice()) && !isAdmin(auth)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "공지글은 관리자만 작성할 수 있습니다.");
@@ -138,6 +137,10 @@ public class BoardServiceImpl implements BoardService {
                 .boardLikeCount(0)
                 .notice(Boolean.TRUE.equals(req.getNotice()))
                 .isSecret(Boolean.TRUE.equals(req.getIsSecret()))
+                .categoryCode(req.getCategoryCode())
+                // 🔥 컨텐츠 전용 필드 세팅 (일반 게시글이면 null 그대로 들어감)
+                .videoUrl(req.getVideoUrl())
+                .duration(req.getDuration())
                 .build();
 
         BoardEntity saved = boardRepository.save(entity);
@@ -161,6 +164,7 @@ public class BoardServiceImpl implements BoardService {
 
         return CreateBoardRes.from(saved);
     }
+
 
 
     /* =======================
