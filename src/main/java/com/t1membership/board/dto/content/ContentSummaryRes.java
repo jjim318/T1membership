@@ -1,4 +1,3 @@
-// src/main/java/com/t1membership/board/dto/content/ContentSummaryRes.java
 package com.t1membership.board.dto.content;
 
 import com.t1membership.board.domain.BoardEntity;
@@ -19,7 +18,7 @@ public class ContentSummaryRes {
     private String boardTitle;
     private String categoryCode;   // ONWORLD_T1, NOTICE, ...
     private String thumbnailUrl;   // 첫 번째 이미지 기준
-    private String duration;       // 지금은 null 써도 됨
+    private String duration;       // 🔥 이제 실제 값 채울 것
     private LocalDateTime createdAt;
 
     public static ContentSummaryRes from(BoardEntity board) {
@@ -41,7 +40,8 @@ public class ContentSummaryRes {
                 .boardTitle(board.getBoardTitle())
                 .categoryCode(board.getCategoryCode())
                 .thumbnailUrl(thumb)
-                .duration(null)                 // 일단 비워둠
+                // 🔥 BoardEntity.duration 사용
+                .duration(board.getDuration())
                 .createdAt(board.getCreateDate()) // BaseEntity 에 맞게
                 .build();
     }

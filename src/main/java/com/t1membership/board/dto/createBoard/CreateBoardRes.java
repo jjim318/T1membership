@@ -26,6 +26,10 @@ public class CreateBoardRes {
     private LocalDateTime createDate;
     private LocalDateTime latestDate;
 
+    // 🔥 컨텐츠 전용
+    private String videoUrl;
+    private String duration;
+
     public static CreateBoardRes from(BoardEntity boardEntity) {
         return CreateBoardRes.builder()
                 .boardNo(boardEntity.getBoardNo())
@@ -33,10 +37,14 @@ public class CreateBoardRes {
                 .boardWriter(boardEntity.getMember().getMemberNickName())
                 .boardContent(boardEntity.getBoardContent())
                 .boardLikeCount(boardEntity.getBoardLikeCount())
+                .boardType(boardEntity.getBoardType())
                 .notice(boardEntity.isNotice())
                 .isSecret(boardEntity.isSecret())
                 .createDate(boardEntity.getCreateDate())
                 .latestDate(boardEntity.getLatestDate())
+                // 🔥 신규 필드 매핑
+                .videoUrl(boardEntity.getVideoUrl())
+                .duration(boardEntity.getDuration())
                 .build();
     }
 
