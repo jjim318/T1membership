@@ -1,5 +1,7 @@
 package com.t1membership.config;
 
+import com.t1membership.member.domain.MemberEntity;
+import com.t1membership.member.repository.MemberRepository;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +21,15 @@ import java.util.stream.Collectors;
 
 @Component
 public class JwtProvider {
+
+    // ==========================
+    // 의존성
+    // ==========================
+    private final MemberRepository memberRepository;
+
+    public JwtProvider(MemberRepository memberRepository) {
+        this.memberRepository = memberRepository;
+    }
 
     // ==========================
     // Secrets (환경변수/설정 주입)
@@ -44,7 +55,7 @@ public class JwtProvider {
     // Expiry (유효기간)
     // ==========================
     private final long accessTokenValidity  = 1000L * 60 * 15;      // Access: 15분
-    private final long refreshTokenValidity = 1000L * 60 * 60 * 24; // Refresh: 1일 (운영에서는 7~14일도 자주 사용)
+    private final long refreshTokenValidity = 1000L * 60 * 60 * 24; // Refresh: 1일
 
     // =========================================================
     // Create Tokens (발급)
@@ -52,13 +63,13 @@ public class JwtProvider {
 
     /**
      * Access 토큰 발급 (권한 포함)
-     * - memberId: 보통 이메일 (memberEmail)
-     * - roles: ["USER"], ["ADMIN"] 등 MemberRole.name() 목록
+     * - memberEmail: 보통 이메일 (memberEmail)
+     * - roles: ["USER"], ["ADMIN"], ["ADMIN_CONTENT"] 등 MemberRole.name() 목록
      */
     public String createAccessToken(String memberEmail, Collection<String> roles) {
         return Jwts.builder()
                 .setSubject(memberEmail)
-                .claim("roles", roles)     // ← 여기 roles를 반드시 넣어준다
+                .claim("roles", roles)     // 🔥 roles claim
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + accessTokenValidity))
                 .signWith(accessKey())
@@ -66,16 +77,24 @@ public class JwtProvider {
     }
 
     /**
-     * 필요하면 roles 없이 쓸 수도 있지만,
-     * 실제 로그인에서는 위 메서드(roles 포함)를 쓰는 걸 추천.
+     * ⚡ 이메일만 주어졌을 때 — DB에서 역할을 읽어서 자동으로 roles claim에 넣어주는 버전
+     * 로그인 로직에서 이 메서드를 써도 roles 가 항상 JWT에 실리도록 처리.
      */
     public String createAccessToken(String memberEmail) {
-        return Jwts.builder()
-                .setSubject(memberEmail)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + accessTokenValidity))
-                .signWith(accessKey())
-                .compact();
+        MemberEntity member = memberRepository.findById(memberEmail)
+                .orElseThrow(() -> new IllegalArgumentException("회원 정보를 찾을 수 없습니다: " + memberEmail));
+
+        List<String> roles = new ArrayList<>();
+
+        // 🔥 단일 enum 구조라고 가정 (MemberRole memberRole)
+        if (member.getMemberRole() != null) {
+            roles.add(member.getMemberRole().name());   // 예: ADMIN_CONTENT
+        }
+
+        // 만약 추후에 리스트로 바꾸면 이렇게:
+        // member.getMemberRoleList().forEach(r -> roles.add(r.name()));
+
+        return createAccessToken(memberEmail, roles);
     }
 
     /**
@@ -93,16 +112,19 @@ public class JwtProvider {
     }
 
     /**
-     * Refresh 토큰 발급 (roles 없이)
-     * - 단순히 subject만 가지고 재발급 용도로만 쓸 수도 있음
+     * ⚡ 이메일만 주어졌을 때 — Access와 동일하게 DB에서 roles를 읽어서 claim에 포함
+     * (원하면 Refresh에는 roles 안 넣고 싶을 수도 있으니, 필요 없으면 이 메서드는 안 써도 됨)
      */
     public String createRefreshToken(String memberEmail) {
-        return Jwts.builder()
-                .setSubject(memberEmail)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + refreshTokenValidity))
-                .signWith(refreshKey())
-                .compact();
+        MemberEntity member = memberRepository.findById(memberEmail)
+                .orElseThrow(() -> new IllegalArgumentException("회원 정보를 찾을 수 없습니다: " + memberEmail));
+
+        List<String> roles = new ArrayList<>();
+        if (member.getMemberRole() != null) {
+            roles.add(member.getMemberRole().name());
+        }
+
+        return createRefreshToken(memberEmail, roles);
     }
 
     // =========================================================

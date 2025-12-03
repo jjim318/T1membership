@@ -1,5 +1,6 @@
 package com.t1membership.board.service;
 
+import com.t1membership.board.dto.content.ContentSummaryRes;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.board.dto.createBoard.CreateBoardReq;
 import com.t1membership.board.dto.createBoard.CreateBoardRes;
@@ -22,4 +23,5 @@ public interface BoardService {
     PageResponseDTO<ReadAllBoardRes> readAllBoard(ReadAllBoardReq req);
     UpdateBoardRes updateBoard(UpdateBoardReq req, List<ExistingImageDTO> existingImages, List<MultipartFile> newImages);
     DeleteBoardRes deleteBoard(DeleteBoardReq req);
+    List<ContentSummaryRes> readContentBoards();
 }

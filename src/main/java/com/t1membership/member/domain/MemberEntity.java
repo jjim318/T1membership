@@ -78,4 +78,17 @@ public class MemberEntity extends BaseEntity {
         addImage(newImage);     // 새 이미지 1장만 등록
     }
 
+    @Column(name = "content_manager")
+    private boolean contentManager = false;
+
+    public boolean isContentManager() {
+        if (this.memberRole == MemberRole.ADMIN){
+            return true;
+        }
+        if (this.memberRole == MemberRole.ADMIN_CONTENT){
+            return true;
+        }
+        return this.contentManager;
+    }
+
 }

@@ -2,6 +2,7 @@ package com.t1membership.board.service;
 
 import com.t1membership.board.constant.BoardType;
 import com.t1membership.board.domain.BoardEntity;
+import com.t1membership.board.dto.content.ContentSummaryRes;
 import com.t1membership.board.dto.createBoard.CreateBoardReq;
 import com.t1membership.board.dto.createBoard.CreateBoardRes;
 import com.t1membership.board.dto.deleteBoard.DeleteBoardReq;
@@ -97,12 +98,18 @@ public class BoardServiceImpl implements BoardService {
         Authentication auth = currentAuthOrThrow();
         String email = auth.getName();
 
-        if (!StringUtils.hasText(req.getBoardTitle()) || !StringUtils.hasText(req.getBoardContent())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "제목/내용은 필수입니다.");
+        boolean hasTitle = StringUtils.hasText(req.getBoardTitle());
+        boolean hasContent = StringUtils.hasText(req.getBoardContent());
+
+        if (!hasTitle) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "제목은 필수입니다.");
         }
-        if (req.getBoardType() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "게시판 타입은 필수입니다.");
+
+        // CONTENT 이외 게시판은 내용도 필수
+        if (req.getBoardType() != BoardType.CONTENT && !hasContent) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "내용은 필수입니다.");
         }
+
 
         // 공지 작성은 관리자만
         if (Boolean.TRUE.equals(req.getNotice()) && !isAdmin(auth)) {
@@ -112,6 +119,15 @@ public class BoardServiceImpl implements BoardService {
         // 작성자/연관 회원 매핑
         MemberEntity member = memberRepository.findById(email)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "회원 정보를 찾을 수 없습니다."));
+
+        // 🔥 CONTENT 타입 게시글은 컨텐츠 담당자만 작성 가능
+        if (req.getBoardType() == BoardType.CONTENT && !member.isContentManager()) {
+            // isContentManager() 는 MemberEntity 안에 만든 boolean getter
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "컨텐츠 게시판은 담당 관리자만 작성할 수 있습니다."
+            );
+        }
 
         BoardEntity entity = BoardEntity.builder()
                 .member(member)                     // FK: member_email
@@ -145,6 +161,7 @@ public class BoardServiceImpl implements BoardService {
 
         return CreateBoardRes.from(saved);
     }
+
 
     /* =======================
        단건 조회 (비밀글 규칙 적용)
@@ -338,4 +355,24 @@ public class BoardServiceImpl implements BoardService {
         boardRepository.delete(board);
         return DeleteBoardRes.success(req.getBoardNo());
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ContentSummaryRes> readContentBoards() {
+
+        // 최신순으로 최대 100개 정도만
+        Pageable pageable = PageRequest.of(
+                0,
+                100,
+                Sort.by(Sort.Order.desc("boardNo"))
+        );
+
+        // 기존에 쓰던 searchByType 재사용 (BoardType.CONTENT)
+        var page = boardRepository.searchByType(BoardType.CONTENT, pageable);
+
+        return page.stream()
+                .map(ContentSummaryRes::from)
+                .toList();
+    }
+
 }
