@@ -4,6 +4,7 @@ package com.t1membership.pay.controller;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.repository.OrderRepository;
+import com.t1membership.pay.dto.TossConfirmReq;
 import com.t1membership.pay.service.TossPaymentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
@@ -113,42 +114,71 @@ public class TossPaymentController {
     }
 
     @PostMapping("/confirm")
-    public ResponseEntity<?> confirm(@RequestBody Map<String, Object> body,
+    public ResponseEntity<?> confirm(@RequestBody TossConfirmReq req,
                                      Authentication authentication) {
-        String paymentKey = (String) body.get("paymentKey");
-        String orderId    = (String) body.get("orderId");
-        Number amtN       = (Number) body.get("amount");
 
-        if (paymentKey == null || orderId == null || amtN == null) {
-            return ResponseEntity.badRequest().body(Map.of("isSuccess", false, "resCode", 400, "resMessage", "invalid request"));
+        // ===== 1) 기본값 꺼내기 =====
+        Long orderNo       = req.getOrderNo();
+        String paymentKey  = req.getPaymentKey();
+        Integer amount     = req.getTotalAmount(); // 프론트에서 넘어온 결제 금액
+
+        // ===== 2) 바디 검증 =====
+        if (orderNo == null || paymentKey == null || paymentKey.isBlank() || amount == null) {
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "isSuccess", false,
+                            "resCode", 400,
+                            "resMessage", "invalid request"
+                    )
+            );
         }
-        int clientAmount = amtN.intValue();
 
-        Long orderNo;
-        try {
-            orderNo = Long.parseLong(orderId.split("-")[1]); // "ANP-{orderNo}-{ts}"
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "orderId 형식 오류");
-        }
+        int clientAmount = amount.intValue();
 
+        // ===== 3) 우리 주문 조회 =====
         OrderEntity order = orderRepository.findByIdFetchItems(orderNo)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "주문 없음"));
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "주문 없음"
+                ));
 
-        String memberId = currentMemberId(authentication); // ← 안전 추출
+        // 로그인 유저 == 주문자 검증
+        String memberId = currentMemberId(authentication);
         if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
+
+        // 결제 가능한 상태인지 (CANCELED, PAID 등 체크)
         assertPayable(order);
 
+        // ===== 4) 서버 금액 계산 & 위변조 체크 =====
         int serverAmount = computeOrderAmount(order);
-        if (serverAmount <= 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "EMPTY_ORDER_AMOUNT");
-        if (serverAmount != clientAmount) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "금액 불일치");
+        if (serverAmount <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "EMPTY_ORDER_AMOUNT");
+        }
+        if (serverAmount != clientAmount) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "금액 불일치");
+        }
 
-        Map<String, Object> result = tossPaymentService.confirmPayment(paymentKey, orderId, serverAmount);
+        // ===== 5) 토스 confirm 호출 =====
+        // 토스에 넘길 orderId 는 "주문 번호 문자열" 로 통일
+        String orderIdForToss = String.valueOf(orderNo);
 
+        Map<String, Object> result =
+                tossPaymentService.confirmPayment(paymentKey, orderIdForToss, serverAmount);
+
+        // ===== 6) 주문 상태 갱신 =====
         order.setOrderStatus(OrderStatus.PAID);
         orderRepository.save(order);
 
-        return ResponseEntity.ok(Map.of("isSuccess", true, "data", result));
+        // ===== 7) 응답 =====
+        return ResponseEntity.ok(
+                Map.of(
+                        "isSuccess", true,
+                        "resCode", 200,
+                        "resMessage", "OK",
+                        "data", result
+                )
+        );
     }
+
 }

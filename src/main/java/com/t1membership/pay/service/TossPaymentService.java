@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -20,37 +21,65 @@ import java.util.Map;
 public class TossPaymentService {
 
     @Value("${toss.payments.secret-key:}")
-    private String tossSecretKey; // 반드시 test_sk_... (테스트)
+    private String tossSecretKey; // test_sk_... (테스트용 시크릿키)
+
+    @Value("${toss.payments.success-url}")
+    private String successUrl;    // 예: http://localhost:3000/pay/toss/success
+    @Value("${toss.payments.fail-url}")
+    private String failUrl;       // 예: http://localhost:3000/pay/toss/fail
 
     private final RestTemplate tossrestTemplate;
 
     /**
-     * 1) 결제창 URL 생성 (API 개별 연동)
-     * 응답의 checkout URL 키가 환경에 따라 달라질 수 있어
-     * checkoutUrl / checkout (string) / checkout.url (object) 모두 대응.
+     * 1) 결제창 URL 생성
+     *
+     *  - 토스 결제생성 API /v1/payments 에 맞춰 필수 필드 채워서 호출
+     *  - 최소 요구 파라미터 예시:
+     *      flowMode : "DEFAULT"  (토스 호스팅 결제창)
+     *      method   : "CARD"     (카드/간편결제 통합창)
+     *      amount   : 결제 금액 (int)
+     *      orderId  : 상점 주문번호
+     *      orderName: 주문명
+     *      successUrl, failUrl : 리다이렉트 URL
      */
     @Transactional
     public String createPaymentUrl(String orderId, int amount, String orderName) {
+
         final String url = "https://api.tosspayments.com/v1/payments";
 
-        // Authorization: Basic base64(test_sk_xxx:)
-        final String basic = "Basic " + Base64.getEncoder()
-                .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
+        if (orderId == null || orderId.isBlank()) {
+            throw new IllegalArgumentException("orderId가 비어 있습니다.");
+        }
+        if (amount <= 0) {
+            throw new IllegalArgumentException("amount는 0보다 커야 합니다. amount=" + amount);
+        }
 
         HttpHeaders headers = createAuthHeaders();
 
+        // 🔥 토스 문서 기준 결제생성에 필요한 필드들
         Map<String, Object> body = Map.of(
+                "flowMode", "DEFAULT",   // 토스 호스팅 결제창
+                "method", "CARD",        // 카드/간편결제 통합 (v1에서는 "카드"를 쓰기도 하는데, 최신 문서 기준 "CARD" 사용)
                 "amount", amount,
                 "orderId", orderId,
-                "orderName", orderName
+                "orderName", orderName,
+                "successUrl", successUrl,
+                "failUrl", failUrl
         );
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
         try {
-            ResponseEntity<Map> response = tossrestTemplate.postForEntity(url, entity, Map.class);
+            log.info("[Toss] 결제창 생성 요청: url={}, body={}", url, body);
+
+            ResponseEntity<Map> response =
+                    tossrestTemplate.postForEntity(url, entity, Map.class);
+
             if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new IllegalStateException("결제창 생성 실패: http=" + response.getStatusCode());
+                throw new IllegalStateException(
+                        "결제창 생성 실패: http=" + response.getStatusCode()
+                                + ", body=" + response.getBody()
+                );
             }
 
             @SuppressWarnings("unchecked")
@@ -58,28 +87,31 @@ public class TossPaymentService {
 
             String checkoutUrl = extractCheckoutUrl(resBody);
             if (checkoutUrl == null || checkoutUrl.isBlank()) {
-                throw new IllegalStateException("결제창 URL을 찾지 못했습니다. 응답=" + resBody);
+                throw new IllegalStateException(
+                        "결제창 URL을 찾지 못했습니다. 응답=" + resBody
+                );
             }
 
-            log.debug("[Toss] checkoutUrl={}", checkoutUrl);
+            log.info("[Toss] checkoutUrl={}", checkoutUrl);
             return checkoutUrl;
 
         } catch (HttpStatusCodeException e) {
-            // 토스가 내려주는 상세 바디까지 로그로 확인
             String err = e.getResponseBodyAsString();
-            throw new IllegalStateException("결제창 생성 오류: http=" + e.getStatusCode() + ", body=" + err, e);
+            log.error("[Toss] 결제창 생성 HTTP 오류: http={}, body={}",
+                    e.getStatusCode(), err);
+            throw new IllegalStateException(
+                    "결제창 생성 오류: http=" + e.getStatusCode()
+                            + ", body=" + err, e
+            );
         }
     }
 
-    /**
-     * 2) 결제 승인(confirm)
-     */
+    // =========================================
+    // 2) 결제 승인(confirm)
+    // =========================================
     @Transactional
     public Map<String, Object> confirmPayment(String paymentKey, String orderId, int amount) {
         final String url = "https://api.tosspayments.com/v1/payments/confirm";
-
-        final String basic = "Basic " + Base64.getEncoder()
-                .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
 
         HttpHeaders headers = createAuthHeaders();
 
@@ -91,11 +123,22 @@ public class TossPaymentService {
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
+        log.info("[Toss] 결제 승인 요청: url={}, body={}", url, body);
+
         try {
-            ResponseEntity<Map> res = tossrestTemplate.postForEntity(url, entity, Map.class);
+            ResponseEntity<Map> res =
+                    tossrestTemplate.postForEntity(url, entity, Map.class);
+
+            log.info("[Toss] 결제 승인 응답: status={}, body={}",
+                    res.getStatusCode(), res.getBody());
+
             if (!res.getStatusCode().is2xxSuccessful()) {
-                throw new IllegalStateException("결제 승인 실패: http=" + res.getStatusCode() + ", body=" + res.getBody());
+                throw new IllegalStateException(
+                        "결제 승인 실패: http=" + res.getStatusCode() +
+                                ", body=" + res.getBody()
+                );
             }
+
             @SuppressWarnings("unchecked")
             Map<String, Object> resBody = (Map<String, Object>) res.getBody();
             log.debug("[Toss] confirm OK: {}", resBody);
@@ -103,26 +146,27 @@ public class TossPaymentService {
 
         } catch (HttpStatusCodeException e) {
             String err = e.getResponseBodyAsString();
-            throw new IllegalStateException("Toss confirm error: http=" + e.getStatusCode() + ", body=" + err, e);
+            log.error("[Toss] confirm error: status={}, body={}",
+                    e.getStatusCode(), err, e);
+            throw new IllegalStateException(
+                    "Toss confirm error: http=" + e.getStatusCode() + ", body=" + err,
+                    e
+            );
         }
     }
-    /**
-     * 3) 결제 취소 / 환불
-     * - paymentKey 기준 취소
-     * - cancelAmount 를 넘기면 부분취소, null 이면 전액취소(형님 정책에 맞게 조절)
-     * - 실제 Order 상태 변경, 재고 복구 등은 OrderService 에서 처리
-     */
+
+    // =========================================
+    // 3) 결제 취소 / 환불
+    // =========================================
     @Transactional
     public Map<String, Object> cancelPayment(String paymentKey,
                                              Integer cancelAmount,
                                              String cancelReason) {
-        // Toss 취소 endpoint: POST /v1/payments/{paymentKey}/cancel
+
         final String url = "https://api.tosspayments.com/v1/payments/" + paymentKey + "/cancel";
 
         HttpHeaders headers = createAuthHeaders();
 
-        // body 구성: reason 은 필수, amount 는 정책에 따라
-        // 전액 취소만 쓴다면 cancelAmount 없이 reason 만 보내도 됨.
         Map<String, Object> body;
         if (cancelAmount != null && cancelAmount > 0) {
             body = Map.of(
@@ -137,10 +181,20 @@ public class TossPaymentService {
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 
+        log.info("[Toss] 결제 취소 요청: url={}, body={}", url, body);
+
         try {
-            ResponseEntity<Map> res = tossrestTemplate.postForEntity(url, entity, Map.class);
+            ResponseEntity<Map> res =
+                    tossrestTemplate.postForEntity(url, entity, Map.class);
+
+            log.info("[Toss] 결제 취소 응답: status={}, body={}",
+                    res.getStatusCode(), res.getBody());
+
             if (!res.getStatusCode().is2xxSuccessful()) {
-                throw new IllegalStateException("결제 취소 실패: http=" + res.getStatusCode() + ", body=" + res.getBody());
+                throw new IllegalStateException(
+                        "결제 취소 실패: http=" + res.getStatusCode() +
+                                ", body=" + res.getBody()
+                );
             }
 
             @SuppressWarnings("unchecked")
@@ -150,17 +204,24 @@ public class TossPaymentService {
 
         } catch (HttpStatusCodeException e) {
             String err = e.getResponseBodyAsString();
-            log.error("[Toss] cancel error: http={}, body={}", e.getStatusCode(), err);
-            throw new IllegalStateException("Toss cancel error: http=" + e.getStatusCode() + ", body=" + err, e);
+            log.error("[Toss] cancel error: status={}, body={}",
+                    e.getStatusCode(), err, e);
+            throw new IllegalStateException(
+                    "Toss cancel error: http=" + e.getStatusCode() + ", body=" + err,
+                    e
+            );
         }
     }
 
-    // ---------------- helpers ----------------
+    // =========================================
+    // 공통 helper
+    // =========================================
 
     /**
      * Authorization, Content-Type 공통 세팅
      */
     private HttpHeaders createAuthHeaders() {
+        // Basic {base64(secretKey:)}
         final String basic = "Basic " + Base64.getEncoder()
                 .encodeToString((tossSecretKey + ":").getBytes(StandardCharsets.UTF_8));
 
@@ -169,8 +230,10 @@ public class TossPaymentService {
         headers.set(HttpHeaders.AUTHORIZATION, basic);
         return headers;
     }
+
     /**
-     * checkoutUrl / checkout(string) / checkout.url(object) 모두 지원
+     * checkoutUrl / checkout(string) / checkout.url(object) / _links.checkout.href
+     * 여러 케이스 대응
      */
     @SuppressWarnings("unchecked")
     private String extractCheckoutUrl(Map<String, Object> body) {
@@ -192,7 +255,6 @@ public class TossPaymentService {
             }
         }
 
-        // 혹시 다른 키로 내려오는 경우 대비(필요 시 확장)
         Object links = body.get("_links");
         if (links instanceof Map<?, ?> lm) {
             Object checkout = lm.get("checkout");

@@ -1,31 +1,28 @@
 package com.t1membership.order.service;
 
-import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;
-import com.t1membership.order.dto.req.common.CancelOrderReq;
 import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
 import com.t1membership.order.dto.req.user.CreateMembershipOrderReq;
-import com.t1membership.order.dto.req.user.CreateOrderReq;
 import com.t1membership.order.dto.req.user.CreatePopOrderReq;
-import com.t1membership.order.dto.res.common.CancelOrderRes;
 import com.t1membership.order.dto.res.user.CreateOrderRes;
-import com.t1membership.order.dto.res.user.UserDetailOrderRes;
 import com.t1membership.order.repository.OrderRepository;
-import com.t1membership.pay.dto.TossPrepareRes;
 import com.t1membership.pay.service.TossPaymentService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrderServiceImpl implements OrderService {
     //주문 서비스 구현체(유저용
     private final OrderRepository orderRepository;
@@ -34,10 +31,9 @@ public class OrderServiceImpl implements OrderService {
     private final MembershipOrderCreator membershipOrderCreator;
     private final PopOrderCreator popOrderCreator;
 
-    /**
-     * BigDecimal → int (원 단위) 변환
-     * - 소수점 있거나 int 범위 넘으면 예외
-     */
+    // ===========================
+    // BigDecimal → int 변환 (토스 amount용)
+    // ===========================
     private int toKrwInt(BigDecimal amount) {
         if (amount == null) {
             throw new IllegalArgumentException("금액이 비어 있습니다.");
@@ -45,14 +41,14 @@ public class OrderServiceImpl implements OrderService {
         try {
             return amount.intValueExact();
         } catch (ArithmeticException e) {
-            throw new IllegalArgumentException("금액(BigDecimal)을 int로 변환할 수 없습니다. amount=" + amount, e);
+            throw new IllegalArgumentException(
+                    "금액(BigDecimal)을 int로 변환할 수 없습니다. amount=" + amount, e);
         }
     }
 
-    /**
-     * 주문명 생성
-     * - 토스 createPaymentUrl 에만 사용 (응답 DTO에는 굳이 넣지 않음)
-     */
+    // ===========================
+    // 주문명 생성 (토스 orderName)
+    // ===========================
     private String buildOrderName(OrderEntity order) {
         if (order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
             return "T1 주문";
@@ -71,10 +67,10 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 공통 처리:
-     * - 주문 저장
-     * - 토스 결제창 URL 생성
-     * - CreateOrderRes 조립
+     * 공통 처리
+     *  1) 주문 저장
+     *  2) 토스 결제창 URL 생성
+     *  3) CreateOrderRes 생성
      */
     private CreateOrderRes processOrder(OrderEntity order) {
 
@@ -82,19 +78,48 @@ public class OrderServiceImpl implements OrderService {
         orderRepository.save(order);
 
         // 2) 토스에 보낼 값 준비
-        int amount    = toKrwInt(order.getOrderTotalPrice());
-        String orderId   = order.getOrderNo().toString();
+        int amount = toKrwInt(order.getOrderTotalPrice());
+        String orderId = order.getOrderNo().toString();
         String orderName = buildOrderName(order);
 
-        // 3) 토스 결제창 URL 생성
-        String checkoutUrl = tossPaymentService.createPaymentUrl(
-                orderId,
-                amount,
-                orderName
-        );
+        try {
+            // 3) 토스 결제창 URL 생성
+            String checkoutUrl = tossPaymentService.createPaymentUrl(
+                    orderId,
+                    amount,
+                    orderName
+            );
 
-        // 4) DTO 정적 팩토리로 응답 생성
-        return CreateOrderRes.from(order, checkoutUrl);
+            // 4) 응답 DTO 생성
+            return CreateOrderRes.from(order, checkoutUrl);
+
+        } catch (HttpClientErrorException | HttpServerErrorException e) {
+            // 🔥 토스에서 4xx / 5xx 에러 응답이 온 경우
+            log.error("[Order] Toss createPaymentUrl 실패: status={}, body={}",
+                    e.getStatusCode(), e.getResponseBodyAsString(), e);
+
+            // 형님이 프론트에서 보는 메시지 깔끔하게 정리
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,   // 우리 서버는 400으로 응답
+                    "결제정보 생성 오류 : http=" + e.getStatusCode()
+            );
+
+        } catch (RestClientException e) {
+            // 🔥 네트워크 오류 등
+            log.error("[Order] Toss 통신 오류", e);
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "결제 서버와 통신 중 오류가 발생했습니다."
+            );
+
+        } catch (Exception e) {
+            // 🔥 그 외 예기치 못한 오류
+            log.error("[Order] 알 수 없는 결제 오류", e);
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "결제정보 생성 중 알 수 없는 오류가 발생했습니다."
+            );
+        }
     }
 
     // ======================

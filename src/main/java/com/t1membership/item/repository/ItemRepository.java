@@ -1,8 +1,8 @@
 package com.t1membership.item.repository;
 
 import com.t1membership.item.constant.ItemCategory;
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.item.constant.Player;
-import com.t1membership.item.constant.PopPlanType;
 import com.t1membership.item.domain.ItemEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -10,9 +10,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ItemRepository extends JpaRepository<ItemEntity, Long> {
+    // 나중에 커스텀 조건 붙이고 싶으면 이런 것도 가능:
+    // Page<ItemEntity> findAllByItemCategory(ItemCategory category, Pageable pageable);
 
     // 멤버십 상품만 (활성된 것만)
     List<ItemEntity> findByItemCategoryAndMembershipActiveIsTrue(ItemCategory itemCategory);
@@ -32,19 +35,11 @@ public interface ItemRepository extends JpaRepository<ItemEntity, Long> {
             Player popPlayer
     );
 
-    // 카테고리 기반 페이지 조회
+    // ItemRepository
     Page<ItemEntity> findAllByItemCategory(ItemCategory itemCategory, Pageable pageable);
 
-    // 🔥 [추가] POP 플랜 타입별 조회
-    List<ItemEntity> findByItemCategoryAndPopPlanType(
-            ItemCategory itemCategory,
-            PopPlanType popPlanType
-    );
-
-    // 🔥 [추가] POP 플랜 타입 + 선수별 조회
-    List<ItemEntity> findByItemCategoryAndPopPlanTypeAndPopPlayer(
-            ItemCategory itemCategory,
-            PopPlanType popPlanType,
-            Player popPlayer
-    );
+    // 멤버십 기본 결제 타입 + 카테고리로 조회
+    Optional<ItemEntity> findByMembershipPayTypeAndItemCategory(
+            MembershipPayType membershipPayType,
+            ItemCategory itemCategory);
 }

@@ -10,8 +10,7 @@ import java.time.LocalDateTime;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class TossPaymentRes {
     private String tossPaymentKey;
-    private String orderId;
-    private Long orderNo;
+    private String orderNo;
     private Integer totalAmount;
     private TossPaymentStatus paymentStatus;
     private TossPaymentMethod method;
@@ -22,8 +21,7 @@ public class TossPaymentRes {
     public static TossPaymentRes from(TossPaymentEntity p) {
         return TossPaymentRes.builder()
                 .tossPaymentKey(p.getTossPaymentKey())
-                .orderId(p.getOrderTossId())
-                .orderNo(p.getOrder().getOrderNo())
+                .orderNo(p.getOrderTossId())
                 .totalAmount(p.getTotalAmount())
                 .paymentStatus(p.getTossPaymentStatus())
                 .method(p.getTossPaymentMethod())
