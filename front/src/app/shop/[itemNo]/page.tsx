@@ -1067,6 +1067,8 @@ function MembershipDetailBody({
     item: ItemDetail;
     detailImages: DetailImage[];
 }) {
+    const router = useRouter();
+
     // 결제 통화 아코디언
     const [currency, setCurrency] = useState<"KRW" | "USD">("KRW");
     const [openCurrency, setOpenCurrency] = useState(false);
@@ -1091,6 +1093,39 @@ function MembershipDetailBody({
     if (payType === "YEARLY") {
         priceUSD = 60.0;
     }
+
+    // 🔥 멤버십 결제 페이지로 이동
+    const handleMembershipCheckout = () => {
+        // TODO: 실제 planCode 는 DB/백엔드 설계에 맞게 바꿔 쓰시면 됩니다.
+        const planCode = "T1-2025-MONTHLY";
+
+        let months = 1;
+        let autoRenew = false;
+
+        switch (payType as MembershipPayType) {
+            case "YEARLY":
+                months = 12;
+                break;
+            case "RECURRING":
+                autoRenew = true;
+                break;
+            case "ONE_TIME":
+            default:
+                months = 1;
+                autoRenew = false;
+        }
+
+        const params = new URLSearchParams({
+            planCode,
+            months: String(months),
+            autoRenew: String(autoRenew),
+            itemName: item.itemName,
+            price: String(item.itemPrice),
+            membershipPayType: payType,
+        });
+
+        router.push(`/order/membership/checkout?${params.toString()}`);
+    };
 
     return (
         <main className="min-h-screen bg-black text-zinc-100">
@@ -1233,6 +1268,7 @@ function MembershipDetailBody({
                             </button>
                             <button
                                 type="button"
+                                onClick={handleMembershipCheckout} // 🔥 여기서 결제 페이지로 이동
                                 className="flex h-10 w-full items-center justify-center rounded-md bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
                             >
                                 가입하기

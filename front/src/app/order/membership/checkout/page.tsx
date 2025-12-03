@@ -1,17 +1,12 @@
+// src/app/order/membership/checkout/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect, ChangeEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
-import axios, { AxiosError } from "axios";
 
-// ===== 타입 정의 =====
-type MembershipPayType = "CARD" | "ACCOUNT";
-
-interface ErrorBody {
-    resMessage?: string;
-    message?: string;
-}
+type Currency = "KRW" | "USD";
+type PayMethod = "TOSS_ACCOUNT" | "TOSS_PAYMENTS" | "EXIMBAY";
 
 interface ApiResult<T> {
     isSuccess: boolean;
@@ -20,754 +15,658 @@ interface ApiResult<T> {
     result: T;
 }
 
+interface MemberInfo {
+    memberEmail: string;
+    memberName: string;
+}
+
+// 🔥 백엔드 CreateMembershipOrderReq 에 맞춘 타입
+// planCode: String, months: Integer, autoRenew: boolean, memberBirth/Name/Phone
+interface CreateMembershipOrderReq {
+    type: "MEMBERSHIP";   // JsonTypeInfo용
+    planCode: string;     // String planCode
+    months: number;       // Integer months
+    autoRenew: boolean;
+    memberBirth: string;
+    memberName: string;
+    memberPhone: string;
+}
+
+// 🔥 백엔드 CreateOrderRes(JSON)에 맞춰서 수정
+//   {
+//     "orderNo": 7,
+//     "orderTotalPrice": 8900.00,
+//     "checkoutUrl": "https://payment-gateway-sandbox..."
+//   }
 interface CreateOrderRes {
     orderNo: number;
+    checkoutUrl?: string;    // 토스 결제창 URL
+    paymentUrl?: string;     // 혹시 다른 타입에서 쓰면 겸사겸사 남겨둠
 }
 
-interface TossPrepareResponse {
-    isSuccess: boolean;
-    resCode?: number;
-    resMessage?: string;
-    data: {
-        orderNo: number;
-        orderId: string;
-        amount: number;
-        orderName: string;
-    };
-}
+// JWT에서 이메일 뽑기
+function extractEmailFromJwt(token: string | null): string | null {
+    if (!token) return null;
+    try {
+        const parts = token.split(".");
+        if (parts.length < 2) return null;
 
-interface CheckoutItem {
-    itemNo: number;
-    imageUrl?: string | null;
-    title: string;
-    subtitle?: string | null;
-    description?: string | null;
-    price: number;
-    quantity: number;
-}
-
-interface CheckoutData {
-    buyerName: string;
-    buyerEmail: string;
-    items: CheckoutItem[];
-    totalAmount: number;
-}
-
-// 멤버십 정보 모달 폼
-interface MembershipForm {
-    name: string;
-    birth: string; // YYYY-MM-DD
-    countryCode: string; // "+82"
-    phone: string; // 숫자만
-}
-
-// Toss
-type TossPayType = "CARD" | "TRANSFER";
-
-interface TossRequestBase {
-    amount: number;
-    orderId: string;
-    orderName: string;
-    successUrl: string;
-    failUrl: string;
-    customerEmail?: string;
-    customerName?: string;
-}
-
-interface TossClient {
-    requestPayment: (
-        method: TossPayType,
-        params: TossRequestBase
-    ) => Promise<void>;
-}
-
-interface TossWindow extends Window {
-    TossPayments?: (clientKey: string) => TossClient;
-}
-
-const getTossClient = (): TossClient | null => {
-    if (typeof window === "undefined") return null;
-    const w = window as TossWindow;
-    if (!w.TossPayments) return null;
-    const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY ?? "";
-    if (!clientKey) return null;
-    return w.TossPayments(clientKey);
-};
-
-const formatPrice = (n: number) => `${n.toLocaleString("ko-KR")}원`;
-
-const extractError = (err: unknown, fallback: string) => {
-    if (axios.isAxiosError<ErrorBody>(err)) {
-        const ax = err as AxiosError<ErrorBody>;
-        return (
-            ax.response?.data?.resMessage ||
-            ax.response?.data?.message ||
-            fallback
+        const payloadPart = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const padded = payloadPart.padEnd(
+            Math.ceil(payloadPart.length / 4) * 4,
+            "=",
         );
-    }
-    if (err instanceof Error) return err.message;
-    return fallback;
-};
+        const json = atob(padded);
+        const payload = JSON.parse(json);
 
-// ===== 컴포넌트 =====
+        return payload.sub ?? payload.memberEmail ?? null;
+    } catch (e) {
+        console.error("[JWT] decode 실패 =", e);
+        return null;
+    }
+}
+
+// 안전한 months 파싱
+function parseMonths(raw: string | null): number {
+    if (!raw) return 1;
+    const trimmed = raw.trim();
+    if (trimmed === "") return 1;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.floor(n);
+}
+
 export default function MembershipCheckoutPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    // 쿼리 파라미터: 플랜/개월/자동결제 여부
-    const planCode =
-        searchParams.get("planCode") ?? "T1-2025-MONTHLY";
-    const months = Number(searchParams.get("months") ?? "1");
-    const autoRenew =
-        searchParams.get("autoRenew") === "true";
+    // 🔥 planCode는 이제 String 그대로 씀
+    const planCode = searchParams.get("planCode") ?? ""; // 예: "T1-2025-MONTHLY"
 
-    const [data, setData] = useState<CheckoutData | null>(null);
-    const [loading, setLoading] = useState(true);
+    const months = parseMonths(searchParams.get("months"));
+    const autoRenew = (searchParams.get("autoRenew") ?? "false") === "true";
+    const itemName = searchParams.get("itemName") ?? "T1 Membership";
+    const price = Number(searchParams.get("price") ?? "0");
+
+    const [currency, setCurrency] = useState<Currency>("KRW");
+    const [payMethod, setPayMethod] = useState<PayMethod>("TOSS_ACCOUNT");
+    const [usePoint, setUsePoint] = useState(0);
+
+    // 주문자 정보
+    const [ordererLastName, setOrdererLastName] = useState("");
+    const [ordererFirstName, setOrdererFirstName] = useState("");
+    const [ordererEmail, setOrdererEmail] = useState("");
+    const [showOrdererModal, setShowOrdererModal] = useState(false);
+
+    // 멤버십 정보(모달)
+    const [showMemberInfoModal, setShowMemberInfoModal] = useState(false);
+    const [memberName, setMemberName] = useState("");
+    const [memberBirth, setMemberBirth] = useState("");
+    const [memberPhoneCountry, setMemberPhoneCountry] = useState("+82");
+    const [memberPhone, setMemberPhone] = useState("");
+    const [memberInfoSaved, setMemberInfoSaved] = useState(false);
+
+    const [agreeAll, setAgreeAll] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    const [paymentMethod, setPaymentMethod] =
-        useState<MembershipPayType>("CARD");
+    const totalAmount = Math.max(price - usePoint, 0);
 
-    // 멤버십 정보 모달
-    const [showMembershipModal, setShowMembershipModal] =
-        useState(false);
-    const [membershipApplied, setMembershipApplied] =
-        useState(false);
-
-    const [membershipForm, setMembershipForm] =
-        useState<MembershipForm>({
-            name: "",
-            birth: "",
-            countryCode: "+82",
-            phone: "",
-        });
-
-    // 약관 동의
-    const [agreePrivacy, setAgreePrivacy] = useState(false); // 개인정보
-    const [agreePaymentTerms, setAgreePaymentTerms] =
-        useState(false); // 결제서비스 이용약관
-    const [
-        agreeMembershipPrivacy,
-        setAgreeMembershipPrivacy,
-    ] = useState(false); // 멤버십 개인정보
-    const [agreeAll, setAgreeAll] = useState(false);
-
+    // ===== 로그인 회원 정보 불러오기 (주문자 카드) =====
     useEffect(() => {
-        if (agreeAll) {
-            setAgreePrivacy(true);
-            setAgreePaymentTerms(true);
-            setAgreeMembershipPrivacy(true);
+        if (typeof window === "undefined") return;
+
+        const token = localStorage.getItem("accessToken");
+        if (!token) return;
+
+        let email = localStorage.getItem("memberEmail");
+
+        if (!email) {
+            const fromJwt = extractEmailFromJwt(token);
+            if (fromJwt) {
+                email = fromJwt;
+                localStorage.setItem("memberEmail", fromJwt);
+                console.log(
+                    "[membership checkout] JWT에서 email 복구 =",
+                    fromJwt,
+                );
+            }
         }
-    }, [agreeAll]);
 
-    useEffect(() => {
-        if (
-            agreePrivacy &&
-            agreePaymentTerms &&
-            agreeMembershipPrivacy
-        ) {
-            setAgreeAll(true);
-        } else {
-            setAgreeAll(false);
+        if (!email) {
+            console.warn(
+                "[membership checkout] 이메일을 찾지 못했습니다. 주문자 정보는 빈 상태로 둡니다.",
+            );
+            return;
         }
-    }, [agreePrivacy, agreePaymentTerms, agreeMembershipPrivacy]);
 
-    const canPay =
-        !!data &&
-        membershipApplied &&
-        agreePrivacy &&
-        agreePaymentTerms &&
-        agreeMembershipPrivacy;
-
-    // ===== 프리뷰 데이터 호출 (/checkout/membership) =====
-    useEffect(() => {
         const load = async () => {
             try {
-                setLoading(true);
-                setErrorMsg(null);
-
-                // 형님이 백엔드에 만들 /checkout/membership
-                const res =
-                    await apiClient.get<ApiResult<CheckoutData>>(
-                        "/checkout/membership",
-                        {
-                            params: {
-                                planCode,
-                                months,
-                                autoRenew,
-                            },
-                        }
-                    );
+                const res = await apiClient.get<ApiResult<MemberInfo>>(
+                    "/member/readOne",
+                );
 
                 if (!res.data.isSuccess) {
-                    throw new Error(
-                        res.data.resMessage ||
-                        "결제 정보를 불러오지 못했습니다."
+                    console.warn(
+                        "[membership checkout] 회원 조회 실패 =",
+                        res.data.resMessage,
                     );
+                    return;
                 }
 
-                setData(res.data.result);
-            } catch (err) {
-                setErrorMsg(
-                    extractError(
-                        err,
-                        "결제 정보를 불러오지 못했습니다."
-                    )
+                const info = res.data.result;
+                const name = info.memberName ?? "";
+
+                const parts = name.trim().split(" ");
+                if (parts.length >= 2) {
+                    setOrdererLastName(parts[0]);
+                    setOrdererFirstName(parts.slice(1).join(" "));
+                } else {
+                    setOrdererLastName("");
+                    setOrdererFirstName(name);
+                }
+                setOrdererEmail(info.memberEmail ?? "");
+            } catch (e) {
+                console.error(
+                    "[membership checkout] 회원 정보 조회 중 오류",
+                    e,
                 );
-            } finally {
-                setLoading(false);
             }
         };
 
         load();
-    }, [planCode, months, autoRenew]);
+    }, []);
 
-    // ===== 멤버십 모달 입력 =====
-    const handleMembershipChange = (
-        field: keyof MembershipForm,
-        value: string
-    ) => {
-        setMembershipForm((prev) => ({
-            ...prev,
-            [field]: value,
-        }));
+    const handleChangeUsePoint = (e: ChangeEvent<HTMLInputElement>) => {
+        const v = Number(e.target.value.replace(/\D/g, "") || "0");
+        setUsePoint(v);
     };
 
-    const validateMembershipForm = (): string | null => {
-        if (!membershipForm.name.trim()) {
-            return "이름을 입력해 주세요.";
-        }
-        if (
-            !/^\d{4}-\d{2}-\d{2}$/.test(membershipForm.birth.trim())
-        ) {
-            return "생년월일은 YYYY-MM-DD 형식으로 입력해 주세요.";
-        }
-        if (!membershipForm.phone.trim()) {
-            return "전화번호를 입력해 주세요.";
-        }
-        if (!/^\d+$/.test(membershipForm.phone.trim())) {
-            return "전화번호는 숫자만 입력해 주세요.";
-        }
-        return null;
-    };
-
-    const applyMembershipInfo = () => {
-        const err = validateMembershipForm();
-        if (err) {
-            alert(err);
+    const handleSubmit = async () => {
+        // 🔥 price 만 필수 체크 (planCode / months 는 서버에서 재검증)
+        if (!price) {
+            alert("주문 정보가 올바르지 않습니다. 다시 시도해 주세요.");
             return;
         }
-        setMembershipApplied(true);
-        setShowMembershipModal(false);
-    };
 
-    // ===== 주문 생성 (/order/membership) =====
-    const createMembershipOrder = async (): Promise<number> => {
-        if (!data) throw new Error("결제 데이터가 없습니다.");
-
-        const err = validateMembershipForm();
-        if (err) throw new Error(err);
-
-        const body = {
-            planCode,
-            months,
-            autoRenew,
-            membershipPayType: paymentMethod as MembershipPayType,
-            memberBirth: membershipForm.birth,
-            memberName: membershipForm.name,
-            memberPhone: `${membershipForm.countryCode}${membershipForm.phone}`,
-        };
-
-        const res = await apiClient.post<CreateOrderRes>(
-            "/order/membership",
-            body
-        );
-        return res.data.orderNo;
-    };
-
-    // ===== Toss prepare (/api/pay/toss/prepare) =====
-    const prepareToss = async (
-        orderNo: number
-    ): Promise<TossPrepareResponse["data"]> => {
-        const method =
-            paymentMethod === "ACCOUNT" ? "ACCOUNT" : "CARD";
-
-        try {
-            const res = await apiClient.post<TossPrepareResponse>(
-                "/api/pay/toss/prepare",
-                { orderNo, method }
-            );
-            if (!res.data.isSuccess) {
-                throw new Error(
-                    res.data.resMessage ||
-                    "Toss 결제 준비에 실패했습니다."
-                );
-            }
-            return res.data.data;
-        } catch (err) {
-            throw new Error(
-                extractError(
-                    err,
-                    "Toss 결제 준비 중 오류가 발생했습니다."
-                )
-            );
-        }
-    };
-
-    // ===== 결제 버튼 =====
-    const handlePay = async () => {
-        if (!canPay) {
-            alert(
-                "멤버십 정보와 필수 약관에 모두 동의해 주세요."
-            );
-            if (!membershipApplied) {
-                setShowMembershipModal(true);
-            }
+        if (!memberInfoSaved) {
+            alert("멤버십 정보를 먼저 입력해 주세요.");
             return;
         }
-        if (!data) return;
+
+        if (!agreeAll) {
+            alert("주문 내용과 약관에 모두 동의해 주세요.");
+            return;
+        }
 
         try {
-            const orderNo = await createMembershipOrder();
-            const prepared = await prepareToss(orderNo);
+            setSubmitting(true);
+            setErrorMsg(null);
 
-            const tossClient = getTossClient();
-            if (!tossClient) {
-                alert("Toss 스크립트 또는 클라이언트 키가 없습니다.");
-                return;
-            }
-
-            const payType: TossPayType =
-                paymentMethod === "ACCOUNT" ? "TRANSFER" : "CARD";
-
-            const base: TossRequestBase = {
-                amount: prepared.amount,
-                orderId: prepared.orderId,
-                orderName: prepared.orderName,
-                successUrl: `${window.location.origin}/order/toss/success`,
-                failUrl: `${window.location.origin}/order/toss/fail`,
-                customerEmail: data.buyerEmail,
-                customerName: data.buyerName,
+            // 🔥 백 DTO(CreateMembershipOrderReq)에 맞게 body 구성
+            const reqBody: CreateMembershipOrderReq = {
+                type: "MEMBERSHIP",
+                planCode, // String (예: "T1-2025-MONTHLY")
+                months,
+                autoRenew,
+                memberName,
+                memberBirth,
+                memberPhone: `${memberPhoneCountry} ${memberPhone}`,
             };
 
-            await tossClient.requestPayment(payType, base);
-        } catch (err) {
-            alert(
-                err instanceof Error
-                    ? err.message
-                    : "결제 요청 중 오류가 발생했습니다."
+            console.log("[membership] 요청 바디 =", reqBody);
+
+            const res = await apiClient.post<ApiResult<CreateOrderRes>>(
+                "/order/membership",
+                reqBody,
             );
+
+            if (!res.data.isSuccess) {
+                throw new Error(res.data.resMessage || "주문 생성 실패");
+            }
+
+            const { orderNo, checkoutUrl, paymentUrl } = res.data.result;
+            console.log("[membership] 주문 생성 성공 =", res.data.result);
+
+            // 🔥 진짜 결제창 URL (토스에서 받은 URL) 로 이동
+            const redirectUrl = checkoutUrl || paymentUrl;
+
+            if (redirectUrl) {
+                window.location.href = redirectUrl;
+            } else {
+                // 혹시 URL 못 받았을 때를 대비한 백업 동작
+                console.warn(
+                    "[membership] checkoutUrl 이 없어 /order/checkout 페이지로 이동합니다.",
+                );
+                router.push(`/order/checkout/${orderNo}`);
+            }
+        } catch (e: any) {
+            console.error("[membership] 주문 생성 실패 =", e);
+
+            if (e.response) {
+                console.error(
+                    "[membership] status =",
+                    e.response.status,
+                    "data =",
+                    e.response.data,
+                );
+                alert(
+                    e.response.data?.resMessage ??
+                    `서버 오류 (${e.response.status})`,
+                );
+            } else {
+                alert(
+                    e.message ?? "주문 처리 중 오류가 발생했습니다.",
+                );
+            }
+
+            setErrorMsg(
+                e?.response?.data?.resMessage ||
+                e?.message ||
+                "주문 처리 중 오류가 발생했습니다.",
+            );
+        } finally {
+            setSubmitting(false);
         }
     };
 
-    // ===== UI =====
+    const ordererDisplayName = `${ordererLastName} ${ordererFirstName}`.trim();
+
     return (
-        <div className="w-full min-h-screen bg-black text-white">
-            <div className="max-w-5xl mx-auto px-6 pt-24 pb-16">
-                <h1 className="text-3xl font-semibold mb-8">
-                    결제하기
-                </h1>
+        <div className="min-h-screen bg-black text-zinc-100">
+            <main className="mx-auto max-w-4xl px-4 pb-32 pt-10">
+                {/* 제목 */}
+                <header className="mb-8">
+                    <h1 className="text-2xl font-semibold">결제하기</h1>
+                </header>
 
-                {loading && (
-                    <div className="text-sm text-neutral-400">
-                        결제 정보를 불러오는 중입니다…
+                {/* 주문자 정보 */}
+                <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-sm font-semibold">주문자</h2>
+                        <button
+                            type="button"
+                            onClick={() => setShowOrdererModal(true)}
+                            className="rounded-md bg-zinc-800 px-3 py-1 text-xs text-zinc-100"
+                        >
+                            변경
+                        </button>
                     </div>
-                )}
-                {errorMsg && (
-                    <div className="text-sm text-red-400 mb-4">
-                        {errorMsg}
+
+                    <div className="mt-4 space-y-1 text-sm">
+                        <p>{ordererDisplayName || "주문자 이름"}</p>
+                        <p className="text-zinc-400">
+                            {ordererEmail || "이메일@example.com"}
+                        </p>
                     </div>
-                )}
+                </section>
 
-                {data && (
-                    <div className="flex flex-col gap-8">
-                        {/* 주문자 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="flex justify-between items-start mb-4">
-                                <div>
-                                    <div className="text-sm text-neutral-400 mb-1">
-                                        주문자
-                                    </div>
-                                    <div className="text-lg font-semibold">
-                                        {data.buyerName}
-                                    </div>
-                                    <div className="text-xs text-neutral-400 mt-1">
-                                        {data.buyerEmail}
-                                    </div>
-                                </div>
-                                <button
-                                    className="px-4 py-2 text-xs bg-neutral-900 border border-neutral-700 rounded-lg hover:bg-neutral-800"
-                                    onClick={() =>
-                                        router.push("/mypage/edit")
-                                    }
-                                >
-                                    변경
-                                </button>
-                            </div>
-                        </section>
+                {/* 멤버십 정보 */}
+                <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4">
+                    <h2 className="text-sm font-semibold">멤버십 정보</h2>
 
-                        {/* 멤버십 카드 (주문 상품) */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm text-neutral-400 mb-4">
-                                주문 상품
-                            </div>
-                            <div className="flex gap-4">
-                                <div className="w-24 h-32 bg-neutral-900 rounded-lg flex items-center justify-center text-[11px] text-neutral-500 overflow-hidden">
-                                    {data.items[0].imageUrl ? (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img
-                                            src={data.items[0].imageUrl!}
-                                            alt={data.items[0].title}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    ) : (
-                                        <>MEMBERSHIP</>
-                                    )}
-                                </div>
-                                <div className="flex-1 flex flex-col justify-between">
-                                    <div>
-                                        <div className="text-sm font-semibold">
-                                            {data.items[0].title}
-                                        </div>
-                                        {data.items[0].subtitle && (
-                                            <div className="text-xs text-neutral-400 mt-0.5">
-                                                {data.items[0].subtitle}
-                                            </div>
-                                        )}
-                                        {data.items[0].description && (
-                                            <div className="text-xs text-neutral-500 mt-0.5 whitespace-pre-line">
-                                                {data.items[0].description}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="mt-2 text-sm font-semibold">
-                                        {formatPrice(data.items[0].price)}
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
+                    <button
+                        type="button"
+                        onClick={() => setShowMemberInfoModal(true)}
+                        className="mt-4 flex w-full items-center justify-between rounded-md border border-zinc-700 bg-black px-4 py-3 text-sm"
+                    >
+                        <div className="flex items-center gap-2">
+                            <span className="text-lg">✏️</span>
+                            <span>
+                                {memberInfoSaved
+                                    ? `${memberName} / ${memberBirth} / ${memberPhoneCountry} ${memberPhone}`
+                                    : "정보 입력"}
+                            </span>
+                        </div>
+                    </button>
 
-                        {/* 멤버십 정보 섹션 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="flex justify-between items-center mb-3">
-                                <div className="text-sm text-neutral-400">
-                                    멤버십 정보
-                                </div>
-                                <button
-                                    className="px-3 py-1.5 text-xs rounded-full border border-neutral-700 hover:bg-neutral-900"
-                                    onClick={() =>
-                                        setShowMembershipModal(true)
-                                    }
-                                >
-                                    정보 입력/수정
-                                </button>
-                            </div>
+                    <p className="mt-2 text-[11px] text-red-300">
+                        필수 입력 항목이에요.
+                    </p>
+                </section>
 
-                            <div className="text-xs text-neutral-300 space-y-1">
-                                <div>
-                  <span className="text-neutral-500 mr-2">
-                    이름
-                  </span>
-                                    <span>
-                    {membershipApplied
-                        ? membershipForm.name
-                        : "입력 필요"}
-                  </span>
-                                </div>
-                                <div>
-                  <span className="text-neutral-500 mr-2">
-                    생년월일
-                  </span>
-                                    <span>
-                    {membershipApplied
-                        ? membershipForm.birth
-                        : "입력 필요 (YYYY-MM-DD)"}
-                  </span>
-                                </div>
-                                <div>
-                  <span className="text-neutral-500 mr-2">
-                    전화번호
-                  </span>
-                                    <span>
-                    {membershipApplied
-                        ? `${membershipForm.countryCode} ${membershipForm.phone}`
-                        : "입력 필요"}
-                  </span>
-                                </div>
-                            </div>
+                {/* 주문 상품 */}
+                <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4">
+                    <h2 className="text-sm font-semibold">주문 상품</h2>
 
-                            {!membershipApplied && (
-                                <div className="mt-2 text-[11px] text-red-400">
-                                    멤버십 정보를 입력해야 결제가 가능합니다.
-                                </div>
-                            )}
-                        </section>
-
-                        {/* 결제 수단 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm text-neutral-400 mb-4">
-                                결제
-                            </div>
-                            <div className="flex flex-col gap-3 text-sm">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="paymentMethod"
-                                        className="accent-red-500"
-                                        checked={paymentMethod === "CARD"}
-                                        onChange={() =>
-                                            setPaymentMethod("CARD")
-                                        }
-                                    />
-                                    <span>TOSS PAYMENTS</span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer text-neutral-500">
-                                    <input
-                                        type="radio"
-                                        name="paymentMethod"
-                                        className="accent-red-500"
-                                        checked={paymentMethod === "ACCOUNT"}
-                                        onChange={() =>
-                                            setPaymentMethod("ACCOUNT")
-                                        }
-                                    />
-                                    <span>
-                    Eximbay
-                    <span className="ml-1 text-[11px] text-neutral-500">
-                      {" "}
-                        - 원화(KRW)로만 결제 가능합니다.
-                    </span>
-                  </span>
-                                </label>
-                            </div>
-                        </section>
-
-                        {/* 결제 금액 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm font-semibold mb-2">
-                                결제 금액
-                            </div>
-                            <div className="flex justify-between items-center mt-3">
-                <span className="text-sm text-neutral-400">
-                  총 결제 금액
-                </span>
-                                <span className="text-2xl font-semibold">
-                  {formatPrice(data.totalAmount)}
-                </span>
-                            </div>
-                        </section>
-
-                        {/* 약관 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm font-semibold mb-3">
-                                약관
-                            </div>
-                            <div className="flex flex-col gap-2 text-xs">
-                                <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                                    <span>(필수) T1 Membership 개인정보 수집 및 이용 안내</span>
-                                    <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
-                                </button>
-                                <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                                    <span>(필수) 일반 개인정보 수집 및 이용 안내</span>
-                                    <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
-                                </button>
-                                <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                                    <span>(필수) 결제서비스 이용약관</span>
-                                    <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
-                                </button>
-                            </div>
-                        </section>
-
-                        {/* 최종 동의 + 결제 버튼 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="flex flex-col gap-2 text-xs mb-3">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="accent-red-500"
-                                        checked={agreeMembershipPrivacy}
-                                        onChange={(e) =>
-                                            setAgreeMembershipPrivacy(
-                                                e.target.checked
-                                            )
-                                        }
-                                    />
-                                    <span>
-                    (필수) T1 Membership 개인정보 수집 및 이용
-                    안내에 동의합니다.
-                  </span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="accent-red-500"
-                                        checked={agreePrivacy}
-                                        onChange={(e) =>
-                                            setAgreePrivacy(e.target.checked)
-                                        }
-                                    />
-                                    <span>
-                    (필수) 개인정보 수집 및 이용 안내에
-                    동의합니다.
-                  </span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="accent-red-500"
-                                        checked={agreePaymentTerms}
-                                        onChange={(e) =>
-                                            setAgreePaymentTerms(
-                                                e.target.checked
-                                            )
-                                        }
-                                    />
-                                    <span>
-                    (필수) 결제서비스 이용약관에 동의합니다.
-                  </span>
-                                </label>
-                            </div>
-
-                            <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
-                                <input
-                                    type="checkbox"
-                                    className="accent-red-500"
-                                    checked={agreeAll}
-                                    onChange={(e) =>
-                                        setAgreeAll(e.target.checked)
-                                    }
-                                />
-                                <span>
-                  주문 내용과 약관에 모두 동의합니다.
-                </span>
-                            </label>
-
-                            <button
-                                className="w-full mt-2 h-12 rounded-xl bg-[#f04923] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#e03f19]"
-                                disabled={!canPay}
-                                onClick={handlePay}
-                            >
-                                결제하기
-                            </button>
-                        </section>
+                    <div className="mt-4 flex items-center gap-4">
+                        <div className="h-20 w-16 flex-shrink-0 rounded-lg bg-zinc-800" />
+                        <div className="flex flex-1 flex-col gap-1 text-sm">
+                            <p className="text-xs text-zinc-400">
+                                {planCode || "T1 Membership"}
+                            </p>
+                            <p className="font-semibold">{itemName}</p>
+                            <p className="text-xs text-zinc-400">
+                                {months}개월 이용
+                            </p>
+                            <p className="mt-1 text-base font-bold">
+                                {price.toLocaleString("ko-KR")}원
+                            </p>
+                        </div>
                     </div>
-                )}
-            </div>
+                </section>
 
-            {/* ===== 멤버십 정보 입력 모달 ===== */}
-            {showMembershipModal && (
-                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-                    <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-2xl px-6 py-6 text-sm">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-base font-semibold">
-                                멤버십 정보 입력
+                {/* 결제 수단 (UI) */}
+                <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4">
+                    <h2 className="text-sm font-semibold">결제</h2>
+
+                    <div className="mt-4 space-y-3 text-sm">
+                        <label className="flex items-center gap-3">
+                            <input
+                                type="radio"
+                                name="payMethod"
+                                checked={payMethod === "TOSS_ACCOUNT"}
+                                onChange={() =>
+                                    setPayMethod("TOSS_ACCOUNT")
+                                }
+                                className="h-4 w-4"
+                            />
+                            <span>Toss 쾌결좌이체</span>
+                            <span className="ml-1 rounded-full bg-red-600 px-2 py-[2px] text-[10px]">
+                                혜택
+                            </span>
+                        </label>
+
+                        <label className="flex items-center gap-3">
+                            <input
+                                type="radio"
+                                name="payMethod"
+                                checked={payMethod === "TOSS_PAYMENTS"}
+                                onChange={() =>
+                                    setPayMethod("TOSS_PAYMENTS")
+                                }
+                                className="h-4 w-4"
+                            />
+                            <span>TOSS PAYMENTS</span>
+                        </label>
+
+                        <label className="flex items-center gap-3">
+                            <input
+                                type="radio"
+                                name="payMethod"
+                                checked={payMethod === "EXIMBAY"}
+                                onChange={() => setPayMethod("EXIMBAY")}
+                                className="h-4 w-4"
+                            />
+                            <span>Eximbay</span>
+                        </label>
+
+                        <p className="mt-2 text-[11px] text-zinc-400">
+                            Toss 쾌결좌이체는 원화(KRW) 결제만 지원됩니다. 결제 시
+                            할인은 자동 적용됩니다.
+                        </p>
+                    </div>
+                </section>
+
+                {/* T1 Point */}
+                <section className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4">
+                    <h2 className="text-sm font-semibold">T1 Point</h2>
+
+                    <div className="mt-3 flex gap-3">
+                        <input
+                            type="text"
+                            value={usePoint.toLocaleString("ko-KR")}
+                            onChange={handleChangeUsePoint}
+                            className="flex-1 rounded-md border border-zinc-700 bg-black px-3 py-2 text-right text-sm outline-none"
+                        />
+                        <button
+                            type="button"
+                            className="w-20 rounded-md bg-zinc-800 text-xs"
+                        >
+                            최대 사용
+                        </button>
+                    </div>
+                    <p className="mt-1 text-[11px] text-zinc-500">보유 0P</p>
+                </section>
+
+                {/* 결제 금액 요약 */}
+                <section className="mb-8 rounded-xl border border-zinc-800 bg-zinc-950 px-5 py-4 text-sm">
+                    <div className="flex justify-between">
+                        <span className="text-zinc-400">총 상품 금액</span>
+                        <span>{price.toLocaleString("ko-KR")}원</span>
+                    </div>
+                    <div className="mt-1 flex justify-between">
+                        <span className="text-zinc-400">포인트 사용</span>
+                        <span>-{usePoint.toLocaleString("ko-KR")}원</span>
+                    </div>
+
+                    <div className="mt-3 flex justify-between border-t border-zinc-800 pt-3 text-base font-bold">
+                        <span>총 결제 금액</span>
+                        <span>{totalAmount.toLocaleString("ko-KR")}원</span>
+                    </div>
+
+                    <p className="mt-4 text-[11px] text-zinc-500">
+                        상품 구매 후 콘텐츠를 열람하였거나, 결제 후 7일이 지나면
+                        구매 확정 처리됩니다. 구매 확정 이후 청약철회가
+                        불가합니다.
+                    </p>
+                </section>
+
+                {/* 약관 / 동의 */}
+                <section className="mb-4 text-sm">
+                    <h2 className="mb-2 text-sm font-semibold">약관</h2>
+                    <ul className="space-y-1 text-xs text-zinc-300">
+                        <li>(필수) 개인정보 수집 및 이용 안내</li>
+                        <li>(필수) 결제서비스 이용약관</li>
+                        <li>(필수) 멤버십 개인정보 이용동의</li>
+                    </ul>
+
+                    <label className="mt-4 flex items-center gap-2 text-xs">
+                        <input
+                            type="checkbox"
+                            checked={agreeAll}
+                            onChange={(e) => setAgreeAll(e.target.checked)}
+                            className="h-4 w-4"
+                        />
+                        <span>주문 내용과 약관에 동의합니다.</span>
+                    </label>
+
+                    {errorMsg && (
+                        <p className="mt-2 text-xs text-red-400">
+                            {errorMsg}
+                        </p>
+                    )}
+                </section>
+
+                {/* 결제 버튼 */}
+                <div className="mt-4">
+                    <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={handleSubmit}
+                        className="w-full rounded-xl bg-red-600 py-3 text-sm font-semibold text-white disabled:bg-zinc-700"
+                    >
+                        {submitting ? "결제 처리 중..." : "결제하기"}
+                    </button>
+                </div>
+            </main>
+
+            {/* 주문자 정보 변경 모달 */}
+            {showOrdererModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                    <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-6 py-6 shadow-xl">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="text-sm font-semibold">
+                                주문자 정보
                             </h2>
                             <button
-                                className="text-xs text-neutral-400 hover:text-neutral-200"
-                                onClick={() =>
-                                    setShowMembershipModal(false)
-                                }
+                                type="button"
+                                onClick={() => setShowOrdererModal(false)}
+                                className="text-lg text-zinc-400"
                             >
-                                닫기
+                                ×
                             </button>
                         </div>
 
-                        <div className="flex flex-col gap-3 text-xs">
+                        <div className="space-y-4 text-sm">
                             <div>
-                                <div className="mb-1 text-neutral-300">
-                                    이름{" "}
-                                    <span className="text-red-500">(필수)</span>
-                                </div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    성
+                                </label>
                                 <input
-                                    className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-2 text-sm"
-                                    value={membershipForm.name}
+                                    type="text"
+                                    value={ordererLastName}
                                     onChange={(e) =>
-                                        handleMembershipChange(
-                                            "name",
-                                            e.target.value
-                                        )
+                                        setOrdererLastName(e.target.value)
                                     }
+                                    className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
+                                    placeholder="성을 입력해 주세요"
                                 />
                             </div>
 
                             <div>
-                                <div className="mb-1 text-neutral-300">
-                                    생년월일{" "}
-                                    <span className="text-red-500">(필수)</span>
-                                    <span className="ml-1 text-[11px] text-neutral-500">
-                    예) 1998-11-03
-                  </span>
-                                </div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    이름
+                                </label>
                                 <input
-                                    className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-2 text-sm"
+                                    type="text"
+                                    value={ordererFirstName}
+                                    onChange={(e) =>
+                                        setOrdererFirstName(e.target.value)
+                                    }
+                                    className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
+                                    placeholder="이름을 입력해 주세요"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    이메일
+                                </label>
+                                <input
+                                    type="email"
+                                    value={ordererEmail}
+                                    onChange={(e) =>
+                                        setOrdererEmail(e.target.value)
+                                    }
+                                    className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
+                                    placeholder="이메일을 입력해 주세요"
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setShowOrdererModal(false)}
+                            className="mt-6 w-full rounded-xl border border-zinc-500 py-2 text-sm font-semibold text-zinc-100"
+                        >
+                            적용하기
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* 멤버십 정보 입력 모달 */}
+            {showMemberInfoModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                    <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-6 py-6 shadow-xl">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="text-sm font-semibold">
+                                멤버십 정보
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setShowMemberInfoModal(false)
+                                }
+                                className="text-lg text-zinc-400"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <p className="mb-3 text-[11px] text-sky-300">
+                            구매 완료 후, 입력한 정보를 수정할 수 없어요. 정확히
+                            확인하고 진행해 주세요.
+                        </p>
+
+                        <div className="space-y-4 text-sm">
+                            <div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    이름 (필수)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={memberName}
+                                    onChange={(e) =>
+                                        setMemberName(e.target.value)
+                                    }
+                                    className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
+                                    placeholder="이름을 입력해 주세요"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    생년월일 (필수)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={memberBirth}
+                                    onChange={(e) =>
+                                        setMemberBirth(e.target.value)
+                                    }
+                                    className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
                                     placeholder="YYYY-MM-DD"
-                                    value={membershipForm.birth}
-                                    onChange={(e) =>
-                                        handleMembershipChange(
-                                            "birth",
-                                            e.target.value
-                                        )
-                                    }
                                 />
+                                <p className="mt-1 text-[10px] text-zinc-500">
+                                    입력 예시 2000-01-23
+                                </p>
                             </div>
 
                             <div>
-                                <div className="mb-1 text-neutral-300">
-                                    전화번호{" "}
-                                    <span className="text-red-500">(필수)</span>
-                                </div>
+                                <label className="mb-1 block text-xs text-zinc-300">
+                                    전화번호 (필수)
+                                </label>
                                 <div className="flex gap-2">
                                     <select
-                                        className="min-w-[80px] bg-black border border-neutral-700 rounded-lg px-2 py-2 text-sm"
-                                        value={membershipForm.countryCode}
+                                        className="w-24 rounded-md border border-zinc-700 bg-black px-2 py-2 text-xs"
+                                        value={memberPhoneCountry}
                                         onChange={(e) =>
-                                            handleMembershipChange(
-                                                "countryCode",
-                                                e.target.value
+                                            setMemberPhoneCountry(
+                                                e.target.value,
                                             )
                                         }
                                     >
-                                        <option value="+82">+82</option>
-                                        <option value="+81">+81</option>
-                                        <option value="+1">+1</option>
+                                        <option value="+82">+82 한국</option>
+                                        <option value="+1">+1 미국</option>
+                                        <option value="+81">+81 일본</option>
                                     </select>
                                     <input
-                                        className="flex-1 bg-black border border-neutral-700 rounded-lg px-3 py-2 text-sm"
-                                        placeholder="숫자만 입력"
-                                        value={membershipForm.phone}
+                                        type="text"
+                                        value={memberPhone}
                                         onChange={(e) =>
-                                            handleMembershipChange(
-                                                "phone",
-                                                e.target.value
+                                            setMemberPhone(
+                                                e.target.value.replace(
+                                                    /\D/g,
+                                                    "",
+                                                ),
                                             )
                                         }
+                                        className="flex-1 rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm outline-none"
+                                        placeholder="하이픈 없이 입력해 주세요"
                                     />
                                 </div>
+                                <p className="mt-1 text-[10px] text-zinc-500">
+                                    국가코드를 확인하고, 숫자만 정확히 입력해
+                                    주세요.
+                                </p>
                             </div>
                         </div>
 
-                        <div className="mt-5 flex gap-2">
-                            <button
-                                className="flex-1 h-10 rounded-xl bg-neutral-800 text-xs hover:bg-neutral-700"
-                                onClick={() =>
-                                    setShowMembershipModal(false)
-                                }
-                            >
-                                취소
-                            </button>
-                            <button
-                                className="flex-1 h-10 rounded-xl bg-[#f04923] text-xs font-semibold hover:bg-[#e03f19]"
-                                onClick={applyMembershipInfo}
-                            >
-                                적용하기
-                            </button>
-                        </div>
+                        <button
+                            type="button"
+                            disabled={
+                                !memberName || !memberBirth || !memberPhone
+                            }
+                            onClick={() => {
+                                setMemberInfoSaved(true);
+                                setShowMemberInfoModal(false);
+                            }}
+                            className="mt-6 w-full rounded-xl bg-red-600 py-2 text-sm font-semibold text-white disabled:bg-zinc-700"
+                        >
+                            적용하기
+                        </button>
                     </div>
                 </div>
             )}
