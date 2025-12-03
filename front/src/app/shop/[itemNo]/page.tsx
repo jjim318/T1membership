@@ -1058,28 +1058,19 @@ export default function ShopDetailPage() {
 }
 
 // ─────────────────────────────────────
-// 멤버십 전용 상세 레이아웃
+// 멤버십 정기권 전용 상세 레이아웃
 // ─────────────────────────────────────
-export function MembershipDetailBody({
-                                         item,
-                                         detailImages,
-                                         compact = false,                        // 상단/하단 크롬 숨기는 용도
-                                         currency: externalCurrency,
-                                         onChangeCurrency,
-                                     }: {
+function MembershipDetailBody({
+                                  item,
+                                  detailImages,
+                              }: {
     item: ItemDetail;
     detailImages: DetailImage[];
-    compact?: boolean;
-    currency?: "KRW" | "USD";
-    onChangeCurrency?: (c: "KRW" | "USD") => void;
 }) {
-    // 부모에서 통화 내려주면 그거 쓰고, 아니면 내부 state 사용
-    const [internalCurrency, setInternalCurrency] =
-        useState<"KRW" | "USD">("KRW");
+    const router = useRouter();
 
-    const currency = externalCurrency ?? internalCurrency;
-    const setCurrency = onChangeCurrency ?? setInternalCurrency;
-
+    // 결제 통화 아코디언
+    const [currency, setCurrency] = useState<"KRW" | "USD">("KRW");
     const [openCurrency, setOpenCurrency] = useState(false);
 
     const currencyLabel =
@@ -1093,64 +1084,95 @@ export function MembershipDetailBody({
 
     const payType = (item.membershipPayType || "").toUpperCase();
 
-    // USD 표기용 임시 값들 (형님 맘대로 수정 가능)
-    let priceUSD = 6.3; // 기본값: RECURRING
+    let priceUSD = 6.3; // 기본값: 정기(RECURRING)
 
     if (payType === "ONE_TIME") {
         priceUSD = 6.5;
     }
+
     if (payType === "YEARLY") {
         priceUSD = 60.0;
     }
 
+    // 🔥 멤버십 결제 페이지로 이동
+    const handleMembershipCheckout = () => {
+        // TODO: 실제 planCode 는 DB/백엔드 설계에 맞게 바꿔 쓰시면 됩니다.
+        const planCode = "T1-2025-MONTHLY";
+
+        let months = 1;
+        let autoRenew = false;
+
+        switch (payType as MembershipPayType) {
+            case "YEARLY":
+                months = 12;
+                break;
+            case "RECURRING":
+                autoRenew = true;
+                break;
+            case "ONE_TIME":
+            default:
+                months = 1;
+                autoRenew = false;
+        }
+
+        const params = new URLSearchParams({
+            planCode,
+            months: String(months),
+            autoRenew: String(autoRenew),
+            itemName: item.itemName,
+            price: String(item.itemPrice),
+            membershipPayType: payType,
+        });
+
+        router.push(`/order/membership/checkout?${params.toString()}`);
+    };
+
     return (
         <main className="min-h-screen bg-black text-zinc-100">
             <section className="mx-auto flex max-w-5xl flex-col gap-8 px-4 pt-16 pb-24">
-                {/* 상단: 제목 + 통화 선택 (compact면 숨김) */}
-                {!compact && (
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-lg font-semibold">
-                            멤버십 가입하기
-                        </h1>
+                {/* 상단: 제목 + 통화 선택 */}
+                <div className="flex items-center justify-between">
+                    <h1 className="text-lg font-semibold">
+                        멤버십 가입하기
+                    </h1>
 
-                        {/* 결제 단위 드롭다운 */}
-                        <div className="relative text-xs">
-                            <button
-                                type="button"
-                                onClick={() => setOpenCurrency((v) => !v)}
-                                className="flex min-w-[180px] items-center justify-between rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
-                            >
-                                <span>{currencyLabel}</span>
-                                <span className="ml-2 text-[10px]">▼</span>
-                            </button>
+                    {/* 결제 단위 드롭다운 */}
+                    <div className="relative text-xs">
+                        <button
+                            type="button"
+                            onClick={() => setOpenCurrency((v) => !v)}
+                            className="flex min-w-[180px] items-center justify-between rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
+                        >
+                            <span>{currencyLabel}</span>
+                            <span className="ml-2 text-[10px]">▼</span>
+                        </button>
 
-                            {openCurrency && (
-                                <div className="absolute right-0 mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 py-1 text-xs shadow-lg">
-                                    <button
-                                        type="button"
-                                        className="flex w-full items-center px-3 py-2 hover:bg-zinc-800"
-                                        onClick={() => {
-                                            setCurrency("KRW");
-                                            setOpenCurrency(false);
-                                        }}
-                                    >
-                                        KRW - 한국 ₩(원)
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="flex w-full items-center px-3 py-2 hover:bg-zinc-800"
-                                        onClick={() => {
-                                            setCurrency("USD");
-                                            setOpenCurrency(false);
-                                        }}
-                                    >
-                                        USD - 미국 $(달러)
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+                        {openCurrency && (
+                            <div className="absolute right-0 mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 py-1 text-xs shadow-lg">
+                                <button
+                                    type="button"
+                                    className="flex w-full items-center px-3 py-2 hover:bg-zinc-800"
+                                    onClick={() => {
+                                        setCurrency("KRW");
+                                        setOpenCurrency(false);
+                                    }}
+                                >
+                                    KRW - 한국 ₩(원)
+                                </button>
+                                <button
+                                    type="button"
+                                    className="flex w-full items-center px-3 py-2 hover:bg-zinc-800"
+                                    onClick={() => {
+                                        setCurrency("USD");
+                                        setOpenCurrency(false);
+                                    }}
+                                >
+                                    USD - 미국 $(달러)
+                                </button>
+                            </div>
+                        )}
                     </div>
-                )}
+                </div>
 
                 {/* 상단 썸네일 + 상품명 */}
                 <div className="mt-4 flex flex-col items-center">
@@ -1191,7 +1213,7 @@ export function MembershipDetailBody({
                     </div>
                 )}
 
-                {/* 옵션 선택 + 가입 카드 (이게 형님이 말한 '구매하는 부분') */}
+                {/* 옵션 선택 + 정기결제 카드 */}
                 <div className="mt-16 w-full max-w-3xl">
                     <p className="mb-3 text-xs font-semibold text-zinc-200">
                         옵션 선택
@@ -1236,7 +1258,7 @@ export function MembershipDetailBody({
                             </li>
                         </ul>
 
-                        {/* 버튼들 – 기존 그대로 유지 */}
+                        {/* 버튼들 */}
                         <div className="mt-6 space-y-2">
                             <button
                                 type="button"
@@ -1246,6 +1268,7 @@ export function MembershipDetailBody({
                             </button>
                             <button
                                 type="button"
+                                onClick={handleMembershipCheckout} // 🔥 여기서 결제 페이지로 이동
                                 className="flex h-10 w-full items-center justify-center rounded-md bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
                             >
                                 가입하기
@@ -1272,21 +1295,16 @@ export function MembershipDetailBody({
                     </p>
                 </section>
 
-                {/* 하단 전체 멤버십 보기 – compact 모드에서는 숨김 */}
-                {!compact && (
-                    <div className="mt-12 flex w-full justify-center border-t border-zinc-800 pt-8">
-                        <Link
-                            href="/membership/all"
-                            className="text-[13px] font-medium text-sky-400 hover:text-sky-300"
-                        >
-                            가입 가능한 전체 멤버십 보기 →
-                        </Link>
-                    </div>
-                )}
+                {/* 하단 전체 멤버십 보기 */}
+                <div className="mt-12 flex w-full justify-center border-t border-zinc-800 pt-8">
+                    <button
+                        type="button"
+                        className="text-[13px] font-medium text-sky-400 hover:text-sky-300"
+                    >
+                        가입 가능한 전체 멤버십 보기 &rarr;
+                    </button>
+                </div>
             </section>
         </main>
     );
 }
-
-
-
