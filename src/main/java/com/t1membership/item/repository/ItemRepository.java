@@ -1,6 +1,7 @@
 package com.t1membership.item.repository;
 
 import com.t1membership.item.constant.ItemCategory;
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.item.constant.Player;
 import com.t1membership.item.domain.ItemEntity;
 import org.springframework.data.domain.Page;
@@ -9,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ItemRepository extends JpaRepository<ItemEntity, Long> {
@@ -36,5 +38,8 @@ public interface ItemRepository extends JpaRepository<ItemEntity, Long> {
     // ItemRepository
     Page<ItemEntity> findAllByItemCategory(ItemCategory itemCategory, Pageable pageable);
 
-
+    // 멤버십 기본 결제 타입 + 카테고리로 조회
+    Optional<ItemEntity> findByMembershipPayTypeAndItemCategory(
+            MembershipPayType membershipPayType,
+            ItemCategory itemCategory);
 }

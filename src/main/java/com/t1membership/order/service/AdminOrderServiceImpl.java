@@ -4,15 +4,11 @@ import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.dto.req.admin.AdminUpdateOrderAddressReq;
 import com.t1membership.order.dto.req.admin.AdminUpdateOrderStatusReq;
-import com.t1membership.order.dto.req.common.CancelOrderReq;
 import com.t1membership.order.dto.res.admin.AdminDetailOrderRes;
-import com.t1membership.order.dto.res.common.SummaryOrderRes;
 import com.t1membership.order.dto.res.common.UpdateOrderAddressRes;
 import com.t1membership.order.repository.OrderRepository;
 import com.t1membership.pay.service.TossPaymentService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 public class AdminOrderServiceImpl implements AdminOrderService {
     private final OrderRepository orderRepository;
-    private final TossPaymentService tossPaymentService;
+    //private final TossPaymentService tossPaymentService;
     //관리자용 주문 서비스 구현체
 
     // ================== 배송지 변경 ==================

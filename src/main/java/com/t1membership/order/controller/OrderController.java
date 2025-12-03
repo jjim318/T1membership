@@ -1,5 +1,6 @@
 package com.t1membership.order.controller;
 
+import com.t1membership.ApiResult;
 import com.t1membership.order.dto.req.common.CancelOrderReq;
 import com.t1membership.order.dto.req.common.SearchOrderReq;
 import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
@@ -60,23 +61,26 @@ public class OrderController {
 
     // 주문 생성 (굿즈)
     @PostMapping("/goods")
-    public CreateOrderRes createGoodsOrder(@AuthenticationPrincipal String email,
+    public ApiResult<CreateOrderRes> createGoodsOrder(@AuthenticationPrincipal String email,
                                            @RequestBody @Valid CreateGoodsOrderReq req) {
-        return orderService.createGoodsOrder(email, req);
+        CreateOrderRes res = orderService.createGoodsOrder(email, req);
+        return new ApiResult<>(res);
     }
 
     // 주문 생성 (멤버십)
     @PostMapping("/membership")
-    public CreateOrderRes createMembershipOrders(@AuthenticationPrincipal String email,
+    public ApiResult<CreateOrderRes> createMembershipOrders(@AuthenticationPrincipal String email,
                                                  @RequestBody @Valid CreateMembershipOrderReq req) {
-        return orderService.createMembershipOrder(email, req);
+        CreateOrderRes res = orderService.createMembershipOrder(email, req);
+        return new ApiResult<>(res);
     }
 
     // 주문 생성 (POP)
     @PostMapping("/POP")
-    public CreateOrderRes createPopOrders(@AuthenticationPrincipal String email,
+    public ApiResult<CreateOrderRes> createPopOrders(@AuthenticationPrincipal String email,
                                           @RequestBody @Valid CreatePopOrderReq req) {
-        return orderService.createPopOrder(email, req);
+        CreateOrderRes res = orderService.createPopOrder(email, req);
+        return new ApiResult<>(res);
     }
 
     // 회원 전체 취소
