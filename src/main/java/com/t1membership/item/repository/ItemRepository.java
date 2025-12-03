@@ -1,8 +1,6 @@
 package com.t1membership.item.repository;
 
-import com.t1membership.item.constant.ItemCategory;
-import com.t1membership.item.constant.MembershipPayType;
-import com.t1membership.item.constant.Player;
+import com.t1membership.item.constant.*;
 import com.t1membership.item.domain.ItemEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -42,4 +40,17 @@ public interface ItemRepository extends JpaRepository<ItemEntity, Long> {
     Optional<ItemEntity> findByMembershipPayTypeAndItemCategory(
             MembershipPayType membershipPayType,
             ItemCategory itemCategory);
+
+    List<ItemEntity> findByItemCategoryAndPopPlanTypeAndPopPlayer(
+            ItemCategory itemCategory,
+            PopPlanType popPlanType,
+            Player popPlayer
+    );
+
+    List<ItemEntity> findByItemCategoryAndPopPlanType(
+            ItemCategory itemCategory,
+            PopPlanType popPlanType
+    );
+
+
 }
