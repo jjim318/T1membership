@@ -366,7 +366,7 @@ export default function CartPage() {
 
                                         <button
                                             type="button"
-                                            onClick={() => router.push("/membership/join")}
+                                            onClick={() => router.push("/membership/all")}
                                             className="text-[11px] font-semibold text-red-300 hover:text-red-200"
                                         >
                                             가입하기 &gt;
