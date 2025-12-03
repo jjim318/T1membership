@@ -443,7 +443,7 @@ function LockedSection({ message }: { message: string }) {
         <p className="text-sm font-semibold mb-2">멤버십 회원 전용 콘텐츠입니다.</p>
         <p className="text-xs text-gray-400 mb-4">{message}</p>
         <Link
-            href="/membership"
+            href="/membership/all"
             className="rounded-full bg-white px-6 py-2 text-xs font-semibold text-black hover:bg-gray-100"
         >
           멤버십 가입하러 가기
@@ -543,7 +543,7 @@ export default function MainPage() {
 
               <div className="flex flex-wrap gap-3">
                 <Link
-                    href="/membership"
+                    href="/membership/all"
                     className="rounded-full bg-white/90 px-6 py-2 text-sm font-semibold text-black hover:bg-white"
                 >
                   멤버십

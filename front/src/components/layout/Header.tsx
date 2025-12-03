@@ -157,7 +157,7 @@ export default function Header() {
             <div className="mx-auto max-w-6xl px-3 md:px-6 h-14 flex items-center justify-between gap-3">
                 {/* 왼쪽: 로고 + 메뉴 */}
                 <div className="flex items-center gap-4 min-w-0">
-                    <Link href="/public" className="flex items-center gap-2 shrink-0">
+                    <Link href="/" className="flex items-center gap-2 shrink-0">
                         <Image
                             src="/icons/t1.png"
                             alt="T1 Logo"
@@ -178,7 +178,7 @@ export default function Header() {
                             text-[11px] xl:text-sm text-zinc-300
                         "
                     >
-                        <Link href="/public" className="hover:text-white">
+                        <Link href="/" className="hover:text-white">
                             HOME
                         </Link>
                         <Link href="/story" className="hover:text-white">

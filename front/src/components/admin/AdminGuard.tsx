@@ -63,7 +63,10 @@ function isAdminToken(token: string | null): boolean {
     const roles: string[] = payload.roles ?? [];
     const singleRole = payload.memberRole ?? "";
 
-    return roles.includes("ADMIN") || singleRole === "ADMIN";
+    return roles.includes("ADMIN") ||
+           singleRole === "ADMIN"  ||
+           roles.includes("ADMIN_CONTENT") ||
+           singleRole === "ADMIN_CONTENT";
 }
 
 // =====================
