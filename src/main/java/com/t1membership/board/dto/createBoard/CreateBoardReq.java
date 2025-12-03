@@ -24,5 +24,6 @@ public class CreateBoardReq {
     private BoardType boardType;
     private Boolean notice;
     private Boolean isSecret;
+    private String categoryCode;
 
 }

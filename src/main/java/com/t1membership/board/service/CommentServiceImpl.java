@@ -14,7 +14,7 @@ import com.t1membership.board.repository.BoardRepository;
 import com.t1membership.board.repository.CommentRepository;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.member.domain.MemberEntity;
-import com.t1membership.member.reporitory.MemberRepository;
+import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.http.HttpStatus;
@@ -105,10 +105,9 @@ public class CommentServiceImpl implements CommentService {
                 .map(this::toReadCommentRes)
                 .toList();
 
-        return PageResponseDTO.<ReadCommentRes>builder()
+        return PageResponseDTO.<ReadCommentRes>withAll()
+                .pageRequestDTO(req)
                 .dtoList(dtoList)
-                .page(page)
-                .size(size)
                 .total((int) result.getTotalElements())
                 .build();
     }
