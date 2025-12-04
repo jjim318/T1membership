@@ -35,4 +35,7 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
      order by o.orderNo desc
 """)
     Page<OrderEntity> searchOrders(AdminSearchOrderReq req, Pageable pageable);
+
+    Optional<OrderEntity> findByTossPayment_OrderTossId(String orderTossId);
+
 }

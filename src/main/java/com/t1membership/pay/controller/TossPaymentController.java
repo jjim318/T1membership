@@ -4,13 +4,16 @@ package com.t1membership.pay.controller;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.repository.OrderRepository;
+import com.t1membership.pay.domain.TossPaymentEntity;
 import com.t1membership.pay.dto.TossConfirmReq;
 import com.t1membership.pay.service.TossPaymentService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -20,38 +23,37 @@ import java.util.Map;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/pay/toss")
+@Slf4j
 public class TossPaymentController {
 
     private final OrderRepository orderRepository;
     private final TossPaymentService tossPaymentService;
 
-    // 공통: 라인합 재계산(BigDecimal 기반)
+    // ==========================
+    // 공통 유틸
+    // ==========================
     private int computeOrderAmount(OrderEntity order) {
-
         return order.getOrderItems().stream()
                 .map(oi -> {
                     BigDecimal line = oi.getLineTotal();
-
-                    // lineTotal <= 0 이면 priceAtOrder * quantity 로 계산
                     if (line == null || line.compareTo(BigDecimal.ZERO) <= 0) {
                         line = oi.getPriceAtOrder().multiply(
                                 BigDecimal.valueOf(oi.getQuantity())
                         );
                     }
-
                     return line;
                 })
-                .reduce(BigDecimal.ZERO, BigDecimal::add)          // BigDecimal 합계
-                .intValueExact();                                   // Toss cancelAmount 위해 Integer 변환
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .intValueExact();
     }
-    // 공통 헬퍼 (컨트롤러 안에 추가)
+
     private String currentMemberId(Authentication auth) {
         if (auth == null) return null;
         Object p = auth.getPrincipal();
         if (p instanceof UserDetails u) return u.getUsername();
-        if (p instanceof OAuth2User ou) return ou.getName();   // 필요 시 매핑 변경
+        if (p instanceof OAuth2User ou) return ou.getName();
         if (p instanceof String s && !"anonymousUser".equals(s)) return s;
-        return null; // 익명 등
+        return null;
     }
 
     private void assertPayable(OrderEntity order) {
@@ -60,25 +62,36 @@ public class TossPaymentController {
         }
     }
 
+    // ==========================
+    // 결제 준비 (checkout 창 띄우기 전)
+    // ==========================
     @PostMapping("/prepare")
-    public ResponseEntity<?> prepare(@RequestBody Map<String, Object> body, Authentication authentication) {
+    @Transactional
+    public ResponseEntity<?> prepare(@RequestBody Map<String, Object> body,
+                                     Authentication authentication) {
+
         Long orderNo = Long.valueOf(body.get("orderNo").toString());
         String method = String.valueOf(body.getOrDefault("method", "CARD"));
+
         OrderEntity order = orderRepository.getReferenceById(orderNo);
 
-        // 로그인되어 있으면 소유자 검증(테스트 중 익명 접근은 통과)
-        String memberId = currentMemberId(authentication); // private helper
+        // 로그인되어 있으면 소유자 검증
+        String memberId = currentMemberId(authentication);
         if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
-        if (order.getOrderStatus() != OrderStatus.ORDERED)
+
+        if (order.getOrderStatus() != OrderStatus.ORDERED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "결제 불가 상태");
+        }
 
         int amount = computeOrderAmount(order);
-        if (amount <= 0)
+        if (amount <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "EMPTY_ORDER_AMOUNT");
-        // ★★★ 최소 결제금액 가드 (여기에 넣는다!)
-        int min = "ACCOUNT".equalsIgnoreCase(method) ? 200 : 100; // 카드=100, 계좌=200
+        }
+
+        // 최소 결제금액 가드
+        int min = "ACCOUNT".equalsIgnoreCase(method) ? 200 : 100;
         if (amount < min) {
             return ResponseEntity.badRequest().body(Map.of(
                     "isSuccess", false,
@@ -88,20 +101,33 @@ public class TossPaymentController {
             ));
         }
 
-        String orderId = "ANP-" + order.getOrderNo() + "-" + System.currentTimeMillis();
+        // ==============================
+        // 🔥 토스용 orderId(orderTossId) - 매번 새로 생성
+        // ==============================
+        TossPaymentEntity tossPayment = order.getTossPayment();
+        if (tossPayment == null) {
+            log.error("[TossPrepare] TossPayment is null. orderNo={}", orderNo);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Toss 결제정보가 없습니다.");
+        }
+
+        // ❗ 기존 값 무시하고 항상 새로 발급
+        String orderTossId = "ANP-" + order.getOrderNo() + "-" + System.currentTimeMillis();
+        tossPayment.setOrderTossId(orderTossId);
+        log.info("[TossPrepare] new orderTossId={}, orderNo={}", orderTossId, orderNo);
+
+        orderRepository.save(order);
+
         String orderName = makeOrderName(order);
 
-        // prepare 마지막 return만 교체
         return ResponseEntity.ok(Map.of(
                 "isSuccess", true,
                 "data", Map.of(
-                        "orderNo", order.getOrderNo(),          // ← 추가
-                        "orderId", orderId,
+                        "orderNo", order.getOrderNo(),
+                        "orderId", orderTossId,   // 토스 위젯에 넘길 orderId
                         "amount", amount,
                         "orderName", orderName
                 )
         ));
-
     }
 
     private String makeOrderName(OrderEntity order) {
@@ -113,17 +139,27 @@ public class TossPaymentController {
         return (rest > 0) ? first + " 외 " + rest + "건" : first;
     }
 
+    // ==========================
+    // 결제 승인(confirm)
+    // ==========================
     @PostMapping("/confirm")
+    @Transactional
     public ResponseEntity<?> confirm(@RequestBody TossConfirmReq req,
                                      Authentication authentication) {
 
-        // ===== 1) 기본값 꺼내기 =====
-        Long orderNo       = req.getOrderNo();
-        String paymentKey  = req.getPaymentKey();
-        Integer amount     = req.getTotalAmount(); // 프론트에서 넘어온 결제 금액
+        String paymentKey = req.getPaymentKey();
+        String orderId    = req.getOrderId();      // Toss orderId (order_toss_id or orderNo)
+        Integer amount    = req.getTotalAmount();
 
-        // ===== 2) 바디 검증 =====
-        if (orderNo == null || paymentKey == null || paymentKey.isBlank() || amount == null) {
+        log.info("[TossConfirm] req orderId={}, paymentKey={}, totalAmount={}",
+                orderId, paymentKey, amount);
+
+        if (paymentKey == null || paymentKey.isBlank()
+                || orderId == null || orderId.isBlank()
+                || amount == null) {
+
+            log.warn("[TossConfirm] invalid request body. req={}", req);
+
             return ResponseEntity.badRequest().body(
                     Map.of(
                             "isSuccess", false,
@@ -135,48 +171,93 @@ public class TossPaymentController {
 
         int clientAmount = amount.intValue();
 
-        // ===== 3) 우리 주문 조회 =====
-        OrderEntity order = orderRepository.findByIdFetchItems(orderNo)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "주문 없음"
-                ));
+        // 1차: order_toss_id 로 조회
+        OrderEntity order = orderRepository.findByTossPayment_OrderTossId(orderId)
+                .orElseGet(() -> {
+                    try {
+                        Long orderNoLong = Long.valueOf(orderId);
+                        return orderRepository.findById(orderNoLong).orElse(null);
+                    } catch (NumberFormatException e) {
+                        return null;
+                    }
+                });
 
-        // 로그인 유저 == 주문자 검증
+        if (order == null) {
+            log.warn("[TossConfirm] 주문 없음. orderId={}", orderId);
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "주문 없음(orderId=" + orderId + ")"
+            );
+        }
+
+        Long orderNo = order.getOrderNo();
+
         String memberId = currentMemberId(authentication);
         if (memberId != null && !memberId.equals(order.getMember().getMemberEmail())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
 
-        // 결제 가능한 상태인지 (CANCELED, PAID 등 체크)
         assertPayable(order);
 
-        // ===== 4) 서버 금액 계산 & 위변조 체크 =====
         int serverAmount = computeOrderAmount(order);
+
+        log.info("[TossConfirm] before adjust serverAmount={}, orderTotalPrice={}",
+                serverAmount,
+                order.getOrderTotalPrice()
+        );
+
+        if (serverAmount <= 0 && order.getOrderTotalPrice() != null) {
+            BigDecimal otp = order.getOrderTotalPrice();
+            if (otp.compareTo(BigDecimal.ZERO) > 0) {
+                serverAmount = otp.intValue();
+                log.info("[TossConfirm] adjusted serverAmount from orderTotalPrice={}", serverAmount);
+            }
+        }
+
         if (serverAmount <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "EMPTY_ORDER_AMOUNT");
+            log.warn("[TossConfirm] EMPTY_ORDER_AMOUNT. orderNo={}, serverAmount={}",
+                    orderNo, serverAmount);
+
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "isSuccess", false,
+                            "resCode", 400,
+                            "resMessage", "EMPTY_ORDER_AMOUNT"
+                    )
+            );
         }
+
         if (serverAmount != clientAmount) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "금액 불일치");
+            log.warn("[TossConfirm] 금액 불일치. orderNo={}, serverAmount={}, clientAmount={}",
+                    orderNo, serverAmount, clientAmount);
+
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "isSuccess", false,
+                            "resCode", 400,
+                            "resMessage", "금액 불일치"
+                    )
+            );
         }
 
-        // ===== 5) 토스 confirm 호출 =====
-        // 토스에 넘길 orderId 는 "주문 번호 문자열" 로 통일
-        String orderIdForToss = String.valueOf(orderNo);
+        Map<String, Object> tossResult =
+                tossPaymentService.confirmPayment(paymentKey, orderId, serverAmount);
 
-        Map<String, Object> result =
-                tossPaymentService.confirmPayment(paymentKey, orderIdForToss, serverAmount);
-
-        // ===== 6) 주문 상태 갱신 =====
         order.setOrderStatus(OrderStatus.PAID);
         orderRepository.save(order);
 
-        // ===== 7) 응답 =====
+        log.info("[TossConfirm] success. orderNo={}, serverAmount={}, orderId={}",
+                orderNo, serverAmount, orderId);
+
         return ResponseEntity.ok(
                 Map.of(
                         "isSuccess", true,
                         "resCode", 200,
                         "resMessage", "OK",
-                        "data", result
+                        "data", Map.of(
+                                "orderNo", orderNo,
+                                "toss", tossResult
+                        )
                 )
         );
     }
