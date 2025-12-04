@@ -54,6 +54,7 @@ public class BoardController {
             @RequestPart(value = "thumbnail", required = false)
             MultipartFile thumbnail
     ) {
+        log.info("[BoardContent] POST /board/content called. title={}", title);
 
         // 0) 기본 검증 – 여기서 막히면 createBoard까지 안 감
         if (title == null || title.isBlank()) {
@@ -110,6 +111,7 @@ public class BoardController {
             @ModelAttribute CreateBoardReq postReq,
             @RequestPart(value = "images", required = false) List<MultipartFile> images
     ) {
+        log.info("[BoardGeneral] POST /board called. title={}", postReq.getBoardTitle());
         var postRes = boardService.createBoard(postReq, images);
         return new ApiResult<>(postRes);
     }

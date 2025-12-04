@@ -103,6 +103,9 @@ public class SecurityConfig {
                         "/main/feed"
                 ).permitAll()
 
+                // 🔥 여기 추가
+                .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
+
                 // 게시판/아이템/댓글 조회 (GET)
                 .requestMatchers(HttpMethod.GET,
                         "/board/**",
