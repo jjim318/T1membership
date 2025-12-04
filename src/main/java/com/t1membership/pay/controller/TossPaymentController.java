@@ -1,8 +1,12 @@
 // TossPaymentController.java
 package com.t1membership.pay.controller;
 
+import com.t1membership.item.constant.ItemCategory;
+import com.t1membership.item.constant.MembershipPayType;
+import com.t1membership.item.constant.PopPlanType;
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.domain.OrderItemEntity;
 import com.t1membership.order.repository.OrderRepository;
 import com.t1membership.pay.domain.TossPaymentEntity;
 import com.t1membership.pay.dto.TossConfirmReq;
@@ -19,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequiredArgsConstructor
@@ -140,7 +145,7 @@ public class TossPaymentController {
     }
 
     // ==========================
-    // 결제 승인(confirm)
+    // 결제 승인(confirm) – 굿즈 / 멤버십 / POP 공통
     // ==========================
     @PostMapping("/confirm")
     @Transactional
@@ -240,10 +245,24 @@ public class TossPaymentController {
             );
         }
 
+        // ==========================
+        // 1) 토스 최종 승인 (공통)
+        // ==========================
         Map<String, Object> tossResult =
                 tossPaymentService.confirmPayment(paymentKey, orderId, serverAmount);
 
+        // ==========================
+        // 2) 주문 상태/결제 정보 업데이트 (공통)
+        // ==========================
         order.setOrderStatus(OrderStatus.PAID);
+        // 필요하면 여기서 paymentMethod / paymentStatus / paidAt 등도 세팅 가능
+
+        // ==========================
+        // 3) 멤버십 / POP 후처리
+        // ==========================
+        applyMembershipIfNeeded(order); // 멤버십 주문이면 멤버 membershipType 갱신
+        applyPopIfNeeded(order);        // POP 주문이면 멤버 popType 갱신
+
         orderRepository.save(order);
 
         log.info("[TossConfirm] success. orderNo={}, serverAmount={}, orderId={}",
@@ -260,6 +279,80 @@ public class TossPaymentController {
                         )
                 )
         );
+    }
+
+    // ==========================
+    // 멤버십 주문 후처리
+    // ==========================
+    private void applyMembershipIfNeeded(OrderEntity order) {
+        var member = order.getMember();
+        if (member == null) {
+            log.warn("[MembershipAfterPay] member is null. orderNo={}", order.getOrderNo());
+            return;
+        }
+
+        // 주문 아이템 중 MEMBERSHIP 카테고리인 상품 찾기
+        var membershipItemOpt = order.getOrderItems().stream()
+                .map(OrderItemEntity::getItem)
+                .filter(Objects::nonNull)
+                .filter(item -> item.getItemCategory() == ItemCategory.MEMBERSHIP)
+                .findFirst();
+
+        if (membershipItemOpt.isEmpty()) {
+            // 이 주문은 멤버십 주문이 아님
+            return;
+        }
+
+        var membershipItem = membershipItemOpt.get();
+        MembershipPayType payType = membershipItem.getMembershipPayType(); // <- ItemEntity 게터명에 맞게 조정
+        if (payType == null) {
+            log.warn("[MembershipAfterPay] membershipPayType is null. orderNo={}, itemNo={}",
+                    order.getOrderNo(), membershipItem.getItemNo());
+            return;
+        }
+
+        // 🔥 멤버 DB에 멤버십 타입 반영
+        member.setMembershipType(payType);
+
+        log.info("[MembershipAfterPay] member={} 멤버십 활성화, type={}",
+                member.getMemberEmail(), payType);
+    }
+
+    // ==========================
+    // POP 주문 후처리
+    // ==========================
+    private void applyPopIfNeeded(OrderEntity order) {
+        var member = order.getMember();
+        if (member == null) {
+            log.warn("[PopAfterPay] member is null. orderNo={}", order.getOrderNo());
+            return;
+        }
+
+        // 주문 아이템 중 POP 카테고리인 상품 찾기
+        var popItemOpt = order.getOrderItems().stream()
+                .map(OrderItemEntity::getItem)
+                .filter(Objects::nonNull)
+                .filter(item -> item.getItemCategory() == ItemCategory.POP)
+                .findFirst();
+
+        if (popItemOpt.isEmpty()) {
+            // POP 주문이 아님
+            return;
+        }
+
+        var popItem = popItemOpt.get();
+        PopPlanType popPlanType = popItem.getPopPlanType(); // <- ItemEntity 게터명에 맞게 조정
+        if (popPlanType == null) {
+            log.warn("[PopAfterPay] popPlanType is null. orderNo={}, itemNo={}",
+                    order.getOrderNo(), popItem.getItemNo());
+            return;
+        }
+
+        // 🔥 멤버 DB에 POP 타입 반영
+        member.setPopType(popPlanType);
+
+        log.info("[PopAfterPay] member={} POP 활성화, type={}",
+                member.getMemberEmail(), popPlanType);
     }
 
 }
