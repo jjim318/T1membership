@@ -3,6 +3,8 @@ package com.t1membership.member.service;
 import com.t1membership.image.domain.ImageEntity;
 import com.t1membership.image.dto.ImageDTO;
 import com.t1membership.image.service.FileService;
+import com.t1membership.item.constant.MembershipPayType;
+import com.t1membership.item.constant.PopPlanType;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.deleteMember.DeleteMemberReq;
@@ -66,6 +68,10 @@ public class MemberServiceImpl implements MemberService {
         memberEntity.setMemberPw((passwordEncoder.encode(joinMemberReq.getMemberPw())));
 
         memberEntity.setMemberRole(MemberRole.USER);
+
+        memberEntity.setMembershipType(MembershipPayType.NO_MEMBERSHIP);
+        memberEntity.setPopType(PopPlanType.NO_POP);
+        memberEntity.setContentManager(false);
 
         // 🔥 가입 시 기본 이미지 URL 설정 (실제 파일 업로드 X)
         memberEntity.setMemberImage("/images/default-profile.png"); // 기본이미지 경로에 맞게 수정할것!!!!!

@@ -2,6 +2,8 @@ package com.t1membership.member.domain;
 
 import com.t1membership.coreDomain.BaseEntity;
 import com.t1membership.image.domain.ImageEntity;
+import com.t1membership.item.constant.MembershipPayType;
+import com.t1membership.item.constant.PopPlanType;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.order.domain.OrderEntity;
 import jakarta.persistence.*;
@@ -23,8 +25,6 @@ public class MemberEntity extends BaseEntity {
     @Column(name = "member_email", nullable = false)
     private String memberEmail;
 
-
-
     @Column(name = "member_pw", nullable = false)
     private String memberPw;
     @Column(name = "member_name", nullable = false)
@@ -43,6 +43,14 @@ public class MemberEntity extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "member_role", nullable = false)
     private MemberRole memberRole;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "membershipType", nullable = false,length = 20)
+    private MembershipPayType membershipType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "popType", nullable = false,length = 20)
+    private PopPlanType popType;
 
     @OneToMany(mappedBy = "member",  cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderEntity> order = new ArrayList<>();

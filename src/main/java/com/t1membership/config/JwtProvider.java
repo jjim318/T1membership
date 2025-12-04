@@ -58,6 +58,35 @@ public class JwtProvider {
     private final long refreshTokenValidity = 1000L * 60 * 60 * 24; // Refresh: 1일
 
     // =========================================================
+    // 내부 공통: 멤버십/POP 정보까지 포함한 Access 토큰 빌더
+    // =========================================================
+    private String buildAccessTokenWithMemberInfo(String memberEmail,
+                                                  Collection<String> roles,
+                                                  MemberEntity member) {
+
+        // 기본 claim
+        JwtBuilder builder = Jwts.builder()
+                .setSubject(memberEmail)
+                .claim("roles", roles)     // 🔥 roles claim
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + accessTokenValidity));
+
+        // 🔥 멤버십 / POP 타입을 claim에 싣기
+        if (member != null) {
+            if (member.getMembershipType() != null) {
+                // 예: "ONE_TIME", "YEARLY", "RECURRING"
+                builder.claim("membershipType", member.getMembershipType().name());
+            }
+            if (member.getPopType() != null) {
+                // 예: "GENERAL", "MEMBERSHIP_ONLY"
+                builder.claim("popType", member.getPopType().name());
+            }
+        }
+
+        return builder.signWith(accessKey()).compact();
+    }
+
+    // =========================================================
     // Create Tokens (발급)
     // =========================================================
 
@@ -67,18 +96,16 @@ public class JwtProvider {
      * - roles: ["USER"], ["ADMIN"], ["ADMIN_CONTENT"] 등 MemberRole.name() 목록
      */
     public String createAccessToken(String memberEmail, Collection<String> roles) {
-        return Jwts.builder()
-                .setSubject(memberEmail)
-                .claim("roles", roles)     // 🔥 roles claim
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + accessTokenValidity))
-                .signWith(accessKey())
-                .compact();
+
+        // 🔥 멤버 정보를 한 번 보고 membershipType/popType까지 같이 싣는다
+        MemberEntity member = memberRepository.findById(memberEmail).orElse(null);
+
+        return buildAccessTokenWithMemberInfo(memberEmail, roles, member);
     }
 
     /**
      * ⚡ 이메일만 주어졌을 때 — DB에서 역할을 읽어서 자동으로 roles claim에 넣어주는 버전
-     * 로그인 로직에서 이 메서드를 써도 roles 가 항상 JWT에 실리도록 처리.
+     * 로그인 로직에서 이 메서드를 쓰면 roles + membershipType + popType 이 모두 JWT에 실린다.
      */
     public String createAccessToken(String memberEmail) {
         MemberEntity member = memberRepository.findById(memberEmail)
@@ -91,15 +118,13 @@ public class JwtProvider {
             roles.add(member.getMemberRole().name());   // 예: ADMIN_CONTENT
         }
 
-        // 만약 추후에 리스트로 바꾸면 이렇게:
-        // member.getMemberRoleList().forEach(r -> roles.add(r.name()));
-
-        return createAccessToken(memberEmail, roles);
+        return buildAccessTokenWithMemberInfo(memberEmail, roles, member);
     }
 
     /**
      * Refresh 토큰 발급 (권한 포함)
      * - 재발급 시에도 동일 roles를 싣고 싶으면 사용
+     * - 여기서는 멤버십 정보까지 굳이 넣을 필요는 없어서 roles만 유지
      */
     public String createRefreshToken(String memberEmail, Collection<String> roles) {
         return Jwts.builder()
@@ -113,7 +138,6 @@ public class JwtProvider {
 
     /**
      * ⚡ 이메일만 주어졌을 때 — Access와 동일하게 DB에서 roles를 읽어서 claim에 포함
-     * (원하면 Refresh에는 roles 안 넣고 싶을 수도 있으니, 필요 없으면 이 메서드는 안 써도 됨)
      */
     public String createRefreshToken(String memberEmail) {
         MemberEntity member = memberRepository.findById(memberEmail)
