@@ -1,21 +1,21 @@
 // src/app/toss/success/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
+import type { AxiosError } from "axios";
 
-interface ApiResult<T> {
+interface TossConfirmApiResult<T> {
     isSuccess: boolean;
     resCode: number;
-    resMessage: string;
-    result: T;
+    resMessage: string | null;
+    data: T;
 }
 
 interface TossConfirmRes {
     orderNo: number;
-    orderStatus: string;
-    orderTotalPrice: number;
+    toss: any;
 }
 
 export default function TossSuccessPage() {
@@ -25,22 +25,20 @@ export default function TossSuccessPage() {
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+    // 새로고침/StrictMode 두 번 호출 방지용
+    const didConfirmRef = useRef(false);
+
     useEffect(() => {
-        // 1) 토스가 넘겨준 쿼리 파라미터
-        const orderId = searchParams.get("orderId");
+        if (didConfirmRef.current) return;
+        didConfirmRef.current = true;
+
+        // Toss가 successUrl 로 자동으로 붙여주는 값들
         const paymentKey = searchParams.get("paymentKey");
         const amount = searchParams.get("amount");
+        const orderId = searchParams.get("orderId"); // 우리가 만든 orderTossId
 
-        if (!orderId || !paymentKey || !amount) {
+        if (!paymentKey || !amount || !orderId) {
             setErrorMsg("필수 파라미터가 없습니다.");
-            setLoading(false);
-            return;
-        }
-
-        // 🔥 orderId(string) -> orderNo(number) 로 변환
-        const orderNo = Number(orderId);
-        if (!Number.isFinite(orderNo)) {
-            setErrorMsg("잘못된 주문 번호입니다.");
             setLoading(false);
             return;
         }
@@ -51,35 +49,43 @@ export default function TossSuccessPage() {
                 setErrorMsg(null);
 
                 console.log("[toss/success] query =", {
-                    orderId,
-                    orderNo,
                     paymentKey,
                     amount,
+                    orderId,
                 });
 
-                // 2) 백엔드 confirm 호출
-                const res = await apiClient.post<ApiResult<TossConfirmRes>>(
-                    "/api/pay/toss/confirm",
-                    {
-                        // 🔥 이제 orderId 말고 orderNo 를 보낸다
-                        orderNo,
-                        paymentKey,
-                        amount: Number(amount),
-                    },
-                );
+                // 백엔드 결제 승인 요청
+                const res = await apiClient.post<
+                    TossConfirmApiResult<TossConfirmRes>
+                >("/api/pay/toss/confirm", {
+                    paymentKey,              // TossConfirmReq.paymentKey
+                    orderId,                 // TossConfirmReq.orderId
+                    totalAmount: Number(amount), // TossConfirmReq.totalAmount
+                });
+
+                console.log("[toss/success] confirm res =", res.data);
 
                 if (!res.data.isSuccess) {
                     throw new Error(res.data.resMessage || "결제 승인 실패");
                 }
 
-                // 3) 승인 성공 → 주문 상세로 이동
-                const nextOrderNo = res.data.result.orderNo;
-                router.replace(`/order/checkout/${nextOrderNo}`);
-            } catch (e: any) {
-                console.error("[toss/success] confirm error", e);
+                const nextOrderNo = res.data.data.orderNo;
+                router.replace(`/mypage/orders/${nextOrderNo}`);
+            } catch (err) {
+                const e = err as AxiosError<any>;
+                console.error("[toss/success] confirm error", {
+                    axiosMessage: e.message,
+                    data: e.response?.data,
+                });
+
+                const data = e.response?.data as
+                    | { resMessage?: string; message?: string }
+                    | undefined;
+
                 setErrorMsg(
-                    e?.response?.data?.resMessage ||
-                    e?.message ||
+                    data?.resMessage ||
+                    data?.message ||
+                    e.message ||
                     "결제 승인 중 오류가 발생했습니다.",
                 );
             } finally {
@@ -96,16 +102,12 @@ export default function TossSuccessPage() {
                 <h1 className="text-xl font-semibold mb-4">결제 처리 중...</h1>
 
                 {loading && (
-                    <p className="text-sm text-zinc-300">
-                        잠시만 기다려 주세요.
-                    </p>
+                    <p className="text-sm text-zinc-300">잠시만 기다려 주세요.</p>
                 )}
 
                 {!loading && errorMsg && (
                     <>
-                        <p className="text-sm text-red-400 mb-4">
-                            {errorMsg}
-                        </p>
+                        <p className="text-sm text-red-400 mb-4">{errorMsg}</p>
                         <button
                             className="w-full rounded-xl bg-zinc-800 py-2 text-sm"
                             onClick={() => router.push("/")}
