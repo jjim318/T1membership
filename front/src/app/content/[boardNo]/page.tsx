@@ -146,6 +146,8 @@ export default function ContentDetailPage() {
                     return;
                 }
 
+                console.log("[content detail] raw result =", res.data.result); // 🔥 여기
+
                 setContent(res.data.result);
             } catch (e) {
                 console.error("[content detail] 에러", e);

@@ -39,7 +39,6 @@ interface ContentCardItem {
     id: number;
     title: string;
     thumbnailUrl: string;
-    duration: string;
     category: ContentCategoryKey;
     createdAtLabel?: string;
 }
@@ -57,7 +56,6 @@ interface BackendContent {
     boardTitle: string;
     categoryCode: string;
     thumbnailUrl?: string | null;
-    duration?: string | null;
     createdAt?: string | null;
 }
 
@@ -172,8 +170,8 @@ function CategoryChipRow() {
                 >
                     {cat.icon && (
                         <span className="text-sm" aria-hidden="true">
-              {cat.icon}
-            </span>
+                            {cat.icon}
+                        </span>
                     )}
                     <span>{cat.label}</span>
                 </button>
@@ -188,9 +186,6 @@ function ContentCardSkeleton() {
             <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
                 <div className="absolute inset-0 flex items-center justify-center text-[11px] text-zinc-500">
                     썸네일
-                </div>
-                <div className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-black/70 px-2 py-[2px] text-[10px] text-zinc-100">
-                    00:00
                 </div>
             </div>
             <div className="space-y-1">
@@ -213,6 +208,10 @@ interface ContentRowProps {
 
 function ContentRow({ category, items, loading }: ContentRowProps) {
     const hasItems = items.length > 0;
+
+    // 🔥 파일 베이스 URL 세팅 (뒤에 슬래시는 제거)
+    const API_BASE =
+        (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
     return (
         <section className="mx-auto mb-10 max-w-6xl px-4">
@@ -240,16 +239,23 @@ function ContentRow({ category, items, loading }: ContentRowProps) {
                     ))
                     : hasItems
                         ? items.map((item) => {
-                            // 🔥 썸네일 URL 보정
+                            // 🔥 절대 URL로 변환 (http로 시작 안 하면 백엔드 주소 붙이기)
                             const resolvedThumb =
                                 item.thumbnailUrl &&
                                 item.thumbnailUrl.startsWith("http")
                                     ? item.thumbnailUrl
                                     : item.thumbnailUrl
-                                        ? `${process.env.NEXT_PUBLIC_API_BASE_URL ?? ""}${
-                                            item.thumbnailUrl
-                                        }`
-                                        : "/content/thumb-placeholder-1.jpg"; // 썸네일 없을 때 예비 이미지
+                                        ? `${API_BASE}${item.thumbnailUrl}`
+                                        : "/content/thumb-placeholder-1.jpg";
+
+                            console.log(
+                                "[CONTENT] API_BASE=",
+                                API_BASE,
+                                "thumb=",
+                                item.thumbnailUrl,
+                                "→",
+                                resolvedThumb,
+                            );
 
                             return (
                                 <Link
@@ -258,15 +264,12 @@ function ContentRow({ category, items, loading }: ContentRowProps) {
                                     className="group flex flex-col gap-2"
                                 >
                                     <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-                                        <Image
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
                                             src={resolvedThumb}
                                             alt={item.title}
-                                            fill
-                                            className="object-cover transition-transform group-hover:scale-105"
+                                            className="h-full w-full object-cover transition-transform group-hover:scale-105"
                                         />
-                                        <div className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-black/70 px-2 py-[2px] text-[10px] text-zinc-100">
-                                            {item.duration}
-                                        </div>
                                     </div>
                                     <div className="space-y-1">
                                         <p className="h-[34px] overflow-hidden text-ellipsis text-[13px] font-medium text-zinc-100">
@@ -295,7 +298,6 @@ function ContentRow({ category, items, loading }: ContentRowProps) {
         </section>
     );
 }
-
 
 // =======================
 // JWT 파싱해서 관리자 판별
@@ -446,7 +448,6 @@ export default function ContentPage() {
 
                 list.forEach((c) => {
                     const raw = c.categoryCode?.toUpperCase();
-                    // 백에서 categoryCode 를 NOTICE, ONWORLD_T1 등으로 넣는다고 가정
                     const key = (raw as ContentCategoryKey) || "NOTICE";
 
                     if (!(key in map)) {
@@ -458,7 +459,6 @@ export default function ContentPage() {
                         id: c.boardNo,
                         title: c.boardTitle,
                         thumbnailUrl: c.thumbnailUrl || "/content/no-thumb.jpg",
-                        duration: c.duration || "00:00",
                         category: key,
                         createdAtLabel: formatDateLabel(c.createdAt),
                     };
@@ -481,7 +481,7 @@ export default function ContentPage() {
     return (
         <div className="min-h-screen bg-black text-zinc-50">
             <main className="pb-16 pt-4">
-                {/* 🔥 관리자일 때만 보이는 컨텐츠 등록 버튼 */}
+                {/* 관리자만 보이는 컨텐츠 등록 버튼 */}
                 {isContentManager && (
                     <section className="mx-auto flex max-w-6xl justify-end px-4 pb-2">
                         <button
@@ -500,7 +500,7 @@ export default function ContentPage() {
                 {/* 카테고리 칩 */}
                 <CategoryChipRow />
 
-                {/* 에러 메시지 한 줄 */}
+                {/* 에러 메시지 */}
                 {errorMsg && (
                     <div className="mx-auto max-w-6xl px-4 pb-4 text-[11px] text-red-400">
                         {errorMsg}

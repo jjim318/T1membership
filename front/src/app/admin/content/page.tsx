@@ -37,15 +37,15 @@ export default function AdminContentCreatePage() {
         useState<ContentCategoryKey>("ONWORLD_T1");
     const [seriesName, setSeriesName] = useState("");
     const [videoUrl, setVideoUrl] = useState("");
-    const [duration, setDuration] = useState("");
     const [summary, setSummary] = useState("");
     const [isPublic, setIsPublic] = useState(true);
-    const [thumbnailFile, setThumbnailFile] =
-        useState<File | null>(null);
+    const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
     const [submitting, setSubmitting] = useState(false);
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+
+        if (submitting) return;
 
         if (!title.trim()) {
             alert("제목은 필수입니다.");
@@ -59,30 +59,25 @@ export default function AdminContentCreatePage() {
         try {
             setSubmitting(true);
 
-            // 🔥 FormData 로 전송 (멀티파트)
             const formData = new FormData();
             formData.append("title", title.trim());
-            formData.append("category", category);          // "ONWORLD_T1" 등
-            if (seriesName.trim()) formData.append("seriesName", seriesName.trim());
+            formData.append("category", category);
+            if (seriesName.trim()) {
+                formData.append("seriesName", seriesName.trim());
+            }
             formData.append("videoUrl", videoUrl.trim());
-            if (duration.trim()) formData.append("duration", duration.trim());
-            if (summary.trim()) formData.append("summary", summary.trim());
-            formData.append("isPublic", String(isPublic));  // 🔥 이름 isPublic
+            if (summary.trim()) {
+                formData.append("summary", summary.trim());
+            }
+            formData.append("isPublic", String(isPublic));
 
             if (thumbnailFile) {
-                formData.append("thumbnail", thumbnailFile);  // 🔥 @RequestPart("thumbnail")
+                formData.append("thumbnail", thumbnailFile);
             }
 
-            await apiClient.post("/board/content", formData);
-            // Content-Type 헤더는 일부러 안 건드림 (axios가 multipart로 자동 세팅)
-
-
-            // 🔥 백엔드 컨트롤러에 맞춰서 URL만 형님이 바꾸시면 됨
-            const res = await apiClient.post(
-                "/board/content",
-                formData);
-
+            const res = await apiClient.post("/board/content", formData);
             console.log("[컨텐츠 등록 완료]", res.data);
+
             alert("컨텐츠가 등록되었습니다.");
             router.push("/content");
         } catch (err) {
@@ -97,9 +92,7 @@ export default function AdminContentCreatePage() {
         <div className="min-h-screen bg-black text-zinc-50">
             <main className="mx-auto max-w-3xl px-4 pb-16 pt-10">
                 <header className="mb-8 flex items-center justify-between">
-                    <h1 className="text-lg font-semibold">
-                        컨텐츠 등록
-                    </h1>
+                    <h1 className="text-lg font-semibold">컨텐츠 등록</h1>
                     <button
                         type="button"
                         onClick={() => router.push("/content")}
@@ -149,7 +142,7 @@ export default function AdminContentCreatePage() {
                         </select>
                     </div>
 
-                    {/* 시리즈명 (섹션 타이틀 같은거) */}
+                    {/* 시리즈명 */}
                     <div className="space-y-1">
                         <label className="text-xs font-semibold text-zinc-200">
                             시리즈 / 라인업 이름 (선택)
@@ -157,9 +150,7 @@ export default function AdminContentCreatePage() {
                         <input
                             type="text"
                             value={seriesName}
-                            onChange={(e) =>
-                                setSeriesName(e.target.value)
-                            }
+                            onChange={(e) => setSeriesName(e.target.value)}
                             className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100 outline-none focus:border-red-500"
                             placeholder="예) T-hind, Road to the Star, 2025 Greetings 등"
                         />
@@ -176,20 +167,6 @@ export default function AdminContentCreatePage() {
                             onChange={(e) => setVideoUrl(e.target.value)}
                             className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100 outline-none focus:border-red-500"
                             placeholder="https://..."
-                        />
-                    </div>
-
-                    {/* 재생시간 */}
-                    <div className="space-y-1">
-                        <label className="text-xs font-semibold text-zinc-200">
-                            재생시간 (선택, 00:00 형식)
-                        </label>
-                        <input
-                            type="text"
-                            value={duration}
-                            onChange={(e) => setDuration(e.target.value)}
-                            className="w-full rounded-md border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100 outline-none focus:border-red-500"
-                            placeholder="예) 12:51"
                         />
                     </div>
 
@@ -221,7 +198,8 @@ export default function AdminContentCreatePage() {
                             className="w-full text-[11px] text-zinc-300"
                         />
                         <p className="text-[11px] text-zinc-500">
-                            업로드하지 않으면 기본 플레이스홀더가 사용되도록 백엔드에서 처리하면 됩니다.
+                            업로드하지 않으면 기본 플레이스홀더가 사용되도록 백엔드에서
+                            처리하면 됩니다.
                         </p>
                     </div>
 
@@ -231,9 +209,7 @@ export default function AdminContentCreatePage() {
                             id="public"
                             type="checkbox"
                             checked={isPublic}
-                            onChange={(e) =>
-                                setIsPublic(e.target.checked)
-                            }
+                            onChange={(e) => setIsPublic(e.target.checked)}
                             className="h-4 w-4 rounded border-zinc-600 bg-black text-red-500"
                         />
                         <label
