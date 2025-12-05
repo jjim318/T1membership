@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
+// import Image from "next/image"; // 지금은 안 쓰니까 삭제해도 됨
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 
@@ -22,11 +22,11 @@ type ContentCategoryKey =
     | "MESSAGE";
 
 interface BannerItem {
-    id: number;
+    boardNo: number;          // 🔥 어떤 컨텐츠로 갈지
     title: string;
     subtitle: string;
     tag?: string;
-    thumbnailUrl: string;
+    thumbnailUrl: string;     // 배너에 표시할 이미지 URL (컨텐츠 썸네일)
 }
 
 interface CategoryMeta {
@@ -43,7 +43,7 @@ interface ContentCardItem {
     createdAtLabel?: string;
 }
 
-// 백엔드 응답 모양 (ApiResult 래핑 + 리스트)
+// 백엔드 공통 응답
 interface ApiResult<T> {
     isSuccess: boolean;
     resCode: number;
@@ -51,12 +51,21 @@ interface ApiResult<T> {
     result: T;
 }
 
+// 컨텐츠 목록용 백엔드 DTO
 interface BackendContent {
     boardNo: number;
     boardTitle: string;
     categoryCode: string;
     thumbnailUrl?: string | null;
     createdAt?: string | null;
+}
+
+// 🔥 배너용 백엔드 DTO (Board 기반)
+interface BackendBanner {
+    boardNo: number;
+    title: string;
+    thumbnailUrl: string;  // 예: "/files/uuid.jpg"
+    bannerOrder: number;
 }
 
 // =======================
@@ -75,9 +84,10 @@ const CATEGORY_LIST: CategoryMeta[] = [
     { key: "MESSAGE", label: "Message from T1", icon: "📼" },
 ];
 
-const BANNER_ITEMS: BannerItem[] = [
+// 기본 더미 배너 (백엔드에서 아직 아무 것도 안 줄 때 사용)
+const DEFAULT_BANNER_ITEMS: BannerItem[] = [
     {
-        id: 1,
+        boardNo: 0,
         tag: "2025 Membership Greetings",
         title: "첫 번째 컨텐츠가 등록되면\n여기에 대표 배너가 뜹니다.",
         subtitle:
@@ -85,7 +95,7 @@ const BANNER_ITEMS: BannerItem[] = [
         thumbnailUrl: "/content/banner-placeholder-1.jpg",
     },
     {
-        id: 2,
+        boardNo: 0,
         tag: "T-hind",
         title: "시리즈별 컨텐츠를\n슬라이드로 보여줄 자리입니다.",
         subtitle: "슬라이는 5초 간격으로 자동 전환됩니다.",
@@ -97,37 +107,55 @@ const BANNER_ITEMS: BannerItem[] = [
 // 공통 컴포넌트
 // =======================
 
-function ContentHeroSlider() {
+// 🔥 배너는 props로 받아서, 없으면 DEFAULT_BANNER_ITEMS 사용
+// 🔥 배너 컴포넌트만 이렇게 교체
+function ContentHeroSlider({ items }: { items: BannerItem[] }) {
     const [activeIndex, setActiveIndex] = useState(0);
 
+    const data = items.length > 0 ? items : DEFAULT_BANNER_ITEMS;
+    const active = data[activeIndex];
+
     useEffect(() => {
-        if (BANNER_ITEMS.length <= 1) return;
+        if (data.length <= 1) return;
 
         const timer = window.setInterval(() => {
-            setActiveIndex((prev) => (prev + 1) % BANNER_ITEMS.length);
+            setActiveIndex((prev) => (prev + 1) % data.length);
         }, 5000);
 
         return () => window.clearInterval(timer);
-    }, []);
-
-    const active = BANNER_ITEMS[activeIndex];
+    }, [data.length]);
 
     return (
-        <section className="mx-auto mt-4 flex max-w-6xl flex-col gap-4 px-4 pb-10 pt-4">
-            <div className="relative h-[260px] overflow-hidden rounded-3xl bg-zinc-900 md:h-[360px]">
-                <div className="absolute inset-0">
-                    <Image
+        <section className="mx-auto mt-0 flex max-w-6xl flex-col gap-4 px-4 pb-10 pt-0">
+            {/* 🔥 배너 높이 조절: aspect + max-h */}
+            <div className="relative w-full overflow-hidden bg-black aspect-[21/8] max-h-[520px]">
+
+                {/* ====== ✅ 1. 블러 배경 (이게 지금 안 먹고 있었음) ====== */}
+                <div className="absolute inset-0 z-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                         src={active.thumbnailUrl}
                         alt={active.title}
-                        fill
-                        priority
-                        className="object-cover opacity-60"
-                        onError={() => {}}
+                        className="h-full w-full object-cover blur-2xl scale-125 opacity-60"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/30" />
                 </div>
 
-                <div className="relative flex h-full flex-col justify-center px-8 py-6 md:px-10">
+                {/* ====== ✅ 2. 그라데이션을 '오른쪽까지 더 깊게' ====== */}
+                <div
+                    className="absolute inset-y-0 left-0 z-10 w-[70%] bg-gradient-to-r from-black via-black/90 to-transparent"/>
+
+                {/* ====== ✅ 3. 오른쪽 원본 썸네일 (그 위에 올라감) ====== */}
+                <div className="absolute inset-y-0 right-0 z-20 flex items-center justify-end pr-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                        src={active.thumbnailUrl}
+                        alt={active.title}
+                        className="h-full w-auto object-contain"
+                    />
+                </div>
+
+                {/* ====== ✅ 4. 제목을 '중앙 → 위쪽'으로 확실히 이동 ====== */}
+                <div className="absolute left-0 top-[18%] z-30 px-8 md:px-12 max-w-md">
                     {active.tag && (
                         <p className="mb-3 text-xs font-medium text-sky-300">
                             {active.tag}
@@ -141,16 +169,16 @@ function ContentHeroSlider() {
                     </p>
                 </div>
 
-                <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-2">
-                    {BANNER_ITEMS.map((b, idx) => (
+                {/* ====== ✅ 5. 인디케이터 ====== */}
+                <div className="absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 gap-2">
+                    {data.map((_, idx) => (
                         <button
-                            key={b.id}
+                            key={idx}
                             type="button"
                             onClick={() => setActiveIndex(idx)}
                             className={`h-2 w-2 rounded-full transition-all ${
-                                idx === activeIndex ? "w-5 bg-white" : "bg-zinc-500"
+                                idx === activeIndex ? "w-6 bg-white" : "bg-zinc-500"
                             }`}
-                            aria-label={`배너 ${idx + 1}`}
                         />
                     ))}
                 </div>
@@ -159,13 +187,14 @@ function ContentHeroSlider() {
     );
 }
 
+
 function CategoryChipRow() {
     return (
         <section className="mx-auto mb-4 flex max-w-6xl flex-wrap gap-2 px-4">
             {CATEGORY_LIST.map((cat) => (
-                <button
+                <Link
                     key={cat.key}
-                    type="button"
+                    href={`/content/category/${cat.key}`}
                     className="flex items-center gap-2 rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
                 >
                     {cat.icon && (
@@ -174,7 +203,7 @@ function CategoryChipRow() {
                         </span>
                     )}
                     <span>{cat.label}</span>
-                </button>
+                </Link>
             ))}
         </section>
     );
@@ -183,7 +212,8 @@ function CategoryChipRow() {
 function ContentCardSkeleton() {
     return (
         <div className="group flex w-full flex-col gap-2">
-            <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+            <div
+                className="relative aspect-video w-full overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
                 <div className="absolute inset-0 flex items-center justify-center text-[11px] text-zinc-500">
                     썸네일
                 </div>
@@ -206,7 +236,7 @@ interface ContentRowProps {
     loading: boolean;
 }
 
-function ContentRow({ category, items, loading }: ContentRowProps) {
+function ContentRow({category, items, loading}: ContentRowProps) {
     const hasItems = items.length > 0;
 
     // 🔥 파일 베이스 URL 세팅 (뒤에 슬래시는 제거)
@@ -225,7 +255,7 @@ function ContentRow({ category, items, loading }: ContentRowProps) {
                     <h3 className="text-base font-semibold">{category.label}</h3>
                 </div>
                 <Link
-                    href={`/content/category/${category.key.toLowerCase()}`}
+                    href={`/content/category/${category.key}`}
                     className="text-[11px] text-zinc-400 hover:text-zinc-200"
                 >
                     전체보기 &rarr;
@@ -240,17 +270,23 @@ function ContentRow({ category, items, loading }: ContentRowProps) {
                     : hasItems
                         ? items.map((item) => {
                             // 🔥 절대 URL로 변환 (http로 시작 안 하면 백엔드 주소 붙이기)
+                            const API_BASE_LOCAL =
+                                (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(
+                                    /\/$/,
+                                    "",
+                                );
+
                             const resolvedThumb =
                                 item.thumbnailUrl &&
                                 item.thumbnailUrl.startsWith("http")
                                     ? item.thumbnailUrl
                                     : item.thumbnailUrl
-                                        ? `${API_BASE}${item.thumbnailUrl}`
+                                        ? `${API_BASE_LOCAL}${item.thumbnailUrl}`
                                         : "/content/thumb-placeholder-1.jpg";
 
                             console.log(
                                 "[CONTENT] API_BASE=",
-                                API_BASE,
+                                API_BASE_LOCAL,
                                 "thumb=",
                                 item.thumbnailUrl,
                                 "→",
@@ -400,6 +436,9 @@ export default function ContentPage() {
         MESSAGE: [],
     });
 
+    // 🔥 배너용 상태 (/main/banner → Board 기반 컨텐츠 썸네일)
+    const [bannerItems, setBannerItems] = useState<BannerItem[]>([]);
+
     // 관리자 여부 체크
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -478,12 +517,70 @@ export default function ContentPage() {
         fetchContents();
     }, []);
 
+    // 🔥 배너 불러오기 (/main/banner → Board 기반 배너 컨텐츠)
+    useEffect(() => {
+        const fetchBanners = async () => {
+            try {
+                const res = await apiClient.get<ApiResult<BackendBanner[]>>(
+                    "/main/banner",
+                );
+
+                if (!res.data.isSuccess) {
+                    console.warn(
+                        "[BANNER] load fail:",
+                        res.data.resMessage || "배너 로딩 실패",
+                    );
+                    return;
+                }
+
+                const list = res.data.result ?? [];
+                const API_BASE =
+                    (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+
+                const mapped: BannerItem[] = list
+                    .sort((a, b) => a.bannerOrder - b.bannerOrder)
+                    .map((b) => {
+                        const raw =
+                            b.thumbnailUrl || "/content/banner-placeholder-1.jpg";
+                        const resolved = raw.startsWith("http")
+                            ? raw
+                            : `${API_BASE}${raw}`;
+
+                        return {
+                            boardNo: b.boardNo,
+                            title: b.title,
+                            subtitle: "", // 필요하면 요약 필드 추가해서 채우면 됨
+                            tag: undefined,
+                            thumbnailUrl: resolved,
+                        };
+                    });
+
+                setBannerItems(mapped);
+            } catch (e) {
+                console.error("[BANNER] load error", e);
+                // 배너는 없어도 치명적이진 않으니까 기본값 사용
+            }
+        };
+
+        fetchBanners();
+    }, []);
+
     return (
         <div className="min-h-screen bg-black text-zinc-50">
-            <main className="pb-16 pt-4">
-                {/* 관리자만 보이는 컨텐츠 등록 버튼 */}
+            <main className="pb-16 pt-0">
+                {/* 관리자만 보이는 상단 버튼들 */}
                 {isContentManager && (
-                    <section className="mx-auto flex max-w-6xl justify-end px-4 pb-2">
+                    <section className="mx-auto flex max-w-6xl justify-end gap-2 px-4 pb-2">
+                        {/* 배너 수정 버튼 */}
+                        <button
+                            type="button"
+                            onClick={() => router.push("/admin/banner")}
+                            className="rounded-full bg-zinc-800 px-4 py-2 text-xs font-semibold text-white hover:bg-zinc-700"
+                        >
+                            배너 수정
+                        </button>
+
+                        {/* 컨텐츠 등록 버튼 */}
                         <button
                             type="button"
                             onClick={() => router.push("/admin/content")}
@@ -494,8 +591,8 @@ export default function ContentPage() {
                     </section>
                 )}
 
-                {/* 상단 자동 배너 */}
-                <ContentHeroSlider />
+                {/* 상단 자동 배너 (백엔드에서 오면 그걸로, 아니면 기본값으로) */}
+                <ContentHeroSlider items={bannerItems} />
 
                 {/* 카테고리 칩 */}
                 <CategoryChipRow />
