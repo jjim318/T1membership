@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 import axios, { AxiosError } from "axios";
 
-// ===== 타입 =====
+// ===== 공통 타입 =====
 type PaymentMethod = "CARD" | "ACCOUNT";
 
 interface ErrorBody {
@@ -62,8 +62,12 @@ interface GoodsForm {
     memo: string;
 }
 
-// 백엔드 DTO에 대응
-interface CreateGoodsOrderBody {
+// ===== 백엔드 CreateGoodsOrderReq 1:1 매칭 =====
+interface CreateGoodsOrderReq {
+    itemId?: number | null;
+    quantity?: number;
+    cartItemIds?: number[];
+
     cartNo: number;
     receiverName: string;
     receiverPhone: string;
@@ -71,14 +75,17 @@ interface CreateGoodsOrderBody {
     receiverDetailAddress: string;
     receiverZipCode: string;
     memo?: string;
-    // 단건 주문
-    itemId?: number | null;
-    quantity?: number;
-    // 장바구니 주문
-    cartItemIds?: number[];
 }
 
-// TossPayments 글로벌 타입 정의
+// ===== 백엔드 CreateOrderReq (type + payload) 매칭 =====
+type ItemCategoryType = "MD" | "MEMBERSHIP" | "POP"; // 백엔드 ItemCategory 이름에 맞게
+
+interface CreateOrderReq<TPayload> {
+    type: ItemCategoryType; // 여기 값이 "MD" 면 Goods DTO로 역직렬화됨
+    payload: TPayload;
+}
+
+// TossPayments 타입
 type TossPayType = "CARD" | "TRANSFER";
 
 interface TossRequestBase {
@@ -100,6 +107,21 @@ interface TossClient {
 
 interface TossWindow extends Window {
     TossPayments?: (clientKey: string) => TossClient;
+}
+
+// 회원 정보 응답
+interface MemberMeRes {
+    memberName: string;
+    memberEmail: string;
+}
+
+// 상품 상세 응답
+interface ItemDetailRes {
+    itemNo: number;
+    itemName: string;
+    itemPrice: number;
+    thumbnailUrl?: string | null;
+    description?: string | null;
 }
 
 const formatPrice = (n: number) => `${n.toLocaleString("ko-KR")}원`;
@@ -126,35 +148,14 @@ const getTossClient = (): TossClient | null => {
     return w.TossPayments(clientKey);
 };
 
-type GoodsCheckoutQuery = {
-    itemId?: number;
-    quantity?: number;
-    cartNo?: number;
-    cartItemIds?: string; // "1,2,3"
-};
-
-// ===== 컴포넌트 =====
+// ===== 페이지 컴포넌트 =====
 export default function GoodsCheckoutPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    // 단건 구매용
-    const itemIdParam = searchParams.get("itemId");
-    const qtyParam = searchParams.get("qty");
-    const itemId = itemIdParam ? Number(itemIdParam) : null;
-    const quantity = qtyParam ? Number(qtyParam) : 1;
-
-    // 장바구니 구매용
-    const cartNoParam = searchParams.get("cartNo");
-    const cartItemIdsParam = searchParams.get("cartItemIds"); // "1,2,3"
-    const cartNo = cartNoParam ? Number(cartNoParam) : 0;
-    const cartItemIds: number[] =
-        cartItemIdsParam && cartItemIdsParam.length > 0
-            ? cartItemIdsParam
-                .split(",")
-                .map((s) => Number(s.trim()))
-                .filter((n) => !Number.isNaN(n))
-            : [];
+    // URL 파라미터 기반 단건 주문 (itemNo, quantity)
+    const [itemId, setItemId] = useState<number | null>(null);
+    const [quantity, setQuantity] = useState<number>(1);
 
     const [data, setData] = useState<CheckoutData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -172,12 +173,12 @@ export default function GoodsCheckoutPage() {
         memo: "",
     });
 
-    // 약관
     const [agreePrivacy, setAgreePrivacy] = useState(false);
-    const [agreePaymentTerms, setAgreePaymentTerms] =
-        useState(false);
+    const [agreePaymentTerms, setAgreePaymentTerms] = useState(false);
     const [agreeAll, setAgreeAll] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // 약관 동기화
     useEffect(() => {
         if (agreeAll) {
             setAgreePrivacy(true);
@@ -194,57 +195,92 @@ export default function GoodsCheckoutPage() {
     }, [agreePrivacy, agreePaymentTerms]);
 
     const canPay =
-        !!data && agreePrivacy && agreePaymentTerms;
+        !!data && agreePrivacy && agreePaymentTerms && !isSubmitting;
 
-    // ===== 화면용 데이터 – 카트/프리뷰 API에서 조회 =====
+    // 1) 마운트 시 URL 파라미터 파싱 + 주문자/상품 정보 로드
     useEffect(() => {
+        const itemNoParam = searchParams.get("itemNo");
+        const qtyParam = searchParams.get("quantity");
+
+        const parsedItemId = itemNoParam ? Number(itemNoParam) : null;
+        const parsedQty = qtyParam ? Number(qtyParam) : 1;
+
+        setItemId(parsedItemId);
+        setQuantity(parsedQty > 0 ? parsedQty : 1);
+
         const load = async () => {
             try {
                 setLoading(true);
                 setErrorMsg(null);
 
-                const params: GoodsCheckoutQuery = {};
-                if (itemId) {
-                    params.itemId = itemId;
-                    params.quantity = quantity;
-                }
-                if (cartNo) {
-                    params.cartNo = cartNo;
-                }
-                if (cartItemIds.length > 0) {
-                    params.cartItemIds = cartItemIds.join(",");
+                if (!parsedItemId) {
+                    throw new Error("주문할 상품 정보가 없습니다.");
                 }
 
-                // 형님이 나중에 구현할 카트/프리뷰 API
-                // GET /checkout/goods?itemId=...&quantity=...&cartNo=...&cartItemIds=1,2
-                const res =
-                    await apiClient.get<ApiResult<CheckoutData>>(
-                        "/checkout/goods",
-                        { params }
+                // 1) 회원 정보
+                const memberRes =
+                    await apiClient.get<ApiResult<MemberMeRes>>(
+                        "/member/readOne"
                     );
-
-                if (!res.data.isSuccess) {
+                if (!memberRes.data.isSuccess) {
                     throw new Error(
-                        res.data.resMessage ||
-                        "결제 정보를 불러오지 못했습니다."
+                        memberRes.data.resMessage ||
+                        "회원 정보를 불러오지 못했습니다."
                     );
                 }
+                const member = memberRes.data.result;
 
-                setData(res.data.result);
+                // 2) 상품 상세
+                const itemRes =
+                    await apiClient.get<ApiResult<ItemDetailRes>>(
+                        `/item/${parsedItemId}`
+                    );
+                if (!itemRes.data.isSuccess) {
+                    throw new Error(
+                        itemRes.data.resMessage ||
+                        "상품 정보를 불러오지 못했습니다."
+                    );
+                }
+                const it = itemRes.data.result;
+
+                const items: CheckoutItem[] = [
+                    {
+                        itemNo: it.itemNo,
+                        imageUrl: it.thumbnailUrl ?? null,
+                        title: it.itemName,
+                        subtitle: null,
+                        description: it.description ?? null,
+                        price: it.itemPrice,
+                        quantity: parsedQty > 0 ? parsedQty : 1,
+                    },
+                ];
+
+                const totalAmount = items.reduce(
+                    (sum, i) => sum + i.price * i.quantity,
+                    0
+                );
+
+                const checkoutData: CheckoutData = {
+                    buyerName: member.memberName,
+                    buyerEmail: member.memberEmail,
+                    items,
+                    totalAmount,
+                };
+
+                setData(checkoutData);
             } catch (err) {
                 setErrorMsg(
-                    extractError(
-                        err,
-                        "결제 정보를 불러오지 못했습니다."
-                    )
+                    extractError(err, "결제 정보를 불러오지 못했습니다.")
                 );
+                setData(null);
             } finally {
                 setLoading(false);
             }
         };
 
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         load();
-    }, [itemId, quantity, cartNo, cartItemIds]);
+    }, [searchParams]);
 
     // ===== 폼 입력 =====
     const handleGoodsChange = (
@@ -264,9 +300,7 @@ export default function GoodsCheckoutPage() {
         if (!goodsForm.receiverPhone.trim()) {
             return "전화번호를 입력해 주세요.";
         }
-        if (
-            !/^[0-9\-]{9,13}$/.test(goodsForm.receiverPhone.trim())
-        ) {
+        if (!/^[0-9\-]{9,13}$/.test(goodsForm.receiverPhone.trim())) {
             return "전화번호는 숫자/하이픈 포함 9~13자리로 입력해 주세요.";
         }
         if (!goodsForm.receiverZipCode.trim()) {
@@ -281,21 +315,20 @@ export default function GoodsCheckoutPage() {
         return null;
     };
 
-    // ===== 주문 생성 =====
+    // ===== 주문 생성 (/order/goods - CreateOrderReq<Goods> 구조로 전송) =====
     const createGoodsOrder = async (): Promise<number> => {
         if (!data) throw new Error("결제 데이터가 없습니다.");
+        if (!itemId) throw new Error("상품 정보가 없습니다.");
 
         const err = validateGoodsForm();
         if (err) throw new Error(err);
 
-        if (!itemId && cartItemIds.length === 0) {
-            throw new Error(
-                "itemId 또는 cartItemIds 가 필요합니다."
-            );
-        }
-
-        const body: CreateGoodsOrderBody = {
-            cartNo,
+        // 1) payload 부분만 먼저 만든다
+        const payload: CreateGoodsOrderReq = {
+            itemId,
+            quantity, // 단건 주문 → quantity 사용
+            // cartItemIds: undefined, // 장바구니 미사용이면 생략
+            cartNo: 0, // 단건 구매라 의미 없는 값이지만 필드 맞추기용
             receiverName: goodsForm.receiverName,
             receiverPhone: goodsForm.receiverPhone,
             receiverAddress: goodsForm.receiverAddress,
@@ -304,21 +337,27 @@ export default function GoodsCheckoutPage() {
         };
 
         if (goodsForm.memo.trim().length > 0) {
-            body.memo = goodsForm.memo;
+            payload.memo = goodsForm.memo;
         }
 
-        if (cartItemIds.length > 0) {
-            body.cartItemIds = cartItemIds;
-        } else {
-            body.itemId = itemId;
-            body.quantity = quantity;
-        }
+        // 2) 백엔드 CreateOrderReq 형태로 감싸기
+        const body: CreateOrderReq<CreateGoodsOrderReq> = {
+            type: "MD", // 🔥 백엔드 @JsonSubTypes name 과 동일
+            payload,
+        };
 
-        const res = await apiClient.post<CreateOrderRes>(
+        const res = await apiClient.post<ApiResult<CreateOrderRes>>(
             "/order/goods",
             body
         );
-        return res.data.orderNo;
+
+        if (!res.data.isSuccess) {
+            throw new Error(
+                res.data.resMessage || "주문 생성에 실패했습니다."
+            );
+        }
+
+        return res.data.result.orderNo;
     };
 
     // ===== Toss prepare =====
@@ -329,10 +368,11 @@ export default function GoodsCheckoutPage() {
             paymentMethod === "ACCOUNT" ? "ACCOUNT" : "CARD";
 
         try {
-            const res = await apiClient.post<TossPrepareResponse>(
-                "/api/pay/toss/prepare",
-                { orderNo, method }
-            );
+            const res =
+                await apiClient.post<TossPrepareResponse>(
+                    "/api/pay/toss/prepare",
+                    { orderNo, method }
+                );
             if (!res.data.isSuccess) {
                 throw new Error(
                     res.data.resMessage ||
@@ -359,6 +399,8 @@ export default function GoodsCheckoutPage() {
         if (!data) return;
 
         try {
+            setIsSubmitting(true);
+
             const orderNo = await createGoodsOrder();
             const prepared = await prepareToss(orderNo);
 
@@ -375,8 +417,8 @@ export default function GoodsCheckoutPage() {
                 amount: prepared.amount,
                 orderId: prepared.orderId,
                 orderName: prepared.orderName,
-                successUrl: `${window.location.origin}/order/toss/success`,
-                failUrl: `${window.location.origin}/order/toss/fail`,
+                successUrl: `${window.location.origin}/toss/success`,
+                failUrl: `${window.location.origin}/toss/fail`,
                 customerEmail: data.buyerEmail,
                 customerName: data.buyerName,
             };
@@ -388,6 +430,8 @@ export default function GoodsCheckoutPage() {
                     ? err.message
                     : "결제 요청 중 오류가 발생했습니다."
             );
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -428,9 +472,7 @@ export default function GoodsCheckoutPage() {
                                 </div>
                                 <button
                                     className="px-4 py-2 text-xs bg-neutral-900 border border-neutral-700 rounded-lg hover:bg-neutral-800"
-                                    onClick={() =>
-                                        router.push("/mypage/edit")
-                                    }
+                                    onClick={() => router.push("/mypage/edit")}
                                 >
                                     변경
                                 </button>
@@ -538,10 +580,7 @@ export default function GoodsCheckoutPage() {
                                         className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-2 text-sm h-16 resize-none"
                                         value={goodsForm.memo}
                                         onChange={(e) =>
-                                            handleGoodsChange(
-                                                "memo",
-                                                e.target.value
-                                            )
+                                            handleGoodsChange("memo", e.target.value)
                                         }
                                     />
                                 </div>
@@ -588,11 +627,29 @@ export default function GoodsCheckoutPage() {
                                                 )}
                                             </div>
                                             <div className="mt-2 text-sm font-semibold">
-                                                {formatPrice(item.price)}
+                                                {formatPrice(item.price)}{" "}
+                                                <span className="ml-1 text-xs text-neutral-500">
+                                                    x {item.quantity}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </section>
+
+                        {/* 결제 금액 */}
+                        <section className="border-t border-neutral-800 pt-6">
+                            <div className="text-sm font-semibold mb-2">
+                                결제 금액
+                            </div>
+                            <div className="flex justify-between items-center mt-3">
+                                <span className="text-sm text-neutral-400">
+                                    총 결제 금액
+                                </span>
+                                <span className="text-2xl font-semibold">
+                                    {formatPrice(data.totalAmount)}
+                                </span>
                             </div>
                         </section>
 
@@ -608,9 +665,7 @@ export default function GoodsCheckoutPage() {
                                         name="paymentMethod"
                                         className="accent-red-500"
                                         checked={paymentMethod === "CARD"}
-                                        onChange={() =>
-                                            setPaymentMethod("CARD")
-                                        }
+                                        onChange={() => setPaymentMethod("CARD")}
                                     />
                                     <span>TOSS PAYMENTS</span>
                                 </label>
@@ -620,58 +675,20 @@ export default function GoodsCheckoutPage() {
                                         name="paymentMethod"
                                         className="accent-red-500"
                                         checked={paymentMethod === "ACCOUNT"}
-                                        onChange={() =>
-                                            setPaymentMethod("ACCOUNT")
-                                        }
+                                        onChange={() => setPaymentMethod("ACCOUNT")}
                                     />
                                     <span>
-                    Eximbay
-                    <span className="ml-1 text-[11px] text-neutral-500">
-                      {" "}
-                        - 원화(KRW)로만 결제 가능합니다.
-                    </span>
-                  </span>
+                                        Eximbay
+                                        <span className="ml-1 text-[11px] text-neutral-500">
+                                            {" "}
+                                            - 원화(KRW)로만 결제 가능합니다.
+                                        </span>
+                                    </span>
                                 </label>
                             </div>
                         </section>
 
-                        {/* 결제 금액 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm font-semibold mb-2">
-                                결제 금액
-                            </div>
-                            <div className="flex justify-between items-center mt-3">
-                <span className="text-sm text-neutral-400">
-                  총 결제 금액
-                </span>
-                                <span className="text-2xl font-semibold">
-                  {formatPrice(data.totalAmount)}
-                </span>
-                            </div>
-                        </section>
-
-                        {/* 약관 */}
-                        <section className="border-t border-neutral-800 pt-6">
-                            <div className="text-sm font-semibold mb-3">
-                                약관
-                            </div>
-                            <div className="flex flex-col gap-2 text-xs">
-                                <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                                    <span>(필수) 개인정보 수집 및 이용 안내</span>
-                                    <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
-                                </button>
-                                <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                                    <span>(필수) 결제서비스 이용약관</span>
-                                    <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
-                                </button>
-                            </div>
-                        </section>
-
-                        {/* 최종 동의 + 결제 버튼 */}
+                        {/* 약관 + 결제 버튼 */}
                         <section className="border-t border-neutral-800 pt-6">
                             <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
                                 <input
@@ -682,9 +699,7 @@ export default function GoodsCheckoutPage() {
                                         setAgreeAll(e.target.checked)
                                     }
                                 />
-                                <span>
-                  주문 내용과 약관에 동의합니다.
-                </span>
+                                <span>주문 내용과 약관에 동의합니다.</span>
                             </label>
 
                             <button
@@ -692,7 +707,7 @@ export default function GoodsCheckoutPage() {
                                 disabled={!canPay}
                                 onClick={handlePay}
                             >
-                                결제하기
+                                {isSubmitting ? "결제 진행 중..." : "결제하기"}
                             </button>
                         </section>
                     </div>

@@ -9,7 +9,7 @@ import { apiClient } from "@/lib/apiClient";
 type OrderStatus = string;
 
 interface OrderItemRes {
-    itemNo: number;
+    itemNo: number | null;
     itemNameSnapshot: string;
     itemOptionSnapshot?: string | null;
     itemImageSnapshot?: string | null;
@@ -18,26 +18,41 @@ interface OrderItemRes {
     lineTotal: number;
 }
 
+// 🔥 백엔드 UserDetailOrderRes 와 맞춘 타입
 interface UserDetailOrderRes {
     orderNo: number;
     orderStatus: OrderStatus;
     createdAt: string;
     updatedAt: string;
     orderTotalPrice: number;
+
+    // 결제 관련
     paymentMethod?: string | null;
     paymentStatus?: string | null;
+
+    // 배송 정보
     receiverName?: string | null;
     receiverPhone?: string | null;
     receiverAddress?: string | null;
     receiverDetailAddress?: string | null;
     receiverZipCode?: string | null;
     memo?: string | null;
+
+    // 주문 상품들
     items: OrderItemRes[];
+
+    // 🔥 멤버십 관련 필드 (백엔드 DTO에 추가한 것과 일치)
+    membershipPlanCode?: string | null;          // 예: T1-2025-MONTHLY
+    membershipPayType?: string | null;           // ONE_TIME / YEARLY / RECURRING
+    membershipMonths?: number | null;
+    membershipStartDate?: string | null;
+    membershipEndDate?: string | null;
 }
 
 // ========= 헬퍼 =========
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string | null | undefined): string {
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return dateStr;
     const y = d.getFullYear();
@@ -46,7 +61,8 @@ function formatDate(dateStr: string): string {
     return `${y}.${m}.${day}`;
 }
 
-function formatDateTime(dateStr: string): string {
+function formatDateTime(dateStr: string | null | undefined): string {
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return dateStr;
     const y = d.getFullYear();
@@ -63,7 +79,7 @@ function formatMoney(value: number): string {
 }
 
 function getStatusLabel(status: OrderStatus): string {
-    const upper = status.toUpperCase();
+    const upper = (status ?? "").toUpperCase();
     if (upper.includes("PENDING") || upper.includes("WAIT")) return "결제 대기";
     if (upper.includes("PAID") || upper.includes("CONFIRM")) return "구매확정";
     if (upper.includes("SHIP") || upper.includes("DELIVERY")) return "배송 중";
@@ -72,6 +88,21 @@ function getStatusLabel(status: OrderStatus): string {
     if (upper.includes("CANCEL")) return "취소 완료";
     if (upper.includes("REFUND")) return "환불 완료";
     return status;
+}
+
+// 🔥 멤버십 planCode → 화면에 보여줄 이름
+function getMembershipDisplayName(planCode?: string | null): string {
+    if (!planCode) return "멤버십 상품";
+
+    switch (planCode) {
+        case "T1-2025-MONTHLY":
+            return "2025 T1 멤버십 (월간)";
+        case "T1-2025-YEARLY":
+            return "2025 T1 멤버십 (연간)";
+        // 필요하면 코드 더 추가
+        default:
+            return "멤버십 상품";
+    }
 }
 
 // ========= 페이지 컴포넌트 =========
@@ -142,7 +173,21 @@ export default function OrderDetailPage() {
         );
     }
 
-    const firstItem = data.items[0];
+    const firstItem = data.items?.[0];
+    // 🔥 멤버십 전용 주문 판별: orderItems 비어 있고, membershipPlanCode 가 있는 경우
+    const isMembershipOrder =
+        !!data.membershipPlanCode && (!data.items || data.items.length === 0);
+
+    // 카드에 표시할 제목 / 수량 / 이미지
+    const displayTitle = isMembershipOrder
+        ? getMembershipDisplayName(data.membershipPlanCode)
+        : firstItem?.itemNameSnapshot ?? "상품명 정보 없음";
+
+    const displayQuantity = isMembershipOrder ? 1 : firstItem?.quantity ?? 0;
+
+    const displayImage = isMembershipOrder
+        ? "/icons/t1.png" // 멤버십 기본 이미지 (원하면 /images/membership.png 같은 걸로 교체)
+        : firstItem?.itemImageSnapshot ?? "/icons/t1.png";
 
     return (
         <main className="min-h-screen bg-black text-white pt-16">
@@ -157,18 +202,32 @@ export default function OrderDetailPage() {
                     </p>
                 </section>
 
-                {/* 안내 바 두 줄 */}
+                {/* 안내 바 */}
                 <section className="space-y-2 mb-4 text-[11px] md:text-xs text-zinc-300">
-                    <div className="rounded-md bg-zinc-800 px-3 py-2">
-                        배송없이 행사현장에서 직접 받는 상품이에요.
-                    </div>
-                    <div className="rounded-md bg-zinc-800 px-3 py-2">
-                        부분 취소 또는 일부 수량에 대한 교환/반품을 원하시면
-                        &apos;1:1 문의하기&apos;를 통해 문의해 주세요.
-                    </div>
+                    {isMembershipOrder ? (
+                        <>
+                            <div className="rounded-md bg-zinc-800 px-3 py-2">
+                                온라인 멤버십 이용권이에요. 배송 없이 계정에 바로
+                                적용되는 상품입니다.
+                            </div>
+                            <div className="rounded-md bg-zinc-800 px-3 py-2">
+                                멤버십 해지 및 환불 규정은 안내 페이지를 꼭 확인해 주세요.
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="rounded-md bg-zinc-800 px-3 py-2">
+                                배송없이 행사현장에서 직접 받는 상품이에요.
+                            </div>
+                            <div className="rounded-md bg-zinc-800 px-3 py-2">
+                                부분 취소 또는 일부 수량에 대한 교환/반품을 원하시면
+                                &apos;1:1 문의하기&apos;를 통해 문의해 주세요.
+                            </div>
+                        </>
+                    )}
                 </section>
 
-                {/* 주문 상품 카드 (구매확정 박스) */}
+                {/* 주문 상품 / 멤버십 카드 */}
                 <section className="bg-zinc-900 rounded-2xl p-4 md:p-5 mb-8">
                     {/* 상태 */}
                     <div className="text-[11px] md:text-xs text-zinc-400 mb-2">
@@ -181,11 +240,8 @@ export default function OrderDetailPage() {
                         <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-zinc-800 overflow-hidden flex items-center justify-center flex-shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                                src={
-                                    firstItem?.itemImageSnapshot ??
-                                    "/icons/t1.png"
-                                }
-                                alt={firstItem?.itemNameSnapshot ?? "상품 이미지"}
+                                src={displayImage}
+                                alt={displayTitle}
                                 className="w-full h-full object-cover"
                             />
                         </div>
@@ -193,22 +249,70 @@ export default function OrderDetailPage() {
                         {/* 텍스트 */}
                         <div className="flex-1 min-w-0 flex flex-col justify-center">
                             <div className="text-sm md:text-base font-semibold truncate">
-                                {firstItem?.itemNameSnapshot ?? "상품명 정보 없음"}
+                                {displayTitle}
                             </div>
 
-                            {firstItem?.itemOptionSnapshot && (
-                                <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
-                                    {firstItem.itemOptionSnapshot}
-                                </div>
-                            )}
+                            {/* 옵션은 일반 상품일 때만 */}
+                            {!isMembershipOrder &&
+                                firstItem?.itemOptionSnapshot && (
+                                    <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
+                                        {firstItem.itemOptionSnapshot}
+                                    </div>
+                                )}
 
                             <div className="mt-1 text-xs md:text-sm text-zinc-300">
-                                {formatMoney(firstItem?.priceAtOrder ?? 0)}원 ·{" "}
-                                {firstItem?.quantity ?? 0}개
+                                {formatMoney(
+                                    isMembershipOrder
+                                        ? data.orderTotalPrice
+                                        : firstItem?.priceAtOrder ?? 0,
+                                )}
+                                원 · {displayQuantity}개
                             </div>
                         </div>
                     </div>
                 </section>
+
+                {/* 멤버십 정보 블록 (멤버십 주문일 때만) */}
+                {isMembershipOrder && (
+                    <section className="mb-8">
+                        <h2 className="text-sm md:text-base font-semibold mb-4">
+                            멤버십 정보
+                        </h2>
+                        <dl className="space-y-2 text-xs md:text-sm">
+                            <div className="flex justify-between">
+                                <dt className="text-zinc-500">이용권</dt>
+                                <dd className="text-zinc-100">
+                                    {getMembershipDisplayName(
+                                        data.membershipPlanCode,
+                                    )}
+                                </dd>
+                            </div>
+                            <div className="flex justify-between">
+                                <dt className="text-zinc-500">결제 방식</dt>
+                                <dd className="text-zinc-100">
+                                    {data.membershipPayType ?? "-"}
+                                </dd>
+                            </div>
+                            {data.membershipStartDate &&
+                                data.membershipEndDate && (
+                                    <div className="flex justify-between">
+                                        <dt className="text-zinc-500">
+                                            이용 기간
+                                        </dt>
+                                        <dd className="text-zinc-100">
+                                            {formatDate(
+                                                data.membershipStartDate,
+                                            )}{" "}
+                                            ~{" "}
+                                            {formatDate(
+                                                data.membershipEndDate,
+                                            )}
+                                        </dd>
+                                    </div>
+                                )}
+                        </dl>
+                    </section>
+                )}
 
                 {/* 구분선 */}
                 <hr className="border-zinc-800 mb-6" />
@@ -253,6 +357,7 @@ export default function OrderDetailPage() {
                 </section>
 
                 {/* 주문자 / 배송 정보 */}
+                {/* 멤버십 주문이라도 주소가 들어가 있을 수 있으니, 일단 공통으로 노출 */}
                 <section className="mb-10">
                     <h2 className="text-sm md:text-base font-semibold mb-3">
                         주문자
@@ -273,16 +378,26 @@ export default function OrderDetailPage() {
                             배송지 정보
                         </h3>
                         <div className="space-y-1 text-xs md:text-sm text-zinc-300">
-                            <div>
-                                {data.receiverZipCode
-                                    ? `[${data.receiverZipCode}] `
-                                    : ""}
-                                {data.receiverAddress ?? ""}{" "}
-                                {data.receiverDetailAddress ?? ""}
-                            </div>
-                            {data.memo && (
-                                <div className="text-zinc-400">
-                                    요청사항: {data.memo}
+                            {data.receiverZipCode ||
+                            data.receiverAddress ||
+                            data.receiverDetailAddress ? (
+                                <>
+                                    <div>
+                                        {data.receiverZipCode
+                                            ? `[${data.receiverZipCode}] `
+                                            : ""}
+                                        {data.receiverAddress ?? ""}{" "}
+                                        {data.receiverDetailAddress ?? ""}
+                                    </div>
+                                    {data.memo && (
+                                        <div className="text-zinc-400">
+                                            요청사항: {data.memo}
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="text-zinc-500">
+                                    배송지 정보 없음
                                 </div>
                             )}
                         </div>
@@ -294,7 +409,9 @@ export default function OrderDetailPage() {
                     <button
                         type="button"
                         className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm md:text-base hover:bg-zinc-800"
-                        onClick={() => alert("고객센터 페이지는 추후 구현 예정입니다.")}
+                        onClick={() =>
+                            alert("고객센터 페이지는 추후 구현 예정입니다.")
+                        }
                     >
                         고객센터
                     </button>
