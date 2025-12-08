@@ -12,7 +12,11 @@ type ItemCategory = "MD" | "MEMBERSHIP" | "POP" | "ALL";
 type ItemSellStatus = "SELL" | "SOLD_OUT" | string;
 type PurchaseMode = "CART" | "BUY";
 type OptionKind = "SIZE" | "PLAYER" | "QTY_ONLY";
-type MembershipPayType = "ONE_TIME" | "YEARLY" | "RECURRING" | "NO_MEMBERSHIP";
+type MembershipPayType =
+    | "ONE_TIME"
+    | "YEARLY"
+    | "RECURRING"
+    | "NO_MEMBERSHIP";
 
 interface ExistingImageDTO {
     fileName: string;
@@ -38,6 +42,12 @@ interface ApiResult<T> {
     resCode: number;
     resMessage: string;
     result: T;
+}
+
+// 🔥 /member/readOne 응답 타입 (백엔드 DTO에 맞춰서 필요하면 필드 추가)
+interface MemberReadOneRes {
+    memberEmail: string;
+    membershipType: MembershipPayType; // NO_MEMBERSHIP / ONE_TIME / YEARLY / RECURRING
 }
 
 type SizeOption = {
@@ -110,6 +120,43 @@ function extractEmailFromJwt(token: string | null): string | null {
     }
 }
 
+// 🔥 JWT(accessToken)에서 membershipType 추출
+function getMembershipTypeFromClient(): MembershipPayType | null {
+    if (typeof window === "undefined") return null;
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) return null;
+
+    try {
+        const parts = token.split(".");
+        if (parts.length < 2) return null;
+
+        const payloadPart = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const padded = payloadPart.padEnd(
+            Math.ceil(payloadPart.length / 4) * 4,
+            "=",
+        );
+        const json = atob(padded);
+        const payload = JSON.parse(json);
+
+        const mt = payload.membershipType as string | undefined;
+
+        if (
+            mt === "ONE_TIME" ||
+            mt === "YEARLY" ||
+            mt === "RECURRING" ||
+            mt === "NO_MEMBERSHIP"
+        ) {
+            return mt as MembershipPayType;
+        }
+
+        return null;
+    } catch (e) {
+        console.error("JWT에서 membershipType 파싱 실패 =", e);
+        return null;
+    }
+}
+
 export default function ShopDetailPage() {
     const params = useParams<{ itemNo: string }>();
     const router = useRouter();
@@ -137,10 +184,8 @@ export default function ShopDetailPage() {
     const [showMembershipModal, setShowMembershipModal] = useState(false);
 
     // 로그인 필요 모달
-    const [showLoginRequiredModal, setShowLoginRequiredModal] = useState(false);
-
-    // TODO: 실제 로그인/멤버십 여부로 교체
-    const isMembershipUser = false;
+    const [showLoginRequiredModal, setShowLoginRequiredModal] =
+        useState(false);
 
     // 장바구니 토스트
     const [showCartToast, setShowCartToast] = useState(false);
@@ -224,9 +269,7 @@ export default function ShopDetailPage() {
     ).map((img) => {
         const raw = img.fileName;
         const url =
-            raw.startsWith("http") || raw.startsWith("/")
-                ? raw
-                : `/${raw}`;
+            raw.startsWith("http") || raw.startsWith("/") ? raw : `/${raw}`;
         return { ...img, url };
     });
 
@@ -285,6 +328,31 @@ export default function ShopDetailPage() {
     const decreaseQty = () => {
         if (optionKind === "PLAYER") return; // 인형은 1개 제한
         setQuantity((q) => (q > 1 ? q - 1 : 1));
+    };
+
+    // 🔥 멤버십 유저인지 /member/readOne으로 확인
+    const fetchIsMembershipUser = async (): Promise<
+        "YES" | "NO" | "LOGIN_REQUIRED" | "ERROR"
+    > => {
+        try {
+            const res = await apiClient.get<ApiResult<MemberReadOneRes>>(
+                "/member/readOne",
+            );
+            const membershipType = res.data.result?.membershipType;
+
+            if (!membershipType || membershipType === "NO_MEMBERSHIP") {
+                return "NO";
+            }
+            return "YES";
+        } catch (e: any) {
+            console.error("멤버십 상태 조회 실패 =", e);
+            const status = e.response?.status;
+
+            if (status === 401) {
+                return "LOGIN_REQUIRED";
+            }
+            return "ERROR";
+        }
     };
 
     const handleConfirmWithOptions = async (mode: PurchaseMode) => {
@@ -364,8 +432,32 @@ export default function ShopDetailPage() {
             setCartLoading(true);
             setOptionError(null);
 
-            // POP 에서는 CART 모드 자체를 안 쓰지만,
-            // 혹시라도 호출되면 그냥 무시
+            // ============================
+            // POP + BUY  → /order/pop/checkout
+            // ============================
+            if (isPopItem && mode === "BUY") {
+                const params = new URLSearchParams({
+                    itemNo: String(item.itemNo),
+                    quantity: String(qty),
+                    itemName: item.itemName,
+                    price: String(item.itemPrice),
+                });
+
+                if (optionKind === "PLAYER" && selectedPlayer) {
+                    params.append("player", selectedPlayer);
+                }
+                if (optionKind === "SIZE" && selectedSize) {
+                    params.append("size", selectedSize);
+                }
+
+                setIsOptionModalOpen(false);
+                router.push(`/order/pop/checkout?${params.toString()}`);
+                return;
+            }
+
+            // ============================
+            // CART 모드: 장바구니 API
+            // ============================
             if (mode === "CART" && !isPopItem) {
                 const url = `/cart/${encodeURIComponent(memberEmail)}/items`;
 
@@ -392,27 +484,65 @@ export default function ShopDetailPage() {
                 return;
             }
 
-            // === BUY 로직 ===
+            // ============================
+            // BUY 모드 (일반/MD 상품) → 멤버십 체크 후 /order/goods/checkout 로 이동
+            // ============================
+
             // 👉 MD 상품(멤버십 전용)만 멤버십 체크
-            const isMembershipOnlyItem = item.itemCategory === "MD";
-            if (isMembershipOnlyItem && !isMembershipUser) {
-                setShowMembershipModal(true);
-                return;
+            if (item.itemCategory === "MD") {
+                // 1차: JWT payload.membershipType으로 체크
+                const jwtMembershipType = getMembershipTypeFromClient();
+
+                if (jwtMembershipType === "NO_MEMBERSHIP") {
+                    setShowMembershipModal(true);
+                    return;
+                }
+
+                if (
+                    jwtMembershipType === "ONE_TIME" ||
+                    jwtMembershipType === "YEARLY" ||
+                    jwtMembershipType === "RECURRING"
+                ) {
+                    // 멤버십 있음 → 통과
+                } else {
+                    // 2차: JWT에 정보 없거나 이상하면 /member/readOne으로 확인 (기존 로직)
+                    const membershipCheck = await fetchIsMembershipUser();
+
+                    if (membershipCheck === "LOGIN_REQUIRED") {
+                        setShowLoginRequiredModal(true);
+                        return;
+                    }
+
+                    if (membershipCheck === "ERROR") {
+                        // 서버 에러일 때는 막아버림
+                        setShowMembershipModal(true);
+                        return;
+                    }
+
+                    if (membershipCheck === "NO") {
+                        setShowMembershipModal(true);
+                        return;
+                    }
+                    // YES면 통과
+                }
             }
 
-            const orderPayload: any = {
-                itemNo: item.itemNo,
-                quantity: qty,
-            };
-            // 필요하면 옵션 정보도 여기에 추가
+            // 🔥 여기서는 멤버십 조건 통과한 상태
+            // order/goods/checkout 페이지로 파라미터 들고 이동
+            const params = new URLSearchParams({
+                itemNo: String(item.itemNo),
+                quantity: String(qty),
+            });
 
-            const res = await apiClient.post<
-                ApiResult<{ orderNo: number }>
-            >("/order/create-single", orderPayload);
+            if (optionKind === "SIZE" && selectedSize) {
+                params.append("size", selectedSize);
+            }
+            if (optionKind === "PLAYER" && selectedPlayer) {
+                params.append("player", selectedPlayer);
+            }
 
-            const orderNo = res.data.result.orderNo;
             setIsOptionModalOpen(false);
-            router.push(`/order/checkout/${orderNo}`);
+            router.push(`/order/goods/checkout?${params.toString()}`);
         } catch (e: any) {
             console.error("요청 실패 =", e);
             if (e.response) {
@@ -494,10 +624,7 @@ export default function ShopDetailPage() {
                     >
                         ← SHOP
                     </Link>
-                    <button
-                        className="text-zinc-400 text-lg"
-                        aria-label="공유"
-                    >
+                    <button className="text-zinc-400 text-lg" aria-label="공유">
                         ⤴
                     </button>
                 </header>
@@ -519,9 +646,7 @@ export default function ShopDetailPage() {
                 <section className="mb-8 border-b border-zinc-800 pb-6">
                     {isPopItem ? (
                         <>
-                            <p className="text-xs text-zinc-400">
-                                POP 구독형 이용권
-                            </p>
+                            <p className="text-xs text-zinc-400">POP 구독형 이용권</p>
                             <h1 className="mt-2 text-lg font-semibold leading-snug">
                                 {item.itemName}
                             </h1>
@@ -551,7 +676,10 @@ export default function ShopDetailPage() {
                                 <span className="text-base">❤️</span>
                                 <span>멤버십 회원만 구매할 수 있어요</span>
                             </div>
-                            <button className="text-xs font-semibold text-red-200">
+                            <button
+                                className="text-xs font-semibold text-red-200"
+                                onClick={() => router.push("/membership/join")}
+                            >
                                 가입 &gt;
                             </button>
                         </div>
@@ -562,15 +690,11 @@ export default function ShopDetailPage() {
                         <div className="mt-6 text-xs">
                             <div className="flex items-center justify-between">
                                 <div className="flex gap-4">
-                                    <span className="text-zinc-400">
-                                        배송 정보
-                                    </span>
+                                    <span className="text-zinc-400">배송 정보</span>
                                     <button
                                         type="button"
                                         onClick={() =>
-                                            setShowShippingDetail(
-                                                (prev) => !prev,
-                                            )
+                                            setShowShippingDetail((prev) => !prev)
                                         }
                                         className="text-zinc-100 hover:text-white"
                                     >
@@ -597,8 +721,7 @@ export default function ShopDetailPage() {
                                             국내 배송
                                         </p>
                                         <p className="mt-1">
-                                            CJ대한통운 / 기본 3,000원, 도서산간
-                                            6,000원
+                                            CJ대한통운 / 기본 3,000원, 도서산간 6,000원
                                             <br />
                                             (50,000원 이상 구매 시 무료 배송)
                                         </p>
@@ -612,8 +735,7 @@ export default function ShopDetailPage() {
                                             해외 배송
                                         </p>
                                         <p className="mt-1">
-                                            DHL / 배송 국가 및 무게에 따라
-                                            배송비가 책정됩니다.
+                                            DHL / 배송 국가 및 무게에 따라 배송비가 책정됩니다.
                                         </p>
                                         <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
                                             출고 이후 5영업일 이상 소요 예상
@@ -655,19 +777,18 @@ export default function ShopDetailPage() {
                         </p>
                         <ul className="space-y-1 list-disc pl-4">
                             <li>
-                                이용권 구매 후 POP에 입장하였거나, 첫 결제 후 7일이
-                                지나면 구매확정 처리됩니다.
+                                이용권 구매 후 POP에 입장하였거나, 첫 결제 후 7일이 지나면
+                                구매확정 처리됩니다.
                             </li>
                             <li>구매확정 이후 청약철회가 불가합니다.</li>
                             <li>
-                                다인권 이용권 구매 시, 선택한 모든 인원의 POP
-                                입장이 아닌 최초 입장 기준으로 사용 처리됩니다.
+                                다인권 이용권 구매 시, 선택한 모든 인원의 POP 입장이 아닌
+                                최초 입장 기준으로 사용 처리됩니다.
                             </li>
                             <li>
-                                더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할
-                                수 있습니다. 정기 결제를 해지하더라도 이용 기간
-                                마지막 날까지 이용이 가능하며, 이용 기간 종료 후
-                                해지 처리됩니다.
+                                더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할 수
+                                있습니다. 정기 결제를 해지하더라도 이용 기간 마지막 날까지
+                                이용이 가능하며, 이용 기간 종료 후 해지 처리됩니다.
                             </li>
                             <li>
                                 멤버십 전용 상품의 경우, 구매확정되지 않은 멤버십은
@@ -684,9 +805,7 @@ export default function ShopDetailPage() {
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-5 py-4 shadow-xl border border-zinc-700">
                         {/* 헤더 */}
                         <div className="mb-3 flex items-center justify-between">
-                            <span className="text-sm text-zinc-300">
-                                {optionTitle}
-                            </span>
+                            <span className="text-sm text-zinc-300">{optionTitle}</span>
                             <button
                                 type="button"
                                 onClick={closeOptionModal}
@@ -701,9 +820,7 @@ export default function ShopDetailPage() {
                             <div className="mb-4">
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        setShowOptionList((v) => !v)
-                                    }
+                                    onClick={() => setShowOptionList((v) => !v)}
                                     className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
                                 >
                                     <span>
@@ -711,9 +828,7 @@ export default function ShopDetailPage() {
                                             ? `size / ${selectedSize}`
                                             : "size 선택"}
                                     </span>
-                                    <span className="text-xs text-zinc-400">
-                                        ▼
-                                    </span>
+                                    <span className="text-xs text-zinc-400">▼</span>
                                 </button>
 
                                 {showOptionList && (
@@ -731,8 +846,7 @@ export default function ShopDetailPage() {
                                                 className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
                                                     s.soldOut
                                                         ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
-                                                        : selectedSize ===
-                                                        s.value
+                                                        : selectedSize === s.value
                                                             ? "border-red-500 bg-zinc-800 text-white"
                                                             : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                                                 }`}
@@ -742,9 +856,7 @@ export default function ShopDetailPage() {
                                                     {s.soldOut && " [품절]"}
                                                 </span>
                                                 <span>
-                                                    {s.price.toLocaleString(
-                                                        "ko-KR",
-                                                    )}
+                                                    {s.price.toLocaleString("ko-KR")}
                                                     원
                                                 </span>
                                             </button>
@@ -758,9 +870,7 @@ export default function ShopDetailPage() {
                             <div className="mb-4">
                                 <button
                                     type="button"
-                                    onClick={() =>
-                                        setShowOptionList((v) => !v)
-                                    }
+                                    onClick={() => setShowOptionList((v) => !v)}
                                     className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
                                 >
                                     <span>
@@ -768,9 +878,7 @@ export default function ShopDetailPage() {
                                             ? `PLAYER / ${selectedPlayer}`
                                             : "PLAYER 선택"}
                                     </span>
-                                    <span className="text-xs text-zinc-400">
-                                        ▼
-                                    </span>
+                                    <span className="text-xs text-zinc-400">▼</span>
                                 </button>
 
                                 {showOptionList && (
@@ -789,8 +897,7 @@ export default function ShopDetailPage() {
                                                 className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
                                                     p.soldOut
                                                         ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
-                                                        : selectedPlayer ===
-                                                        p.value
+                                                        : selectedPlayer === p.value
                                                             ? "border-red-500 bg-zinc-800 text-white"
                                                             : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                                                 }`}
@@ -800,9 +907,7 @@ export default function ShopDetailPage() {
                                                     {p.soldOut && " [품절]"}
                                                 </span>
                                                 <span>
-                                                    {p.price.toLocaleString(
-                                                        "ko-KR",
-                                                    )}
+                                                    {p.price.toLocaleString("ko-KR")}
                                                     원
                                                 </span>
                                             </button>
@@ -825,8 +930,7 @@ export default function ShopDetailPage() {
                                         {optionKind === "PLAYER" &&
                                             selectedPlayer &&
                                             `PLAYER / ${selectedPlayer}`}
-                                        {optionKind === "QTY_ONLY" &&
-                                            item.itemName}
+                                        {optionKind === "QTY_ONLY" && item.itemName}
                                     </span>
                                 </div>
 
@@ -836,9 +940,7 @@ export default function ShopDetailPage() {
                                         <button
                                             type="button"
                                             onClick={decreaseQty}
-                                            disabled={
-                                                optionKind === "PLAYER"
-                                            }
+                                            disabled={optionKind === "PLAYER"}
                                             className={`px-3 py-1 text-sm ${
                                                 optionKind === "PLAYER"
                                                     ? "text-zinc-500 cursor-not-allowed"
@@ -848,16 +950,12 @@ export default function ShopDetailPage() {
                                             -
                                         </button>
                                         <span className="px-4 py-1 text-sm text-white">
-                                            {optionKind === "PLAYER"
-                                                ? 1
-                                                : quantity}
+                                            {optionKind === "PLAYER" ? 1 : quantity}
                                         </span>
                                         <button
                                             type="button"
                                             onClick={increaseQty}
-                                            disabled={
-                                                optionKind === "PLAYER"
-                                            }
+                                            disabled={optionKind === "PLAYER"}
                                             className={`px-3 py-1 text-sm ${
                                                 optionKind === "PLAYER"
                                                     ? "text-zinc-500 cursor-not-allowed"
@@ -870,10 +968,7 @@ export default function ShopDetailPage() {
 
                                     {/* 금액 */}
                                     <span className="text-sm font-semibold text-white">
-                                        {calcTotalPrice().toLocaleString(
-                                            "ko-KR",
-                                        )}
-                                        원
+                                        {calcTotalPrice().toLocaleString("ko-KR")}원
                                     </span>
                                 </div>
                             </div>
@@ -899,9 +994,7 @@ export default function ShopDetailPage() {
                                 <button
                                     type="button"
                                     disabled={cartLoading}
-                                    onClick={() =>
-                                        handleConfirmWithOptions("BUY")
-                                    }
+                                    onClick={() => handleConfirmWithOptions("BUY")}
                                     className="w-full rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
                                 >
                                     구매하기
@@ -912,9 +1005,7 @@ export default function ShopDetailPage() {
                                 <button
                                     type="button"
                                     disabled={cartLoading}
-                                    onClick={() =>
-                                        handleConfirmWithOptions("CART")
-                                    }
+                                    onClick={() => handleConfirmWithOptions("CART")}
                                     className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
                                         cartLoading
                                             ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
@@ -926,9 +1017,7 @@ export default function ShopDetailPage() {
                                 <button
                                     type="button"
                                     disabled={cartLoading}
-                                    onClick={() =>
-                                        handleConfirmWithOptions("BUY")
-                                    }
+                                    onClick={() => handleConfirmWithOptions("BUY")}
                                     className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
                                 >
                                     바로 구매
@@ -956,9 +1045,7 @@ export default function ShopDetailPage() {
                             </button>
                             <button
                                 type="button"
-                                onClick={() =>
-                                    router.push("/membership/join")
-                                }
+                                onClick={() => router.push("/membership/join")}
                                 className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500"
                             >
                                 멤버십 가입
@@ -981,9 +1068,7 @@ export default function ShopDetailPage() {
                         <div className="flex gap-3">
                             <button
                                 type="button"
-                                onClick={() =>
-                                    setShowLoginRequiredModal(false)
-                                }
+                                onClick={() => setShowLoginRequiredModal(false)}
                                 className="flex-1 rounded-xl bg-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-600"
                             >
                                 취소
@@ -1045,7 +1130,7 @@ export default function ShopDetailPage() {
                                 type="button"
                                 disabled={cartLoading}
                                 onClick={openOptionModal}
-                                className="flex-1 rounded-xl py-3 text-sm font-semibold text-center bg-red-600 text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                                className="flex-1 rounded-xl py-3 text-sm font-semibold text-center bg-red-600 text:white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
                             >
                                 구매하기
                             </button>
@@ -1074,9 +1159,7 @@ function MembershipDetailBody({
     const [openCurrency, setOpenCurrency] = useState(false);
 
     const currencyLabel =
-        currency === "KRW"
-            ? "KRW - 한국 ₩(원)"
-            : "USD - 미국 $(달러)";
+        currency === "KRW" ? "KRW - 한국 ₩(원)" : "USD - 미국 $(달러)";
 
     const thumbnailImage = detailImages[0];
     const otherImages = detailImages.slice(1);
@@ -1096,7 +1179,6 @@ function MembershipDetailBody({
 
     // 🔥 멤버십 결제 페이지로 이동
     const handleMembershipCheckout = () => {
-        // TODO: 실제 planCode 는 DB/백엔드 설계에 맞게 바꿔 쓰시면 됩니다.
         const planCode = "T1-2025-MONTHLY";
 
         let months = 1;
@@ -1132,9 +1214,7 @@ function MembershipDetailBody({
             <section className="mx-auto flex max-w-5xl flex-col gap-8 px-4 pt-16 pb-24">
                 {/* 상단: 제목 + 통화 선택 */}
                 <div className="flex items-center justify-between">
-                    <h1 className="text-lg font-semibold">
-                        멤버십 가입하기
-                    </h1>
+                    <h1 className="text-lg font-semibold">멤버십 가입하기</h1>
 
                     {/* 결제 단위 드롭다운 */}
                     <div className="relative text-xs">
@@ -1222,9 +1302,7 @@ function MembershipDetailBody({
                     <div className="w-[360px] rounded-2xl border border-zinc-700 bg-zinc-950 px-8 py-7 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
                         {/* 제목 / 가격 */}
                         <div className="space-y-1">
-                            <h2 className="text-sm font-semibold">
-                                {item.itemName}
-                            </h2>
+                            <h2 className="text-sm font-semibold">{item.itemName}</h2>
                             <p className="text-xs text-zinc-300">
                                 {currency === "KRW"
                                     ? `${priceKRW.toLocaleString(
@@ -1268,8 +1346,8 @@ function MembershipDetailBody({
                             </button>
                             <button
                                 type="button"
-                                onClick={handleMembershipCheckout} // 🔥 여기서 결제 페이지로 이동
-                                className="flex h-10 w-full items-center justify-center rounded-md bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
+                                onClick={handleMembershipCheckout}
+                                className="flex h-10 w-full items-center justify-center rounded-md bg:red-600 text-xs font-semibold text-white hover:bg-red-500"
                             >
                                 가입하기
                             </button>
@@ -1279,19 +1357,16 @@ function MembershipDetailBody({
 
                 {/* 유의사항 */}
                 <section className="mt-10 w-full max-w-3xl text-left text-[11px] leading-relaxed text-zinc-400">
-                    <p className="mb-2 font-semibold text-zinc-300">
-                        유의사항
-                    </p>
+                    <p className="mb-2 font-semibold text-zinc-300">유의사항</p>
                     <p>
-                        · 상품 구매 후 콘텐츠를 열람하였거나, 이용 시작 후 7일이
-                        지나면 구매 확정 처리됩니다.
+                        · 상품 구매 후 콘텐츠를 열람하였거나, 이용 시작 후 7일이 지나면
+                        구매 확정 처리됩니다.
                     </p>
                     <p>· 구매 확정 이후 청약 철회가 불가합니다.</p>
                     <p>
                         · 더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할 수
-                        있습니다. 정기 결제를 해지하더라도 이용 기간 마지막
-                        날까지 이용이 가능하며, 이용 기간 종료 후 해지
-                        처리됩니다.
+                        있습니다. 정기 결제를 해지하더라도 이용 기간 마지막 날까지
+                        이용이 가능하며, 이용 기간 종료 후 해지 처리됩니다.
                     </p>
                 </section>
 

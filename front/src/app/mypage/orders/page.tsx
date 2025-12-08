@@ -241,11 +241,6 @@ export default function MyOrdersPage() {
                                         </button>
                                     </div>
 
-                                    {/* 안내 바 – 일단 공통으로 하나 추가 (나중에 타입별로 문구 바꿔도 됨) */}
-                                    <div className="rounded-lg bg-zinc-800 text-[11px] md:text-xs text-zinc-300 px-3 py-2">
-                                        배송없이 행사현장에서 직접 받는 상품이에요.
-                                    </div>
-
                                     {/* 주문 카드 */}
                                     <div className="bg-zinc-900 rounded-2xl p-4 md:p-5">
                                         {/* 상태 라벨 */}
