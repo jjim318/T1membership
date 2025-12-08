@@ -15,9 +15,11 @@ import com.t1membership.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 @Component
@@ -35,10 +37,11 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
     //→ Creator는 “로직만” 담당, 트랜잭션 경계는 Service가 관리
 
     @Override
+    @Transactional
     public OrderEntity create(String memberEmail, CreateGoodsOrderReq req) {
 
         // 1) 회원 검증
-        MemberEntity member = memberRepository.findById(memberEmail)
+        MemberEntity member = memberRepository.findByMemberEmail(memberEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "회원이 존재하지 않습니다."));
 
         // 2) 주문 엔티티 생성 + 공통 정보 세팅
@@ -52,13 +55,28 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         order.setMemo(req.getMemo());
         order.setOrderStatus(OrderStatus.ORDERED);
 
+        // 🔥 NPE 방지: 리스트가 null이면 새 리스트 세팅
+        if (order.getOrderItems() == null) {
+            order.setOrderItems(new ArrayList<>());
+        }
+
         BigDecimal totalAmount;
 
         // 3) 단건 vs 장바구니 분기
-        if (req.getItemId() != null && req.getQuantity() != null) {
+        boolean hasSingle =
+                req.getItemId() != null && req.getQuantity() != null;
+        boolean hasCart =
+                req.getCartItemIds() != null && !req.getCartItemIds().isEmpty();
+
+        if (hasSingle && !hasCart) {
             totalAmount = createFromSingleItem(order, req);
-        } else {
+        } else if (hasCart) {
             totalAmount = createFromCartItems(order, memberEmail, req);
+        } else {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "단건 또는 장바구니 정보가 올바르지 않습니다."
+            );
         }
 
         // 4) 총 금액 세팅 (recalcTotal 도 있지만, 명시적으로 맞춰줌)
@@ -70,7 +88,9 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         return order; // 서비스에서 save + Toss 호출
     }
 
-    //단건주문처리
+    // ==========================
+    // 단건 주문 처리
+    // ==========================
     private BigDecimal createFromSingleItem(OrderEntity order, CreateGoodsOrderReq req) {
 
         if (req.getItemId() == null || req.getQuantity() == null) {
@@ -88,38 +108,34 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
                     HttpStatus.BAD_REQUEST, "수량은 1개 이상이어야 합니다.");
         }
 
-        // 재고/판매가능 여부 체크 (예시)
+        // 재고/판매가능 여부 체크
         validateItemStock(item, quantity);
 
-        // 주문 아이템 스냅샷 생성
-        OrderItemEntity orderItem = new OrderItemEntity();
-        orderItem.setOrder(order);                  // 연관관계
-        orderItem.setItem(item);                    // 원본 item 연관관계 있으면 세팅
-        orderItem.setOrderItemNo(item.getItemNo());          // 스냅샷용으로 PK 박아둘 수도 있음
-        orderItem.setItemNameSnapshot(item.getItemName());
-        orderItem.setItemPriceSnapshot(item.getItemPrice());
-        orderItem.setQuantity(quantity);
+        // 🔥 주문 아이템 생성 (스냅샷 + priceAtOrder + lineTotal 계산까지 포함)
+        //    - OrderItemEntity.of(...) 안에서
+        //      priceAtOrder, itemNameSnapshot, itemPriceSnapshot, lineTotal 을 다 세팅해 줍니다.
+        OrderItemEntity orderItem = OrderItemEntity.of(item, quantity);
 
+        // 🔥 연관관계 세팅 (order <-> orderItem)
+        orderItem.setOrder(order);
         order.getOrderItems().add(orderItem);
 
-        //단건 주문 금액 = 단가 × 수량 (BigDecimal)
-        BigDecimal lineTotal = item.getItemPrice()
-                .multiply(BigDecimal.valueOf(quantity));
-
-        //필요하면 orderItem 에도 lineTotal 저장 (필드가 있다면)
-        orderItem.setLineTotal(lineTotal);
-
-        return lineTotal;
+        // 단건 주문 금액 = 라인 합계
+        return orderItem.getLineTotal();
     }
 
-    //장바구니 선택 주문 관리
-    private BigDecimal createFromCartItems(OrderEntity order,
-                                     String memberEmail,
-                                     CreateGoodsOrderReq req) {
+    // ==========================
+    // 장바구니 선택 주문 처리
+    // ==========================
+    private BigDecimal createFromCartItems(
+            OrderEntity order,
+            String memberEmail,
+            CreateGoodsOrderReq req
+    ) {
 
         List<Long> cartItemIds = req.getCartItemIds();
 
-        // 예시: cartNo + memberId 조건까지 같이 검증하는 메서드
+        // cartNo + memberId 조건까지 같이 검증하는 메서드
         List<CartEntity> cartItems = cartRepository.findAllById(cartItemIds);
 
         if (cartItems.size() != cartItemIds.size()) {
@@ -140,36 +156,30 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST, "본인의 장바구니가 아닙니다.");
             }
+
             ItemEntity item = cartItem.getItem();
             int quantity = cartItem.getItemQuantity();
 
             // 재고/판매가능 여부 체크
             validateItemStock(item, quantity);
 
-            OrderItemEntity orderItem = new OrderItemEntity();
-            orderItem.setOrder(order);
-            orderItem.setItem(item);
-            orderItem.setOrderItemNo(item.getItemNo());
-            orderItem.setItemNameSnapshot(item.getItemName());
-            orderItem.setItemPriceSnapshot(item.getItemPrice());
-            orderItem.setQuantity(quantity);
+            // 🔥 장바구니 라인도 동일하게 팩토리 메서드 사용
+            OrderItemEntity orderItem = OrderItemEntity.of(item, quantity);
 
+            // 🔥 연관관계 세팅
+            orderItem.setOrder(order);
             order.getOrderItems().add(orderItem);
 
-            // 첫 상품 기준으로 주문 타입 세팅 (item enum이 MD라면)
+            // 첫 상품 기준으로 주문 타입 세팅 등 필요시 여기서 처리
             if (first) {
                 // order.setOrderType(item.getItemType());
                 first = false;
             }
 
-            //개별 라인 금액 = 단가 × 수량 (BigDecimal)
-            BigDecimal lineTotal = item.getItemPrice()
-                    .multiply(BigDecimal.valueOf(quantity));
+            // 🔥 라인 합계는 이미 of() 안에서 계산해서 넣어둔 값 사용
+            BigDecimal lineTotal = orderItem.getLineTotal();
 
-            //필요하면
-            orderItem.setLineTotal(lineTotal);
-
-            //총합에 더하기
+            // 총합에 더하기
             totalAmount = totalAmount.add(lineTotal);
         }
 
