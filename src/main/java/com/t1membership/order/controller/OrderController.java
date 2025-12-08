@@ -2,9 +2,6 @@ package com.t1membership.order.controller;
 
 import com.t1membership.ApiResult;
 import com.t1membership.item.constant.ItemCategory;
-import com.t1membership.item.constant.MembershipPayType;
-import com.t1membership.item.repository.ItemRepository;
-import com.t1membership.member.repository.MemberRepository;
 import com.t1membership.order.dto.req.common.CancelOrderReq;
 import com.t1membership.order.dto.req.common.SearchOrderReq;
 import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
@@ -14,8 +11,6 @@ import com.t1membership.order.dto.req.user.CreatePopOrderReq;
 import com.t1membership.order.dto.res.common.CancelOrderRes;
 import com.t1membership.order.dto.res.common.SummaryOrderRes;
 import com.t1membership.order.dto.res.user.CreateOrderRes;
-import com.t1membership.order.dto.res.user.PopCheckoutItemRes;
-import com.t1membership.order.dto.res.user.PopCheckoutRes;
 import com.t1membership.order.dto.res.user.UserDetailOrderRes;
 import com.t1membership.order.service.OrderCancelService;
 import com.t1membership.order.service.OrderQueryService;
@@ -43,8 +38,6 @@ public class OrderController {
     private final OrderQueryService orderQueryService;
     private final OrderService orderService;
     private final OrderCancelService orderCancelService;
-    private final MemberRepository memberRepository;
-    private final ItemRepository itemRepository;
 
     //유저용
     //주문 생성,주문 조회, 주문 취소(환불)
@@ -136,48 +129,4 @@ public class OrderController {
         // 4) 결과 반환
         return ResponseEntity.ok(res);
     }
-
-
-    // ✅ POP 결제 페이지 프리뷰
-    @GetMapping("/pop/checkout")
-    public ApiResult<PopCheckoutRes> getPopCheckout(
-            @AuthenticationPrincipal String email,
-            @RequestParam Long popId,
-            @RequestParam int qty,
-            @RequestParam(required = false) String variant
-    ) {
-        var member = memberRepository.findByMemberEmail(email)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
-
-        var popItem = itemRepository.findById(popId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST));
-
-        boolean isMember = member.getMembershipType() != MembershipPayType.NO_MEMBERSHIP;
-
-        int[] nonMemberPrices = {0, 5500, 10000, 14500, 19000, 23500};
-        int[] memberPrices    = {0, 4400, 8000, 11600, 15200, 18800};
-
-        if (qty < 1 || qty > 5) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "POP 인원 수는 1~5명만 가능합니다.");
-        }
-
-        int totalAmount = isMember ? memberPrices[qty] : nonMemberPrices[qty];
-
-        PopCheckoutItemRes itemRes = PopCheckoutItemRes.builder()
-                .itemNo(popItem.getItemNo())
-                .title(popItem.getItemName())
-                .price(totalAmount)
-                .quantity(qty)
-                .build();
-
-        PopCheckoutRes res = PopCheckoutRes.builder()
-                .buyerName(member.getMemberNickName())
-                .buyerEmail(member.getMemberEmail())
-                .items(List.of(itemRes))
-                .totalAmount(totalAmount)
-                .build();
-
-        return new ApiResult<>(res);
-    }
-
 }

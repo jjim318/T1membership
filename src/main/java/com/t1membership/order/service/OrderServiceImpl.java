@@ -1,5 +1,6 @@
 package com.t1membership.order.service;
 
+import com.t1membership.cart.repository.CartRepository;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;
 import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
@@ -30,6 +31,7 @@ public class OrderServiceImpl implements OrderService {
     private final TossPaymentService tossPaymentService;
     private final MembershipOrderCreator membershipOrderCreator;
     private final PopOrderCreator popOrderCreator;
+    private final CartRepository cartRepository;
 
     // ===========================
     // BigDecimal → int 변환 (토스 amount용)
@@ -129,11 +131,19 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public CreateOrderRes createGoodsOrder(String memberEmail, CreateGoodsOrderReq req) {
 
-        // 주문 도메인 생성 (Creator가 담당)
+        // 1) 주문 도메인 생성 (Creator가 담당)
         OrderEntity order = goodsOrderCreator.create(memberEmail, req);
 
-        // 공통 처리 + 응답
-        return processOrder(order);
+        // 2) 공통 처리 + 토스 결제 URL 생성
+        CreateOrderRes res = processOrder(order);
+
+        // 3) 🔥 장바구니 기반 주문이었다면, 장바구니 비우기
+        if (req.getCartItemIds() != null && !req.getCartItemIds().isEmpty()) {
+            cartRepository.deleteAllByIdInBatch(req.getCartItemIds());
+            // 또는 cartRepository.deleteAllById(req.getCartItemIds());
+        }
+
+        return res;
     }
 
     // ======================

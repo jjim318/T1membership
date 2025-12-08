@@ -125,17 +125,23 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
     }
 
     // ==========================
-    // 장바구니 선택 주문 처리
+    // 장바구니 선택 주문 처리 (여러 개 지원)
     // ==========================
     private BigDecimal createFromCartItems(
             OrderEntity order,
             String memberEmail,
             CreateGoodsOrderReq req
     ) {
-
         List<Long> cartItemIds = req.getCartItemIds();
 
-        // cartNo + memberId 조건까지 같이 검증하는 메서드
+        if (cartItemIds == null || cartItemIds.isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "장바구니 정보가 없습니다."
+            );
+        }
+
+        // cartItemIds 에 넘어온 PK 들로 CartEntity 조회
         List<CartEntity> cartItems = cartRepository.findAllById(cartItemIds);
 
         if (cartItems.size() != cartItemIds.size()) {
@@ -147,11 +153,8 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         boolean first = true;
 
         for (CartEntity cartItem : cartItems) {
-            // cartNo, memberId 직접 검증
-            if (!cartItem.getCartNo().equals(req.getCartNo())) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST, "장바구니 번호가 올바르지 않습니다.");
-            }
+
+            // 🔥 본인 장바구니인지 검증 (이것만으로 충분)
             if (!cartItem.getMember().getMemberEmail().equals(memberEmail)) {
                 throw new ResponseStatusException(
                         HttpStatus.BAD_REQUEST, "본인의 장바구니가 아닙니다.");
@@ -163,28 +166,25 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
             // 재고/판매가능 여부 체크
             validateItemStock(item, quantity);
 
-            // 🔥 장바구니 라인도 동일하게 팩토리 메서드 사용
+            // 주문 아이템 생성
             OrderItemEntity orderItem = OrderItemEntity.of(item, quantity);
 
-            // 🔥 연관관계 세팅
+            // 연관관계 세팅
             orderItem.setOrder(order);
             order.getOrderItems().add(orderItem);
 
-            // 첫 상품 기준으로 주문 타입 세팅 등 필요시 여기서 처리
             if (first) {
-                // order.setOrderType(item.getItemType());
+                // order.setOrderType(item.getItemType()); // 필요하면 여기서 설정
                 first = false;
             }
 
-            // 🔥 라인 합계는 이미 of() 안에서 계산해서 넣어둔 값 사용
-            BigDecimal lineTotal = orderItem.getLineTotal();
-
-            // 총합에 더하기
-            totalAmount = totalAmount.add(lineTotal);
+            // 라인 합계는 orderItem 안에 있음
+            totalAmount = totalAmount.add(orderItem.getLineTotal());
         }
 
         return totalAmount;
     }
+
 
     //상품 재고 + 판매 상태 검증
     private void validateItemStock(ItemEntity item, int quantity) {

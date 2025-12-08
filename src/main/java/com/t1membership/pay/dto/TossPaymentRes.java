@@ -5,13 +5,14 @@ import com.t1membership.pay.constant.TossPaymentStatus;
 import com.t1membership.pay.domain.TossPaymentEntity;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class TossPaymentRes {
     private String tossPaymentKey;
     private String orderNo;
-    private Integer totalAmount;
+    private BigDecimal totalAmount;
     private TossPaymentStatus paymentStatus;
     private TossPaymentMethod method;
     private LocalDateTime approvedAt;   // 화면 표시 편의상 LocalDateTime로 변환

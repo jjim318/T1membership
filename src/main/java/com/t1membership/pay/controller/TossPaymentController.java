@@ -8,6 +8,8 @@ import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.domain.OrderItemEntity;
 import com.t1membership.order.repository.OrderRepository;
+import com.t1membership.pay.constant.TossPaymentMethod;
+import com.t1membership.pay.constant.TossPaymentStatus;
 import com.t1membership.pay.domain.TossPaymentEntity;
 import com.t1membership.pay.dto.TossConfirmReq;
 import com.t1membership.pay.service.TossPaymentService;
@@ -110,9 +112,29 @@ public class TossPaymentController {
         // 🔥 토스용 orderId(orderTossId) - 매번 새로 생성
         // ==============================
         TossPaymentEntity tossPayment = order.getTossPayment();
+
+        // 1) 문자열 method -> enum 변환
+        TossPaymentMethod tossMethod;
+        switch (method.toUpperCase()) {
+            case "CARD" -> tossMethod = TossPaymentMethod.CARD;
+            case "ACCOUNT" -> tossMethod = TossPaymentMethod.TRANSFER;       // 쓰고싶은 쪽으로
+            case "VIRTUAL_ACCOUNT" -> tossMethod = TossPaymentMethod.VIRTUAL_ACCOUNT;
+            case "MOBILE_PHONE" -> tossMethod = TossPaymentMethod.MOBILE_PHONE;
+            case "EASY_PAY" -> tossMethod = TossPaymentMethod.EASY_PAY;
+            default -> tossMethod = TossPaymentMethod.UNKNOWN;
+        }
+
         if (tossPayment == null) {
-            log.error("[TossPrepare] TossPayment is null. orderNo={}", orderNo);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Toss 결제정보가 없습니다.");
+            log.warn("[TossPrepare] TossPayment is null. create new. orderNo={}", orderNo);
+
+            tossPayment = TossPaymentEntity.builder()
+                    .order(order)                                // 주문 연결
+                    .totalAmount(BigDecimal.valueOf(amount))     // 결제 금액
+                    .tossPaymentMethod(tossMethod)               // 🔥 method NOT NULL
+                    .tossPaymentStatus(TossPaymentStatus.PENDING)  // 🔥 status NOT NULL 기본값
+                    .build();
+
+            order.setTossPayment(tossPayment);
         }
 
         // ❗ 기존 값 무시하고 항상 새로 발급
@@ -133,6 +155,7 @@ public class TossPaymentController {
                         "orderName", orderName
                 )
         ));
+
     }
 
     private String makeOrderName(OrderEntity order) {

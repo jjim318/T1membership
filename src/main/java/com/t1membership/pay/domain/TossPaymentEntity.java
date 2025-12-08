@@ -7,6 +7,7 @@ import com.t1membership.pay.constant.TossPaymentStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -58,7 +59,7 @@ public class TossPaymentEntity extends BaseEntity {
 
     /** 결제 총액(원 단위, 정수) */
     @Column(name = "total_amount", nullable = false)
-    private int totalAmount;
+    private BigDecimal totalAmount;
 
     /** 결제수단 */
     @Enumerated(EnumType.STRING)

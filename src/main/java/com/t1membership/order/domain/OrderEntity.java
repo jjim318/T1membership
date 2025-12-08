@@ -73,7 +73,7 @@ public class OrderEntity extends BaseEntity {
     private Boolean autoRenew;
 
     //취소 --------------------
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY,cascade = CascadeType.ALL)
     @JoinColumn(name = "toss_pay")
     private TossPaymentEntity tossPayment;
 
