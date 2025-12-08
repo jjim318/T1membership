@@ -139,11 +139,11 @@ const PLAYER_TABLE: Record<number, PlayerOption[]> = {
 };
 
 const POP_PLAYER_IMAGES: Record<string, string> = {
-    FAKER: "http://localhost:8080/files/faker.png",
-    ONER: "http://localhost:8080/files/oner.png",
-    DORAN: "http://localhost:8080/files/doran.png",
-    GUMAYUSI: "http://localhost:8080/files/gumayusi.png",
-    KERIA: "http://localhost:8080/files/keria.png",
+    FAKER: "/story/faker.jpg",
+    ONER: "/story/oner.jpg",
+    DORAN: "/story/doran.jpg",
+    GUMAYUSI: "/story/gumayusi.jpg",
+    KERIA: "/story/keria.jpg",
 };
 
 
@@ -1102,7 +1102,7 @@ export default function ShopDetailPage() {
                                                         <img
                                                             src={
                                                                 POP_PLAYER_IMAGES[player.value] ??
-                                                                "http://localhost:8080/files/default.png"
+                                                                `/story/default.jpg`
                                                             }
                                                             alt={player.label}
                                                             className="h-full w-full object-cover"

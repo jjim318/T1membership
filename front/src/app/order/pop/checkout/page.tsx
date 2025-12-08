@@ -40,8 +40,18 @@ interface TossPrepareResponse {
 // 🔥 /member/readOne 응답 (필요한 것만)
 interface MemberReadOneRes {
     memberEmail: string;
-    memberName?: string;      // 실제 DTO 필드명에 맞게 조정 (memberNickName 쓰면 거기로 바꾸면 됨)
+    memberName?: string;
     memberNickName?: string;
+}
+
+// 🔥 /item/{popId} 응답에서 쓸 최소 필드
+interface PopItemRes {
+    itemName: string;
+    itemPrice: number;
+    images?: {
+        fileName: string;
+        sortOrder?: number | null;
+    }[];
 }
 
 // Toss
@@ -109,37 +119,23 @@ export default function PopCheckoutPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    // 1) URL 쿼리에서 POP 정보 가져오기
-    const {
-        popId,
-        quantity,
-        itemName,
-        price,
-        thumbnail,
-        initialVariant,
-    } = useMemo(() => {
+    // 1) URL 쿼리에서 POP 기본 정보(popId/qty/variant)만 가져오기
+    const { popId, quantity, initialVariant } = useMemo(() => {
         const popIdParam =
             searchParams.get("popId") ?? searchParams.get("itemNo");
         const qtyParam =
             searchParams.get("qty") ?? searchParams.get("quantity");
-        const itemNameParam = searchParams.get("itemName") ?? "";
-        const priceParam = searchParams.get("price");
-        const thumbParam = searchParams.get("thumbnail") ?? "";
         const variantParam = searchParams.get("variant") ?? "";
 
         return {
             popId: popIdParam ? Number(popIdParam) : null,
             quantity: qtyParam ? Number(qtyParam) : 1,
-            itemName: itemNameParam,
-            price: priceParam ? Number(priceParam) : 0,
-            thumbnail: thumbParam || null,
             initialVariant: variantParam,
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams.toString()]);
 
     // 2) 화면 상태
-    const [variant, setVariant] = useState<string>(initialVariant);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const [paymentMethod, setPaymentMethod] =
@@ -152,9 +148,33 @@ export default function PopCheckoutPage() {
     const [agreePaymentTerms, setAgreePaymentTerms] = useState(false);
     const [agreeAll, setAgreeAll] = useState(false);
 
+    // 🔥 선택된 스타 (쿼리로 넘어온 variant를 그대로 사용, 수정 불가)
+    const [variant, setVariant] = useState<string>(initialVariant || "");
+
+    // variant → ["DORAN","KERIA","FAKER"] 이런 배열로 변환 (표시용)
+    const selectedPlayers = useMemo(
+        () =>
+            (variant || "")
+                .split(",")
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0),
+        [variant],
+    );
+
+    // initialVariant가 바뀌면 상태 동기화
+    useEffect(() => {
+        setVariant(initialVariant || "");
+    }, [initialVariant]);
+
     // 🔥 JWT 토큰 기반 로그인 유저 정보 (백엔드 /member/readOne 호출)
     const [buyerName, setBuyerName] = useState<string>("");
     const [buyerEmail, setBuyerEmail] = useState<string>("");
+
+    // 🔥 POP 상품 정보 (백엔드 /item/{popId}에서 로드)
+    const [itemName, setItemName] = useState<string>("");
+    const [thumbnail, setThumbnail] = useState<string | null>(null);
+    const [unitPrice, setUnitPrice] = useState<number>(0);
+    const [loadingItem, setLoadingItem] = useState<boolean>(false);
 
     // 3) 전체 동의 체크박스 연동
     useEffect(() => {
@@ -177,31 +197,81 @@ export default function PopCheckoutPage() {
         }
     }, [agreePrivacy, agreeCommunity, agreePaymentTerms]);
 
+    // 총 결제 금액 (단가 * 인원 수)
     const totalAmount = useMemo(() => {
-        if (!price || !quantity) return 0;
-        return price * quantity;
-    }, [price, quantity]);
+        if (!unitPrice || !quantity) return 0;
+        return unitPrice * quantity;
+    }, [unitPrice, quantity]);
 
     const canPay =
         !!popId &&
-        price > 0 &&
+        unitPrice > 0 &&
         !!itemName &&
-        !!variant.trim() &&
-        !!buyerEmail &&          // 로그인 유저 정보까지 있어야 결제 가능
+        selectedPlayers.length > 0 &&
+        !!buyerEmail && // 로그인 유저 정보까지 있어야 결제 가능
         agreePrivacy &&
         agreeCommunity &&
         agreePaymentTerms;
 
-    // 4) 기본 값 검증
+    // 4) 기본 값 검증 (popId 유효성만)
     useEffect(() => {
-        if (!popId || price <= 0 || !itemName) {
+        if (!popId) {
             setErrorMsg(
-                "잘못된 접근입니다. POP 상품 페이지에서 다시 시도해 주세요."
+                "잘못된 접근입니다. POP 상품 페이지에서 다시 시도해 주세요.",
             );
         } else {
             setErrorMsg(null);
         }
-    }, [popId, price, itemName]);
+    }, [popId]);
+
+    // 4-1) 🔥 POP 상품 정보 /item/{popId}에서 로드
+    useEffect(() => {
+        if (!popId) return;
+
+        const loadPopItem = async () => {
+            try {
+                setLoadingItem(true);
+                setErrorMsg(null);
+
+                const res =
+                    await apiClient.get<ApiResult<PopItemRes>>(
+                        `/item/${popId}`,
+                    );
+
+                if (!res.data.isSuccess) {
+                    throw new Error(
+                        res.data.resMessage ||
+                        "POP 상품 정보를 불러오지 못했습니다.",
+                    );
+                }
+
+                const it = res.data.result;
+                setItemName(it.itemName);
+                setUnitPrice(it.itemPrice);
+
+                const sorted = [...(it.images ?? [])].sort(
+                    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+                );
+                const rawThumb = sorted[0]?.fileName ?? "";
+                if (rawThumb) {
+                    const url =
+                        rawThumb.startsWith("http") || rawThumb.startsWith("/")
+                            ? rawThumb
+                            : `/${rawThumb}`;
+                    setThumbnail(url);
+                } else {
+                    setThumbnail(null);
+                }
+            } catch (err) {
+                console.error("POP 상품 정보 로드 실패 =", err);
+                setErrorMsg("POP 상품 정보를 불러오지 못했습니다.");
+            } finally {
+                setLoadingItem(false);
+            }
+        };
+
+        loadPopItem();
+    }, [popId]);
 
     // 5) 🔥 /member/readOne 으로 로그인 유저 정보 가져오기 (JWT 사용)
     useEffect(() => {
@@ -215,7 +285,7 @@ export default function PopCheckoutPage() {
                 if (!res.data.isSuccess) {
                     throw new Error(
                         res.data.resMessage ||
-                        "회원 정보를 불러오지 못했습니다."
+                        "회원 정보를 불러오지 못했습니다.",
                     );
                 }
 
@@ -225,7 +295,7 @@ export default function PopCheckoutPage() {
                 setBuyerName(
                     m.memberNickName ||
                     m.memberName ||
-                    m.memberEmail.split("@")[0]
+                    m.memberEmail.split("@")[0],
                 );
             } catch (err) {
                 // 401이면 로그인 페이지로 보내버림
@@ -242,8 +312,8 @@ export default function PopCheckoutPage() {
                 setErrorMsg(
                     extractError(
                         err,
-                        "회원 정보를 불러오지 못했습니다."
-                    )
+                        "회원 정보를 불러오지 못했습니다.",
+                    ),
                 );
             }
         };
@@ -253,8 +323,8 @@ export default function PopCheckoutPage() {
 
     const validatePop = (): string | null => {
         if (!popId) return "popId 가 필요합니다.";
-        if (!variant.trim())
-            return "선택한 스타(옵션)를 입력해 주세요.";
+        if (selectedPlayers.length === 0)
+            return "선택한 스타 정보가 없습니다. POP 상품 페이지에서 다시 시도해 주세요.";
         return null;
     };
 
@@ -266,17 +336,18 @@ export default function PopCheckoutPage() {
         const body = {
             popId,
             quantity,
+            // shop에서 선택한 스타 문자열 그대로 사용
             variant: variant || undefined,
         };
 
         const res = await apiClient.post<ApiResult<CreateOrderRes>>(
             "/order/POP",
-            body
+            body,
         );
 
         if (!res.data.isSuccess) {
             throw new Error(
-                res.data.resMessage || "POP 주문 생성에 실패했습니다."
+                res.data.resMessage || "POP 주문 생성에 실패했습니다.",
             );
         }
 
@@ -285,19 +356,19 @@ export default function PopCheckoutPage() {
 
     // ===== Toss prepare (POST /api/pay/toss/prepare) =====
     const prepareToss = async (
-        orderNo: number
+        orderNo: number,
     ): Promise<TossPrepareResponse["data"]> => {
         const method = resolveBackendMethod(paymentMethod);
 
         try {
             const res = await apiClient.post<TossPrepareResponse>(
                 "/api/pay/toss/prepare",
-                { orderNo, method }
+                { orderNo, method },
             );
             if (!res.data.isSuccess) {
                 throw new Error(
                     res.data.resMessage ||
-                    "Toss 결제 준비에 실패했습니다."
+                    "Toss 결제 준비에 실패했습니다.",
                 );
             }
             return res.data.data;
@@ -305,8 +376,8 @@ export default function PopCheckoutPage() {
             throw new Error(
                 extractError(
                     err,
-                    "Toss 결제 준비 중 오류가 발생했습니다."
-                )
+                    "Toss 결제 준비 중 오류가 발생했습니다.",
+                ),
             );
         }
     };
@@ -339,7 +410,6 @@ export default function PopCheckoutPage() {
                 amount: prepared.amount,
                 orderId: prepared.orderId,
                 orderName: prepared.orderName,
-                // 형님 프로젝트 설정에 맞는 URL로
                 successUrl: `${window.location.origin}/toss/success`,
                 failUrl: `${window.location.origin}/toss/fail`,
                 customerEmail: buyerEmail || undefined,
@@ -351,7 +421,7 @@ export default function PopCheckoutPage() {
             alert(
                 err instanceof Error
                     ? err.message
-                    : "결제 요청 중 오류가 발생했습니다."
+                    : "결제 요청 중 오류가 발생했습니다.",
             );
         }
     };
@@ -360,9 +430,7 @@ export default function PopCheckoutPage() {
     return (
         <div className="w-full min-h-screen bg-black text-white">
             <div className="max-w-5xl mx-auto px-6 pt-24 pb-16">
-                <h1 className="text-3xl font-semibold mb-8">
-                    결제하기
-                </h1>
+                <h1 className="text-3xl font-semibold mb-8">결제하기</h1>
 
                 {errorMsg && (
                     <div className="text-sm text-red-400 mb-6">
@@ -370,9 +438,15 @@ export default function PopCheckoutPage() {
                     </div>
                 )}
 
-                {!errorMsg && (
+                {!errorMsg && loadingItem && (
+                    <div className="text-sm text-neutral-400 mb-6">
+                        상품 정보를 불러오는 중입니다...
+                    </div>
+                )}
+
+                {!errorMsg && !loadingItem && (
                     <div className="flex flex-col gap-8">
-                        {/* 주문자 (JWT 기반 /member/readOne) */}
+                        {/* 주문자 */}
                         <section className="border-t border-neutral-800 pt-6">
                             <div className="flex justify-between items-start mb-4">
                                 <div>
@@ -408,7 +482,7 @@ export default function PopCheckoutPage() {
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img
                                             src={thumbnail}
-                                            alt={itemName}
+                                            alt={itemName || "POP 상품"}
                                             className="w-full h-full object-cover"
                                         />
                                     ) : (
@@ -418,39 +492,54 @@ export default function PopCheckoutPage() {
                                 <div className="flex-1 flex flex-col justify-between">
                                     <div>
                                         <div className="text-sm font-semibold">
-                                            {itemName}
+                                            {itemName || "POP 이용권"}
+                                        </div>
+                                        <div className="mt-1 text-xs text-neutral-400">
+                                            {quantity}인권 · 1개월 이용
                                         </div>
                                         <div className="mt-2 text-sm font-semibold">
-                                            {formatPrice(price)}
+                                            {unitPrice > 0
+                                                ? formatPrice(unitPrice)
+                                                : "-"}
                                             <span className="ml-1 text-[11px] text-neutral-500">
                                                 (세금 포함가)
                                             </span>
-                                        </div>
-                                        <div className="mt-1 text-xs text-neutral-400">
-                                            수량 {quantity}개
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </section>
 
-                        {/* 선택한 스타 */}
+                        {/* 선택한 스타 (고정 표시용) */}
                         <section className="border-t border-neutral-800 pt-6">
                             <div className="text-sm text-neutral-400 mb-3">
                                 선택한 스타
                             </div>
                             <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-full bg-neutral-700 flex items-center justify-center text-xs">
-                                    {variant.charAt(0) || "S"}
+
+                                {/* 오른쪽 칩 리스트 */}
+                                <div className="flex flex-wrap gap-2">
+                                    {selectedPlayers.map((p) => (
+                                        <div
+                                            key={p}
+                                            className="flex items-center gap-2 rounded-full bg-neutral-900 border border-neutral-700 px-3 py-1 text-xs"
+                                        >
+                                            <span className="w-5 h-5 rounded-full bg-neutral-700 flex items-center justify-center text-[10px] text-neutral-200">
+                                                {p.charAt(0)}
+                                            </span>
+                                            <span className="text-neutral-100">
+                                                {p}
+                                            </span>
+                                        </div>
+                                    ))}
+
+                                    {selectedPlayers.length === 0 && (
+                                        <span className="text-xs text-neutral-500">
+                                            선택된 스타가 없습니다. POP 페이지에서
+                                            다시 시도해 주세요.
+                                        </span>
+                                    )}
                                 </div>
-                                <input
-                                    className="bg-neutral-900 border border-neutral-700 rounded-full px-4 py-2 text-xs min-w-[140px]"
-                                    placeholder="스타 이름을 입력해 주세요"
-                                    value={variant}
-                                    onChange={(e) =>
-                                        setVariant(e.target.value)
-                                    }
-                                />
                             </div>
                         </section>
 
@@ -467,7 +556,8 @@ export default function PopCheckoutPage() {
                                             name="paymentMethod"
                                             className="accent-red-500"
                                             checked={
-                                                paymentMethod === "TOSS_QUICK"
+                                                paymentMethod ===
+                                                "TOSS_QUICK"
                                             }
                                             onChange={() =>
                                                 setPaymentMethod("TOSS_QUICK")
@@ -628,9 +718,7 @@ export default function PopCheckoutPage() {
                                         setAgreeAll(e.target.checked)
                                     }
                                 />
-                                <span>
-                                    주문 내용과 약관에 동의합니다.
-                                </span>
+                                <span>주문 내용과 약관에 동의합니다.</span>
                             </label>
 
                             <button

@@ -91,7 +91,7 @@ const STORY_CARDS: StoryCard[] = [
     id: 1,
     label: "멤버십 회원 전용",
     nickname: "Gumayusi",
-    avatarUrl: "/story/gumausi.jpg",
+    avatarUrl: "/story/gumayusi.jpg",
     locked: true,
     gradientFrom: "#FF7A00",
     gradientTo: "#FF3D00",
@@ -166,7 +166,7 @@ const INSTAGRAM_CARDS: SnsImageCard[] = [
   },
   {
     id: 2,
-    imageUrl: "/story/gumausi.jpg",
+    imageUrl: "/story/gumayusi.jpg",
     alt: "T1 인스타 카드 2",
     linkUrl: "https://www.instagram.com/t1lol",
   },
