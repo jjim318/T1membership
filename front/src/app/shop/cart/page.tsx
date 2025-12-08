@@ -45,6 +45,16 @@ function getMemberEmailFromToken(): string | null {
     }
 }
 
+// ===== Authorization 헤더 유틸 =====
+function getAuthHeaders() {
+    if (typeof window === "undefined") return {};
+    const token = localStorage.getItem("accessToken");
+    if (!token) return {};
+    return {
+        Authorization: `Bearer ${token}`,
+    };
+}
+
 export default function CartPage() {
     const router = useRouter();
 
@@ -77,10 +87,14 @@ export default function CartPage() {
                     return;
                 }
 
-                const res = await apiClient.get<ApiResult<CartItem[]>>("/cart");
+                const res = await apiClient.get<ApiResult<CartItem[]>>("/cart", {
+                    headers: getAuthHeaders(),
+                });
 
                 if (!res.data.isSuccess) {
-                    setErrorMsg(res.data.resMessage ?? "장바구니 정보를 불러오지 못했습니다.");
+                    setErrorMsg(
+                        res.data.resMessage ?? "장바구니 정보를 불러오지 못했습니다."
+                    );
                     setItems([]);
                     return;
                 }
@@ -159,9 +173,15 @@ export default function CartPage() {
                 )
             );
 
-            await apiClient.put(`/cart/${encodeURIComponent(memberEmail)}/items/${item.cartNo}`, {
-                quantity: nextQty,
-            });
+            await apiClient.put(
+                `/cart/${encodeURIComponent(memberEmail)}/items/${item.cartNo}`,
+                {
+                    quantity: nextQty,
+                },
+                {
+                    headers: getAuthHeaders(),
+                }
+            );
         } catch (e) {
             console.error("[updateQuantity] 실패, 롤백", e);
             // 실패 시 다시 리로드
@@ -185,7 +205,10 @@ export default function CartPage() {
 
         try {
             await apiClient.delete(
-                `/cart/${encodeURIComponent(memberEmail)}/items/${deleteTarget.cartNo}`
+                `/cart/${encodeURIComponent(memberEmail)}/items/${deleteTarget.cartNo}`,
+                {
+                    headers: getAuthHeaders(),
+                }
             );
 
             setItems((prev) =>
@@ -201,14 +224,16 @@ export default function CartPage() {
         }
     };
 
-    // ====== 구매하기 (아직 백엔드 연동 전 – 나중에 prepareOrder랑 연결) ======
+    // ====== 구매하기 → /order/goods/checkout 으로 이동 ======
     const handleCheckout = () => {
         if (selectedIds.length === 0) {
             alert("구매할 상품을 선택해주세요.");
             return;
         }
-        // TODO: /order/prepare 연동
-        alert("나중에 주문 페이지와 연동할 예정입니다.");
+
+        // 선택된 cartNo들을 쿼리스트링으로 넘김
+        const query = `cartNos=${selectedIds.join(",")}`;
+        router.push(`/order/goods/checkout?${query}`);
     };
 
     // ====== 화면 분기 ======
@@ -243,7 +268,7 @@ export default function CartPage() {
     }
 
     return (
-        <div className="min-h-screen bg-black text-white">
+        <div className="min-h-screen bg-black text:white">
             {/* 🔥 고정 헤더 높이만큼 그냥 빈 박스로 밀어버리기 */}
             <main className="mx-auto mt-[112px] flex max-w-4xl flex-col px-6 pb-24">
                 {/* 제목 */}
@@ -287,7 +312,6 @@ export default function CartPage() {
                                 />
                             </div>
 
-                            {/* 🔥 왼쪽: 썸네일 - 문구 - 수량박스 */}
                             {/* 🔥 왼쪽: 썸네일 - 수량박스만 남김 */}
                             <div className="flex w-32 flex-col gap-2">
                                 {/* 썸네일 */}
@@ -316,8 +340,8 @@ export default function CartPage() {
                                         -
                                     </button>
                                     <span className="text-xs text-white">
-            {item.quantity}
-        </span>
+                                        {item.quantity}
+                                    </span>
                                     <button
                                         type="button"
                                         className="flex h-full w-8 items-center justify-center text-xs text-zinc-300 hover:bg-zinc-800"
@@ -330,7 +354,6 @@ export default function CartPage() {
 
                             {/* 🔥 오른쪽: 삭제버튼 - 멤버십문구+가입하기 - 가격 */}
                             <div className="flex flex-1 flex-col justify-between">
-
                                 {/* 상품명 + 삭제 버튼 */}
                                 <div className="flex items-start justify-between">
                                     <div className="space-y-1">
@@ -343,7 +366,9 @@ export default function CartPage() {
                                             </p>
                                         )}
                                         {item.soldOut && (
-                                            <p className="text-[11px] text-red-400">품절</p>
+                                            <p className="text-[11px] text-red-400">
+                                                품절
+                                            </p>
                                         )}
                                     </div>
 
@@ -357,16 +382,18 @@ export default function CartPage() {
                                     </button>
                                 </div>
 
-                                {/* 🔥 멤버십 문구 + 가입하기 버튼을 같은 줄로 배치 */}
+                                {/* 🔥 멤버십 문구 + 가입하기 버튼 */}
                                 {item.membershipOnly && (
                                     <div className="mt-3 flex items-center justify-between">
-            <span className="text-[11px] text-red-500 whitespace-nowrap">
-                멤버십 가입 후 구매할 수 있는 상품이에요.
-            </span>
+                                        <span className="text-[11px] text-red-500 whitespace-nowrap">
+                                            멤버십 가입 후 구매할 수 있는 상품이에요.
+                                        </span>
 
                                         <button
                                             type="button"
-                                            onClick={() => router.push("/membership/all")}
+                                            onClick={() =>
+                                                router.push("/membership/all")
+                                            }
                                             className="text-[11px] font-semibold text-red-300 hover:text-red-200"
                                         >
                                             가입하기 &gt;
@@ -381,7 +408,6 @@ export default function CartPage() {
                                     </p>
                                 </div>
                             </div>
-
                         </div>
                     ))}
 
@@ -392,15 +418,17 @@ export default function CartPage() {
                     )}
                 </section>
 
-
                 {/* 하단 요약 & 버튼 (고정푸터 X) */}
                 <section className="mt-10 pt-4 text-xs text-zinc-300">
                     <div className="mb-3 flex items-center justify-between">
                         <div>
-              <span className="font-semibold text-white">
-                {totalQuantity}개
-              </span>
-                            <span className="ml-1 text-zinc-400"> (배송비 미포함)</span>
+                            <span className="font-semibold text-white">
+                                {totalQuantity}개
+                            </span>
+                            <span className="ml-1 text-zinc-400">
+                                {" "}
+                                (배송비 미포함)
+                            </span>
                         </div>
                         <div className="text-right text-sm font-semibold">
                             {totalAmount.toLocaleString("ko-KR")}원
@@ -428,8 +456,7 @@ export default function CartPage() {
             {/* ===== 삭제 확인 모달 ===== */}
             {deleteTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                    <div
-                        className="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 px-6 py-5 text-sm text-zinc-100">
+                    <div className="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-900 px-6 py-5 text-sm text-zinc-100">
                         <p className="mb-6 text-center">
                             이 상품을 장바구니에서 삭제할까요?
                         </p>
@@ -456,8 +483,7 @@ export default function CartPage() {
             {/* ===== 배송비 정보 모달 ===== */}
             {shippingInfoOpen && (
                 <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-                    <div
-                        className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 px-6 py-5 text-sm text-zinc-100">
+                    <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 px-6 py-5 text-sm text-zinc-100">
                         <div className="mb-4 flex items-center justify-between">
                             <span className="text-sm font-semibold">배송비 정보</span>
                             <button
