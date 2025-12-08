@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 
@@ -126,14 +125,15 @@ export default function AdminBannerPage() {
                 // 이미 선택됨 → 해제
                 const clone = [...prev];
                 clone.splice(idx, 1);
-                // 순서 다시 1부터 정렬해도 됨
+                // 순서 다시 1부터 정렬
                 return clone.map((b, i) => ({
                     ...b,
                     bannerOrder: i + 1,
                 }));
             } else {
                 // 새로 선택
-                const raw = content.thumbnailUrl || "/content/banner-placeholder-1.jpg";
+                const raw =
+                    content.thumbnailUrl || "/content/banner-placeholder-1.jpg";
                 const resolved = raw.startsWith("http")
                     ? raw
                     : `${API_BASE}${raw}`;
@@ -257,11 +257,11 @@ export default function AdminBannerPage() {
                                                 }`}
                                             >
                                                 <div className="relative h-12 w-20 overflow-hidden rounded bg-zinc-900">
-                                                    <Image
+                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                    <img
                                                         src={resolvedThumb}
                                                         alt={c.boardTitle}
-                                                        fill
-                                                        className="object-cover"
+                                                        className="h-full w-full object-cover"
                                                     />
                                                 </div>
                                                 <div className="flex-1 overflow-hidden text-xs">
@@ -326,11 +326,11 @@ export default function AdminBannerPage() {
                                             className="flex items-center gap-3 rounded-lg bg-zinc-800 p-2"
                                         >
                                             <div className="relative h-14 w-24 overflow-hidden rounded bg-zinc-900">
-                                                <Image
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img
                                                     src={b.thumbnailUrl}
                                                     alt={b.title}
-                                                    fill
-                                                    className="object-cover"
+                                                    className="h-full w-full object-cover"
                                                 />
                                             </div>
                                             <div className="flex-1 overflow-hidden">

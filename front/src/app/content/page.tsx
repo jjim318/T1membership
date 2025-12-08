@@ -107,10 +107,10 @@ const DEFAULT_BANNER_ITEMS: BannerItem[] = [
 // 공통 컴포넌트
 // =======================
 
-// 🔥 배너는 props로 받아서, 없으면 DEFAULT_BANNER_ITEMS 사용
-// 🔥 배너 컴포넌트만 이렇게 교체
+// 🔥 배너 컴포넌트
 function ContentHeroSlider({ items }: { items: BannerItem[] }) {
     const [activeIndex, setActiveIndex] = useState(0);
+    const router = useRouter(); // ✅ 여기 추가
 
     const data = items.length > 0 ? items : DEFAULT_BANNER_ITEMS;
     const active = data[activeIndex];
@@ -125,12 +125,17 @@ function ContentHeroSlider({ items }: { items: BannerItem[] }) {
         return () => window.clearInterval(timer);
     }, [data.length]);
 
+    // ✅ 썸네일 클릭 시 컨텐츠 상세로 이동
+    const handleClickBanner = () => {
+        if (!active.boardNo || active.boardNo === 0) return; // 더미 배너 방지
+        router.push(`/content/${active.boardNo}`);
+    };
+
     return (
         <section className="mx-auto mt-0 flex max-w-6xl flex-col gap-4 px-4 pb-10 pt-0">
-            {/* 🔥 배너 높이 조절: aspect + max-h */}
             <div className="relative w-full overflow-hidden bg-black aspect-[21/8] max-h-[520px]">
 
-                {/* ====== ✅ 1. 블러 배경 (이게 지금 안 먹고 있었음) ====== */}
+                {/* 1) 전체 배경 블러 */}
                 <div className="absolute inset-0 z-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -140,21 +145,34 @@ function ContentHeroSlider({ items }: { items: BannerItem[] }) {
                     />
                 </div>
 
-                {/* ====== ✅ 2. 그라데이션을 '오른쪽까지 더 깊게' ====== */}
-                <div
-                    className="absolute inset-y-0 left-0 z-10 w-[70%] bg-gradient-to-r from-black via-black/90 to-transparent"/>
+                {/* 2) 왼쪽 여백을 완전 검정으로 덮는 레이어 */}
+                <div className="absolute inset-y-0 left-0 z-10 w-[38%] bg-black" />
 
-                {/* ====== ✅ 3. 오른쪽 원본 썸네일 (그 위에 올라감) ====== */}
-                <div className="absolute inset-y-0 right-0 z-20 flex items-center justify-end pr-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                        src={active.thumbnailUrl}
-                        alt={active.title}
-                        className="h-full w-auto object-contain"
-                    />
+                {/* 3) 오른쪽 썸네일 + 썸네일 경계에서 시작하는 그라데이션
+                    👉 여기만 클릭 가능하게 처리
+                */}
+                <div
+                    className="absolute inset-y-0 right-0 z-20 flex items-center justify-end cursor-pointer"
+                    onClick={handleClickBanner} // ✅ 여기 클릭 이벤트
+                >
+                    <div className="relative h-full">
+                        {/* 선명한 썸네일 */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                            src={active.thumbnailUrl}
+                            alt={active.title}
+                            className="h-full w-auto object-cover"
+                        />
+
+                        {/* 썸네일 왼쪽 가장자리에서 시작하는 검정 → 투명 그라데이션 */}
+                        <div
+                            className="absolute inset-y-0 left-0 w-[260px]
+                            bg-gradient-to-r from-black via-black/80 to-transparent"
+                        />
+                    </div>
                 </div>
 
-                {/* ====== ✅ 4. 제목을 '중앙 → 위쪽'으로 확실히 이동 ====== */}
+                {/* 4) 텍스트 영역 */}
                 <div className="absolute left-0 top-[18%] z-30 px-8 md:px-12 max-w-md">
                     {active.tag && (
                         <p className="mb-3 text-xs font-medium text-sky-300">
@@ -169,7 +187,7 @@ function ContentHeroSlider({ items }: { items: BannerItem[] }) {
                     </p>
                 </div>
 
-                {/* ====== ✅ 5. 인디케이터 ====== */}
+                {/* 5) 인디케이터 */}
                 <div className="absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 gap-2">
                     {data.map((_, idx) => (
                         <button
@@ -186,6 +204,7 @@ function ContentHeroSlider({ items }: { items: BannerItem[] }) {
         </section>
     );
 }
+
 
 
 function CategoryChipRow() {
@@ -571,6 +590,16 @@ export default function ContentPage() {
                 {/* 관리자만 보이는 상단 버튼들 */}
                 {isContentManager && (
                     <section className="mx-auto flex max-w-6xl justify-end gap-2 px-4 pb-2">
+
+                        {/* ✅ 컨텐츠 수정/삭제 버튼 (맨 오른쪽에 위치) */}
+                        <button
+                            type="button"
+                            onClick={() => router.push("/admin/content/manage")}
+                            className="rounded-full bg-zinc-700 px-4 py-2 text-xs font-semibold text-white hover:bg-zinc-600"
+                        >
+                            컨텐츠 수정/삭제
+                        </button>
+
                         {/* 배너 수정 버튼 */}
                         <button
                             type="button"

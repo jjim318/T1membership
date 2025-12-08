@@ -64,6 +64,50 @@ type PlayerOption = {
     soldOut: boolean;
 };
 
+// ===== POP 전용 타입 & 테이블 =====
+type PopPassCount = 1 | 2 | 3 | 4 | 5;
+
+const POP_PASS_LABELS: Record<PopPassCount, string> = {
+    1: "1인권",
+    2: "2인권",
+    3: "3인권",
+    4: "4인권",
+    5: "5인권",
+};
+
+// 비멤버십 가격
+const POP_PASS_PRICES_NON_MEMBER: Record<PopPassCount, number> = {
+    1: 5500,
+    2: 10000,
+    3: 14500,
+    4: 19000,
+    5: 23500,
+};
+
+// 멤버십 가격
+const POP_PASS_PRICES_MEMBER: Record<PopPassCount, number> = {
+    1: 4400,
+    2: 8000,
+    3: 11600,
+    4: 15200,
+    5: 18800,
+};
+
+type PopPlayerOption = {
+    value: string; // 백엔드에 넘길 값
+    label: string; // 화면에 보여줄 이름
+};
+
+const POP_PLAYER_OPTIONS: PopPlayerOption[] = [
+    { value: "DORAN", label: "Doran" },
+    { value: "KERIA", label: "Keria" },
+    { value: "GUMAYUSI", label: "Gumayusi" },
+    { value: "FAKER", label: "Faker" },
+    { value: "ONER", label: "Oner" },
+    { value: "SMASH", label: "Smash" },
+    { value: "PEYZ", label: "Peyz" },
+];
+
 // ===== 상품별 옵션 타입 맵핑 =====
 const OPTION_KIND_TABLE: Record<number, OptionKind> = {
     1: "SIZE", // 저지
@@ -180,6 +224,14 @@ export default function ShopDetailPage() {
     const [quantity, setQuantity] = useState(1);
     const [optionError, setOptionError] = useState<string | null>(null);
 
+    // ===== POP 전용 상태 =====
+    const [selectedPopCount, setSelectedPopCount] =
+        useState<PopPassCount | null>(null);
+    const [selectedPopPlayers, setSelectedPopPlayers] = useState<string[]>([]);
+    const [isMembershipUserForPop, setIsMembershipUserForPop] = useState<
+        boolean | null
+    >(null);
+
     // ===== 멤버십 전용 안내 모달 =====
     const [showMembershipModal, setShowMembershipModal] = useState(false);
 
@@ -190,6 +242,9 @@ export default function ShopDetailPage() {
     // 장바구니 토스트
     const [showCartToast, setShowCartToast] = useState(false);
     const cartToastTimerRef = useRef<number | null>(null);
+
+    const isMembershipItem = item?.itemCategory === "MEMBERSHIP";
+    const isPopItem = item?.itemCategory === "POP";
 
     // ===== 데이터 로딩 =====
     useEffect(() => {
@@ -218,6 +273,46 @@ export default function ShopDetailPage() {
 
         load();
     }, [itemNo]);
+
+    // POP용 멤버십 여부 체크 (할인 적용)
+    useEffect(() => {
+        if (!isPopItem) return;
+        if (typeof window === "undefined") return;
+
+        const token = localStorage.getItem("accessToken");
+        if (!token) {
+            setIsMembershipUserForPop(false);
+            return;
+        }
+
+        const mt = getMembershipTypeFromClient();
+        if (mt && mt !== "NO_MEMBERSHIP") {
+            setIsMembershipUserForPop(true);
+            return;
+        }
+
+        // JWT에 정보가 없으면 서버에 한 번 물어본다
+        (async () => {
+            try {
+                const res =
+                    await apiClient.get<ApiResult<MemberReadOneRes>>(
+                        "/member/readOne",
+                    );
+                const membershipType = res.data.result?.membershipType;
+                if (
+                    membershipType &&
+                    membershipType !== "NO_MEMBERSHIP"
+                ) {
+                    setIsMembershipUserForPop(true);
+                } else {
+                    setIsMembershipUserForPop(false);
+                }
+            } catch (e) {
+                console.error("POP 멤버십 여부 조회 실패 =", e);
+                setIsMembershipUserForPop(false);
+            }
+        })();
+    }, [isPopItem]);
 
     // 토스트 타이머 정리
     useEffect(() => {
@@ -249,10 +344,6 @@ export default function ShopDetailPage() {
     }
 
     // ===== 여기부터는 item 이 확실히 존재 =====
-    const isMembershipItem = item.itemCategory === "MEMBERSHIP";
-    const isPopItem = item.itemCategory === "POP";
-
-    // 이미지 정리
     const sortedImages = [...(item.images ?? [])].sort(
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
     );
@@ -279,10 +370,11 @@ export default function ShopDetailPage() {
     // 👉 MD만 멤버십 전용 상품
     const isMembershipOnly = item.itemCategory === "MD";
 
-    // 이 상품이 어떤 옵션 구조인지
+    const isPop = item.itemCategory === "POP";
+
+    // 이 상품이 어떤 옵션 구조인지 (POP은 QTY_ONLY로 고정이지만, 일반 모달에서는 사용 안 함)
     let optionKind: OptionKind;
-    if (isPopItem) {
-        // POP 이용권은 수량만 선택
+    if (isPop) {
         optionKind = "QTY_ONLY";
     } else {
         optionKind = OPTION_KIND_TABLE[item.itemNo] ?? "SIZE";
@@ -313,13 +405,25 @@ export default function ShopDetailPage() {
         setSelectedSize(null);
         setSelectedPlayer(null);
         setQuantity(1);
+
+        // POP 전용 상태 초기화
+        if (isPop) {
+            setSelectedPopCount(null);
+            setSelectedPopPlayers([]);
+        }
     };
 
     const closeOptionModal = () => {
         setIsOptionModalOpen(false);
+        setOptionError(null);
+
+        if (isPop) {
+            setSelectedPopCount(null);
+            setSelectedPopPlayers([]);
+        }
     };
 
-    // ===== 수량 조절 =====
+    // ===== 수량 조절 (일반 상품) =====
     const increaseQty = () => {
         if (optionKind === "PLAYER") return; // 인형은 1개 제한
         setQuantity((q) => q + 1);
@@ -330,7 +434,7 @@ export default function ShopDetailPage() {
         setQuantity((q) => (q > 1 ? q - 1 : 1));
     };
 
-    // 🔥 멤버십 유저인지 /member/readOne으로 확인
+    // 🔥 멤버십 유저인지 /member/readOne으로 확인 (일반 MD용)
     const fetchIsMembershipUser = async (): Promise<
         "YES" | "NO" | "LOGIN_REQUIRED" | "ERROR"
     > => {
@@ -355,9 +459,51 @@ export default function ShopDetailPage() {
         }
     };
 
+    // ===== POP 모달: 선수 선택 토글 =====
+    const togglePopPlayer = (value: string) => {
+        if (!selectedPopCount) return; // 이용권 먼저 선택해야 함
+
+        setSelectedPopPlayers((prev) => {
+            const exists = prev.includes(value);
+            if (exists) {
+                return prev.filter((v) => v !== value);
+            }
+
+            if (prev.length >= selectedPopCount) {
+                return prev; // 최대 인원수까지만
+            }
+
+            return [...prev, value];
+        });
+    };
+
+    const popSelectedCount = selectedPopPlayers.length;
+    const popMaxCount = selectedPopCount ?? 0;
+
+    const isPopBuyEnabled =
+        !!selectedPopCount && popSelectedCount === popMaxCount;
+
+    const getCurrentPopPrice = (): number => {
+        if (!selectedPopCount) return item.itemPrice; // 기본값: 기존 가격
+
+        const isMember = isMembershipUserForPop === true;
+        const table = isMember
+            ? POP_PASS_PRICES_MEMBER
+            : POP_PASS_PRICES_NON_MEMBER;
+
+        return table[selectedPopCount];
+    };
+
+    // ===== 공통 구매 처리 =====
     const handleConfirmWithOptions = async (mode: PurchaseMode) => {
         if (!item) {
             setOptionError("상품 정보를 불러오지 못했습니다.");
+            return;
+        }
+
+        // POP는 전용 핸들러로 보냄
+        if (isPop && mode === "BUY") {
+            await handlePopBuy();
             return;
         }
 
@@ -433,32 +579,9 @@ export default function ShopDetailPage() {
             setOptionError(null);
 
             // ============================
-            // POP + BUY  → /order/pop/checkout
-            // ============================
-            if (isPopItem && mode === "BUY") {
-                const params = new URLSearchParams({
-                    itemNo: String(item.itemNo),
-                    quantity: String(qty),
-                    itemName: item.itemName,
-                    price: String(item.itemPrice),
-                });
-
-                if (optionKind === "PLAYER" && selectedPlayer) {
-                    params.append("player", selectedPlayer);
-                }
-                if (optionKind === "SIZE" && selectedSize) {
-                    params.append("size", selectedSize);
-                }
-
-                setIsOptionModalOpen(false);
-                router.push(`/order/pop/checkout?${params.toString()}`);
-                return;
-            }
-
-            // ============================
             // CART 모드: 장바구니 API
             // ============================
-            if (mode === "CART" && !isPopItem) {
+            if (mode === "CART") {
                 const url = `/cart/${encodeURIComponent(memberEmail)}/items`;
 
                 const res = await apiClient.post<ApiResult<unknown>>(
@@ -556,7 +679,53 @@ export default function ShopDetailPage() {
         }
     };
 
-    // ===== 금액 계산 (옵션 타입별로 단가 결정) =====
+    // ===== POP BUY 처리 (이용권 + 선수들 같이 넘김) =====
+    const handlePopBuy = async () => {
+        if (!item) return;
+
+        // 로그인 체크
+        const hasToken =
+            typeof window !== "undefined" &&
+            !!localStorage.getItem("accessToken");
+        if (!hasToken) {
+            setShowLoginRequiredModal(true);
+            return;
+        }
+
+        // 필수 선택 체크
+        if (!selectedPopCount) {
+            setOptionError("이용권을 선택해주세요.");
+            return;
+        }
+        if (selectedPopPlayers.length !== selectedPopCount) {
+            setOptionError("선수를 모두 선택해주세요.");
+            return;
+        }
+
+        const isMember = isMembershipUserForPop === true;
+        const priceTable = isMember
+            ? POP_PASS_PRICES_MEMBER
+            : POP_PASS_PRICES_NON_MEMBER;
+        const finalPrice = priceTable[selectedPopCount]; // ← 이건 백엔드에서 다시 써도 되고, 안 써도 됨
+
+        const passCount = selectedPopCount;
+        const players = selectedPopPlayers.join(","); // "DORAN,KERIA,FAKER" 이런 식
+
+        // 🔥 여기만 바꾸는 거임
+        const params = new URLSearchParams({
+            popId: String(item.itemNo),   // PopCheckoutPage에서 popId로 읽음
+            qty: String(passCount),       // PopCheckoutPage에서 qty로 읽음
+            variant: players,             // PopCheckoutPage에서 variant로 읽음
+            // 필요하면 참고용으로만 추가 가능 (지금 checkout 코드는 안 씀):
+            // price: String(finalPrice),
+            // itemName: item.itemName,
+        });
+
+        setIsOptionModalOpen(false);
+        router.push(`/order/pop/checkout?${params.toString()}`);
+    };
+
+    // ===== 금액 계산 (옵션 타입별로 단가 결정) - 일반 상품 =====
     const calcTotalPrice = (): number => {
         let unitPrice = item.itemPrice;
 
@@ -644,7 +813,7 @@ export default function ShopDetailPage() {
 
                 {/* 썸네일 아래 영역 */}
                 <section className="mb-8 border-b border-zinc-800 pb-6">
-                    {isPopItem ? (
+                    {isPop ? (
                         <>
                             <p className="text-xs text-zinc-400">POP 구독형 이용권</p>
                             <h1 className="mt-2 text-lg font-semibold leading-snug">
@@ -686,7 +855,7 @@ export default function ShopDetailPage() {
                     )}
 
                     {/* 배송 관련 문구: POP이 아닐 때만 표시 */}
-                    {!isPopItem && (
+                    {!isPop && (
                         <div className="mt-6 text-xs">
                             <div className="flex items-center justify-between">
                                 <div className="flex gap-4">
@@ -735,7 +904,8 @@ export default function ShopDetailPage() {
                                             해외 배송
                                         </p>
                                         <p className="mt-1">
-                                            DHL / 배송 국가 및 무게에 따라 배송비가 책정됩니다.
+                                            DHL / 배송 국가 및 무게에 따라 배송비가
+                                            책정됩니다.
                                         </p>
                                         <p className="mt-1 inline-flex rounded-full border border-zinc-700 px-2 py-[2px] text-[10px] text-zinc-300">
                                             출고 이후 5영업일 이상 소요 예상
@@ -770,7 +940,7 @@ export default function ShopDetailPage() {
                 </section>
 
                 {/* POP 전용 유의사항 */}
-                {isPopItem && (
+                {isPop && (
                     <section className="mt-8 pb-10 text-[11px] leading-relaxed text-zinc-400">
                         <p className="mb-2 font-semibold text-zinc-200">
                             유의 사항
@@ -803,226 +973,398 @@ export default function ShopDetailPage() {
             {isOptionModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="w-full max-w-md rounded-2xl bg-zinc-900 px-5 py-4 shadow-xl border border-zinc-700">
-                        {/* 헤더 */}
-                        <div className="mb-3 flex items-center justify-between">
-                            <span className="text-sm text-zinc-300">{optionTitle}</span>
-                            <button
-                                type="button"
-                                onClick={closeOptionModal}
-                                className="text-zinc-400 hover:text-zinc-200 text-lg leading-none"
-                            >
-                                ×
-                            </button>
-                        </div>
-
-                        {/* 옵션 선택 영역 (SIZE / PLAYER) */}
-                        {optionKind === "SIZE" && (
-                            <div className="mb-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowOptionList((v) => !v)}
-                                    className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-                                >
-                                    <span>
-                                        {selectedSize
-                                            ? `size / ${selectedSize}`
-                                            : "size 선택"}
+                        {isPop ? (
+                            // ===========================
+                            // POP 전용 모달
+                            // ===========================
+                            <>
+                                {/* 헤더 */}
+                                <div className="mb-3 flex items-center justify-between">
+                                    <span className="text-sm text-zinc-300">
+                                        구매하기
                                     </span>
-                                    <span className="text-xs text-zinc-400">▼</span>
-                                </button>
-
-                                {showOptionList && (
-                                    <div className="mt-2 space-y-1">
-                                        {sizeOptions.map((s) => (
-                                            <button
-                                                key={s.value}
-                                                type="button"
-                                                disabled={s.soldOut}
-                                                onClick={() => {
-                                                    if (s.soldOut) return;
-                                                    setSelectedSize(s.value);
-                                                    setShowOptionList(false);
-                                                }}
-                                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                                                    s.soldOut
-                                                        ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
-                                                        : selectedSize === s.value
-                                                            ? "border-red-500 bg-zinc-800 text-white"
-                                                            : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-                                                }`}
-                                            >
-                                                <span>
-                                                    {s.label}
-                                                    {s.soldOut && " [품절]"}
-                                                </span>
-                                                <span>
-                                                    {s.price.toLocaleString("ko-KR")}
-                                                    원
-                                                </span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {optionKind === "PLAYER" && (
-                            <div className="mb-4">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowOptionList((v) => !v)}
-                                    className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-                                >
-                                    <span>
-                                        {selectedPlayer
-                                            ? `PLAYER / ${selectedPlayer}`
-                                            : "PLAYER 선택"}
-                                    </span>
-                                    <span className="text-xs text-zinc-400">▼</span>
-                                </button>
-
-                                {showOptionList && (
-                                    <div className="mt-2 space-y-1">
-                                        {playerOptions.map((p) => (
-                                            <button
-                                                key={p.value}
-                                                type="button"
-                                                disabled={p.soldOut}
-                                                onClick={() => {
-                                                    if (p.soldOut) return;
-                                                    setSelectedPlayer(p.value);
-                                                    setShowOptionList(false);
-                                                    setQuantity(1); // 인당 1개 고정
-                                                }}
-                                                className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
-                                                    p.soldOut
-                                                        ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
-                                                        : selectedPlayer === p.value
-                                                            ? "border-red-500 bg-zinc-800 text-white"
-                                                            : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-                                                }`}
-                                            >
-                                                <span>
-                                                    {p.label}
-                                                    {p.soldOut && " [품절]"}
-                                                </span>
-                                                <span>
-                                                    {p.price.toLocaleString("ko-KR")}
-                                                    원
-                                                </span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* QTY_ONLY는 별도 옵션 선택 UI 없음 */}
-
-                        {/* 선택된 옵션 / 수량 & 금액 */}
-                        {hasSelection && (
-                            <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-3">
-                                <div className="mb-2 flex items-center justify-between text-sm text-zinc-100">
-                                    <span>
-                                        {optionKind === "SIZE" &&
-                                            selectedSize &&
-                                            `size / ${selectedSize}`}
-                                        {optionKind === "PLAYER" &&
-                                            selectedPlayer &&
-                                            `PLAYER / ${selectedPlayer}`}
-                                        {optionKind === "QTY_ONLY" && item.itemName}
-                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={closeOptionModal}
+                                        className="text-zinc-400 hover:text-zinc-200 text-lg leading-none"
+                                    >
+                                        ×
+                                    </button>
                                 </div>
 
-                                <div className="flex items-center justify-between">
-                                    {/* 수량 조절 */}
-                                    <div className="inline-flex items-center rounded-md border border-zinc-700">
-                                        <button
-                                            type="button"
-                                            onClick={decreaseQty}
-                                            disabled={optionKind === "PLAYER"}
-                                            className={`px-3 py-1 text-sm ${
-                                                optionKind === "PLAYER"
-                                                    ? "text-zinc-500 cursor-not-allowed"
-                                                    : "text-zinc-300 hover:bg-zinc-800"
-                                            }`}
-                                        >
-                                            -
-                                        </button>
-                                        <span className="px-4 py-1 text-sm text-white">
-                                            {optionKind === "PLAYER" ? 1 : quantity}
+                                {/* 이용 기간 (고정 1개월 표기) */}
+                                <div className="mb-4">
+                                    <p className="text-xs text-zinc-400">
+                                        이용 기간
+                                    </p>
+                                    <p className="mt-1 text-sm text-zinc-100">
+                                        1개월
+                                    </p>
+                                </div>
+
+                                {/* 이용권 선택 */}
+                                <div className="mb-4">
+                                    <button
+                                        type="button"
+                                        className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                                    >
+                                        <span>이용권 선택</span>
+                                        <span className="text-xs text-zinc-400">
+                                            {selectedPopCount
+                                                ? `${POP_PASS_LABELS[selectedPopCount]} / ${getCurrentPopPrice().toLocaleString(
+                                                    "ko-KR",
+                                                )}원`
+                                                : "선택해주세요"}
                                         </span>
-                                        <button
-                                            type="button"
-                                            onClick={increaseQty}
-                                            disabled={optionKind === "PLAYER"}
-                                            className={`px-3 py-1 text-sm ${
-                                                optionKind === "PLAYER"
-                                                    ? "text-zinc-500 cursor-not-allowed"
-                                                    : "text-zinc-300 hover:bg-zinc-800"
-                                            }`}
-                                        >
-                                            +
-                                        </button>
+                                    </button>
+
+                                    <div className="mt-2 space-y-1">
+                                        {([1, 2, 3, 4, 5] as PopPassCount[]).map((cnt) => {
+                                            const isActive = selectedPopCount === cnt;
+                                            const isMember = isMembershipUserForPop === true;
+                                            const table = isMember
+                                                ? POP_PASS_PRICES_MEMBER
+                                                : POP_PASS_PRICES_NON_MEMBER;
+                                            const price = table[cnt];
+
+                                            return (
+                                                <button
+                                                    key={cnt}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedPopCount(cnt);        // 여기서도 숫자 그대로
+                                                        setSelectedPopPlayers([]);
+                                                        setOptionError(null);
+                                                    }}
+                                                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                                                        isActive
+                                                            ? "border-red-500 bg-zinc-800 text-white"
+                                                            : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                    }`}
+                                                >
+                                                    <span>{POP_PASS_LABELS[cnt]}</span>
+                                                    <span>{price.toLocaleString("ko-KR")}원</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
 
-                                    {/* 금액 */}
-                                    <span className="text-sm font-semibold text-white">
-                                        {calcTotalPrice().toLocaleString("ko-KR")}원
-                                    </span>
                                 </div>
-                            </div>
-                        )}
 
-                        {/* 에러 메시지 */}
-                        {optionError && (
-                            <p className="mb-2 text-center text-xs text-red-300">
-                                {optionError}
-                            </p>
-                        )}
+                                {/* 스타 선택 */}
+                                <div className="mb-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <p className="text-xs text-zinc-400">
+                                            스타 선택
+                                        </p>
+                                        <p className="text-[11px] text-zinc-400">
+                                            {popSelectedCount}/
+                                            {popMaxCount || "-"}
+                                        </p>
+                                    </div>
 
-                        {/* PLAYER 전용 안내 문구 */}
-                        {optionKind === "PLAYER" && (
-                            <p className="mb-3 text-[11px] text-zinc-400 text-left">
-                                1인당 각 옵션별로 1개까지 구매할 수 있어요.
-                            </p>
-                        )}
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {POP_PLAYER_OPTIONS.map((player) => {
+                                            const active =
+                                                selectedPopPlayers.includes(
+                                                    player.value,
+                                                );
+                                            const disabled = !selectedPopCount;
 
-                        {/* 모달 하단 버튼: POP이면 구매 하나, 나머진 장바구니 + 구매 */}
-                        {isPopItem ? (
-                            <div className="mt-2">
-                                <button
-                                    type="button"
-                                    disabled={cartLoading}
-                                    onClick={() => handleConfirmWithOptions("BUY")}
-                                    className="w-full rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
-                                >
-                                    구매하기
-                                </button>
-                            </div>
+                                            return (
+                                                <button
+                                                    key={player.value}
+                                                    type="button"
+                                                    disabled={disabled}
+                                                    onClick={() =>
+                                                        togglePopPlayer(
+                                                            player.value,
+                                                        )
+                                                    }
+                                                    className={`flex flex-col items-center rounded-xl border px-2 py-2 text-xs ${
+                                                        disabled
+                                                            ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
+                                                            : active
+                                                                ? "border-red-500 bg-zinc-800 text-white"
+                                                                : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                    }`}
+                                                >
+                                                    <div className="mb-1 h-12 w-12 rounded-full bg-zinc-800" />
+                                                    <span>{player.label}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* 안내 문구 */}
+                                <p className="mb-3 text-[11px] text-zinc-400">
+                                    한 번에 1개의 이용권만 구매할 수 있어요. 이미
+                                    구매한 스타의 이용권은 다시 구매할 수 없어요.
+                                </p>
+
+                                {/* 에러 메시지 */}
+                                {optionError && (
+                                    <p className="mb-2 text-center text-xs text-red-300">
+                                        {optionError}
+                                    </p>
+                                )}
+
+                                {/* 하단 가격 + 구매 버튼 */}
+                                <div className="mt-3 flex items-center justify-between">
+                                    <span className="text-sm font-semibold text-white">
+                                        {selectedPopCount
+                                            ? getCurrentPopPrice().toLocaleString(
+                                            "ko-KR",
+                                        ) + "원"
+                                            : ""}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        disabled={!isPopBuyEnabled || cartLoading}
+                                        onClick={handlePopBuy}
+                                        className="ml-3 flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                                    >
+                                        구매하기
+                                    </button>
+                                </div>
+                            </>
                         ) : (
-                            <div className="mt-2 flex gap-3">
-                                <button
-                                    type="button"
-                                    disabled={cartLoading}
-                                    onClick={() => handleConfirmWithOptions("CART")}
-                                    className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
-                                        cartLoading
-                                            ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
-                                            : "border-zinc-500 text-white bg-black hover:bg-zinc-900"
-                                    }`}
-                                >
-                                    장바구니
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={cartLoading}
-                                    onClick={() => handleConfirmWithOptions("BUY")}
-                                    className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
-                                >
-                                    바로 구매
-                                </button>
-                            </div>
+                            // ===========================
+                            // 기존 (MD/일반) 모달
+                            // ===========================
+                            <>
+                                {/* 헤더 */}
+                                <div className="mb-3 flex items-center justify-between">
+                                    <span className="text-sm text-zinc-300">
+                                        {optionTitle}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={closeOptionModal}
+                                        className="text-zinc-400 hover:text-zinc-200 text-lg leading-none"
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+
+                                {/* 옵션 선택 영역 (SIZE / PLAYER) */}
+                                {optionKind === "SIZE" && (
+                                    <div className="mb-4">
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setShowOptionList((v) => !v)
+                                            }
+                                            className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                                        >
+                                            <span>
+                                                {selectedSize
+                                                    ? `size / ${selectedSize}`
+                                                    : "size 선택"}
+                                            </span>
+                                            <span className="text-xs text-zinc-400">
+                                                ▼
+                                            </span>
+                                        </button>
+
+                                        {showOptionList && (
+                                            <div className="mt-2 space-y-1">
+                                                {sizeOptions.map((s) => (
+                                                    <button
+                                                        key={s.value}
+                                                        type="button"
+                                                        disabled={s.soldOut}
+                                                        onClick={() => {
+                                                            if (s.soldOut) return;
+                                                            setSelectedSize(s.value);
+                                                            setShowOptionList(false);
+                                                        }}
+                                                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                                                            s.soldOut
+                                                                ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
+                                                                : selectedSize ===
+                                                                s.value
+                                                                    ? "border-red-500 bg-zinc-800 text-white"
+                                                                    : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                        }`}
+                                                    >
+                                                        <span>
+                                                            {s.label}
+                                                            {s.soldOut && " [품절]"}
+                                                        </span>
+                                                        <span>
+                                                            {s.price.toLocaleString(
+                                                                "ko-KR",
+                                                            )}
+                                                            원
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {optionKind === "PLAYER" && (
+                                    <div className="mb-4">
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setShowOptionList((v) => !v)
+                                            }
+                                            className="flex w-full items-center justify-between rounded-lg border border-zinc-600 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                                        >
+                                            <span>
+                                                {selectedPlayer
+                                                    ? `PLAYER / ${selectedPlayer}`
+                                                    : "PLAYER 선택"}
+                                            </span>
+                                            <span className="text-xs text-zinc-400">
+                                                ▼
+                                            </span>
+                                        </button>
+
+                                        {showOptionList && (
+                                            <div className="mt-2 space-y-1">
+                                                {playerOptions.map((p) => (
+                                                    <button
+                                                        key={p.value}
+                                                        type="button"
+                                                        disabled={p.soldOut}
+                                                        onClick={() => {
+                                                            if (p.soldOut) return;
+                                                            setSelectedPlayer(p.value);
+                                                            setShowOptionList(false);
+                                                            setQuantity(1); // 인당 1개 고정
+                                                        }}
+                                                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                                                            p.soldOut
+                                                                ? "border-zinc-800 bg-zinc-900 text-zinc-500 cursor-not-allowed"
+                                                                : selectedPlayer ===
+                                                                p.value
+                                                                    ? "border-red-500 bg-zinc-800 text-white"
+                                                                    : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                                                        }`}
+                                                    >
+                                                        <span>
+                                                            {p.label}
+                                                            {p.soldOut && " [품절]"}
+                                                        </span>
+                                                        <span>
+                                                            {p.price.toLocaleString(
+                                                                "ko-KR",
+                                                            )}
+                                                            원
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* QTY_ONLY는 별도 옵션 선택 UI 없음 */}
+
+                                {/* 선택된 옵션 / 수량 & 금액 */}
+                                {hasSelection && (
+                                    <div className="mb-4 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-3">
+                                        <div className="mb-2 flex items-center justify-between text-sm text-zinc-100">
+                                            <span>
+                                                {optionKind === "SIZE" &&
+                                                    selectedSize &&
+                                                    `size / ${selectedSize}`}
+                                                {optionKind === "PLAYER" &&
+                                                    selectedPlayer &&
+                                                    `PLAYER / ${selectedPlayer}`}
+                                                {optionKind === "QTY_ONLY" &&
+                                                    item.itemName}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex items-center justify-between">
+                                            {/* 수량 조절 */}
+                                            <div className="inline-flex items-center rounded-md border border-zinc-700">
+                                                <button
+                                                    type="button"
+                                                    onClick={decreaseQty}
+                                                    disabled={optionKind === "PLAYER"}
+                                                    className={`px-3 py-1 text-sm ${
+                                                        optionKind === "PLAYER"
+                                                            ? "text-zinc-500 cursor-not-allowed"
+                                                            : "text-zinc-300 hover:bg-zinc-800"
+                                                    }`}
+                                                >
+                                                    -
+                                                </button>
+                                                <span className="px-4 py-1 text-sm text-white">
+                                                    {optionKind === "PLAYER"
+                                                        ? 1
+                                                        : quantity}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={increaseQty}
+                                                    disabled={optionKind === "PLAYER"}
+                                                    className={`px-3 py-1 text-sm ${
+                                                        optionKind === "PLAYER"
+                                                            ? "text-zinc-500 cursor-not-allowed"
+                                                            : "text-zinc-300 hover:bg-zinc-800"
+                                                    }`}
+                                                >
+                                                    +
+                                                </button>
+                                            </div>
+
+                                            {/* 금액 */}
+                                            <span className="text-sm font-semibold text-white">
+                                                {calcTotalPrice().toLocaleString(
+                                                    "ko-KR",
+                                                )}
+                                                원
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 에러 메시지 */}
+                                {optionError && (
+                                    <p className="mb-2 text-center text-xs text-red-300">
+                                        {optionError}
+                                    </p>
+                                )}
+
+                                {/* PLAYER 전용 안내 문구 */}
+                                {optionKind === "PLAYER" && (
+                                    <p className="mb-3 text-[11px] text-zinc-400 text-left">
+                                        1인당 각 옵션별로 1개까지 구매할 수 있어요.
+                                    </p>
+                                )}
+
+                                {/* 모달 하단 버튼: POP이면 여기 안 쓰고, 나머진 장바구니 + 구매 */}
+                                <div className="mt-2 flex gap-3">
+                                    <button
+                                        type="button"
+                                        disabled={cartLoading}
+                                        onClick={() => handleConfirmWithOptions("CART")}
+                                        className={`flex-1 rounded-xl border px-3 py-2 text-sm font-semibold ${
+                                            cartLoading
+                                                ? "border-zinc-700 text-zinc-400 bg-zinc-900 cursor-not-allowed"
+                                                : "border-zinc-500 text-white bg-black hover:bg-zinc-900"
+                                        }`}
+                                    >
+                                        장바구니
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={cartLoading}
+                                        onClick={() => handleConfirmWithOptions("BUY")}
+                                        className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-300"
+                                    >
+                                        바로 구매
+                                    </button>
+                                </div>
+                            </>
                         )}
                     </div>
                 </div>
@@ -1099,7 +1441,7 @@ export default function ShopDetailPage() {
                         >
                             품절
                         </button>
-                    ) : isPopItem ? (
+                    ) : isPop ? (
                         // 🔥 POP : 장바구니 없이 구매하기만
                         <button
                             type="button"
