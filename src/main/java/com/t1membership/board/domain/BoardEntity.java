@@ -76,6 +76,20 @@ public class BoardEntity extends BaseEntity {
     }
 
     @Column(name = "category_code")
-    private String categoryCode;    // Thind, 온네상이T1, Greeting 등등 
+    private String categoryCode;    // Thind, 온네상이T1, Greeting 등등
+
+    // BoardEntity 내부
+
+    @Column(name = "is_main_banner", nullable = false)
+    private boolean mainBanner = false;
+
+    @Column(name = "banner_order")
+    private Integer bannerOrder;
+
+    public void changeBanner(boolean mainBanner, Integer bannerOrder) {
+        this.mainBanner = mainBanner;
+        this.bannerOrder = bannerOrder;
+    }
+
 
 }
