@@ -104,8 +104,6 @@ const POP_PLAYER_OPTIONS: PopPlayerOption[] = [
     { value: "GUMAYUSI", label: "Gumayusi" },
     { value: "FAKER", label: "Faker" },
     { value: "ONER", label: "Oner" },
-    { value: "SMASH", label: "Smash" },
-    { value: "PEYZ", label: "Peyz" },
 ];
 
 // ===== 상품별 옵션 타입 맵핑 =====
@@ -139,6 +137,16 @@ const PLAYER_TABLE: Record<number, PlayerOption[]> = {
     ],
     // 다른 인형 상품 생기면 여기 추가
 };
+
+const POP_PLAYER_IMAGES: Record<string, string> = {
+    FAKER: "http://localhost:8080/files/faker.png",
+    ONER: "http://localhost:8080/files/oner.png",
+    DORAN: "http://localhost:8080/files/doran.png",
+    GUMAYUSI: "http://localhost:8080/files/gumayusi.png",
+    KERIA: "http://localhost:8080/files/keria.png",
+};
+
+
 
 // JWT(accessToken)에서 이메일(sub or memberEmail) 추출
 function extractEmailFromJwt(token: string | null): string | null {
@@ -1089,7 +1097,17 @@ export default function ShopDetailPage() {
                                                                 : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                                                     }`}
                                                 >
-                                                    <div className="mb-1 h-12 w-12 rounded-full bg-zinc-800" />
+                                                    <div
+                                                        className="mb-1 h-12 w-12 rounded-full bg-zinc-800 overflow-hidden">
+                                                        <img
+                                                            src={
+                                                                POP_PLAYER_IMAGES[player.value] ??
+                                                                "http://localhost:8080/files/default.png"
+                                                            }
+                                                            alt={player.label}
+                                                            className="h-full w-full object-cover"
+                                                        />
+                                                    </div>
                                                     <span>{player.label}</span>
                                                 </button>
                                             );
@@ -1099,7 +1117,7 @@ export default function ShopDetailPage() {
 
                                 {/* 안내 문구 */}
                                 <p className="mb-3 text-[11px] text-zinc-400">
-                                    한 번에 1개의 이용권만 구매할 수 있어요. 이미
+                                한 번에 1개의 이용권만 구매할 수 있어요. 이미
                                     구매한 스타의 이용권은 다시 구매할 수 없어요.
                                 </p>
 
