@@ -13,7 +13,7 @@ interface SummaryOrderRes {
     orderDate: string;        // 주문시각 (LocalDateTime → ISO 문자열)
     orderTotalPrice: number;  // 총 결제 금액
     orderStatus: string;      // 주문 상태 (enum 문자열)
-    itemCount: number;        // 상품 개수
+    itemCount: number;        // 상품 개수(또는 총 수량)
     itemName: string | null;  // 대표 상품 이름
 }
 
@@ -222,58 +222,70 @@ export default function MyOrdersPage() {
                     <>
                         {/* 각 주문 블록 – T1.fan 구조 비슷하게 */}
                         <div className="space-y-8">
-                            {filteredOrders.map((order) => (
-                                <section key={order.orderNo} className="space-y-2">
-                                    {/* 날짜 + 상세 보기 */}
-                                    <div className="flex items-center justify-between text-xs md:text-sm text-zinc-400">
-                                        <span>{formatDate(order.orderDate)}</span>
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                router.push(
-                                                    `/mypage/orders/${order.orderNo}`,
-                                                )
-                                            }
-                                            className="flex items-center gap-1 hover:text-zinc-200"
-                                        >
-                                            <span>상세 보기</span>
-                                            <span>{">"}</span>
-                                        </button>
-                                    </div>
+                            {filteredOrders.map((order) => {
+                                // 🔥 대표 상품명 + 외 N건
+                                const displayName =
+                                    order.itemName == null
+                                        ? "상품명 정보 없음"
+                                        : order.itemCount > 1
+                                            ? `${order.itemName} 외 ${order.itemCount - 1}건`
+                                            : order.itemName;
 
-                                    {/* 주문 카드 */}
-                                    <div className="bg-zinc-900 rounded-2xl p-4 md:p-5">
-                                        {/* 상태 라벨 */}
-                                        <div className="text-[11px] md:text-xs text-zinc-400 mb-2">
-                                            {getStatusLabel(order.orderStatus)}
+                                const quantityText = `총 수량 ${order.itemCount}개`; // itemCount를 총 수량으로 사용
+
+                                return (
+                                    <section key={order.orderNo} className="space-y-2">
+                                        {/* 날짜 + 상세 보기 */}
+                                        <div className="flex items-center justify-between text-xs md:text-sm text-zinc-400">
+                                            <span>{formatDate(order.orderDate)}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    router.push(
+                                                        `/mypage/orders/${order.orderNo}`,
+                                                    )
+                                                }
+                                                className="flex items-center gap-1 hover:text-zinc-200"
+                                            >
+                                                <span>상세 보기</span>
+                                                <span>{">"}</span>
+                                            </button>
                                         </div>
 
-                                        {/* 내용: 썸네일 + 상품명 + 금액/개수 */}
-                                        <div className="flex gap-3">
-                                            {/* 썸네일 – 지금은 기본 T1 로고, 나중에 이미지 필드 생기면 교체 */}
-                                            <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-zinc-800 overflow-hidden flex items-center justify-center flex-shrink-0">
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img
-                                                    src="/icons/t1.png"
-                                                    alt="T1"
-                                                    className="w-10 h-10 opacity-80"
-                                                />
+                                        {/* 주문 카드 */}
+                                        <div className="bg-zinc-900 rounded-2xl p-4 md:p-5">
+                                            {/* 상태 라벨 */}
+                                            <div className="text-[11px] md:text-xs text-zinc-400 mb-2">
+                                                {getStatusLabel(order.orderStatus)}
                                             </div>
 
-                                            {/* 텍스트 영역 */}
-                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                <div className="text-sm md:text-base font-medium truncate">
-                                                    {order.itemName ?? "상품명 정보 없음"}
+                                            {/* 내용: 썸네일 + 상품명 + 금액/개수 */}
+                                            <div className="flex gap-3">
+                                                {/* 썸네일 – 지금은 기본 T1 로고, 나중에 이미지 필드 생기면 교체 */}
+                                                <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-zinc-800 overflow-hidden flex items-center justify-center flex-shrink-0">
+                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                    <img
+                                                        src="/icons/t1.png"
+                                                        alt="T1"
+                                                        className="w-10 h-10 opacity-80"
+                                                    />
                                                 </div>
-                                                <div className="mt-1 text-xs md:text-sm text-zinc-400">
-                                                    {formatMoney(order.orderTotalPrice)}원 ·{" "}
-                                                    {order.itemCount}개
+
+                                                {/* 텍스트 영역 */}
+                                                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                    <div className="text-sm md:text-base font-medium truncate">
+                                                        {displayName}
+                                                    </div>
+                                                    <div className="mt-1 text-xs md:text-sm text-zinc-400">
+                                                        {formatMoney(order.orderTotalPrice)}원 ·{" "}
+                                                        {quantityText}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                </section>
-                            ))}
+                                    </section>
+                                );
+                            })}
                         </div>
 
                         {/* 페이지네이션 */}

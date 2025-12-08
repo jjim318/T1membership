@@ -62,6 +62,20 @@ interface GoodsForm {
     memo: string;
 }
 
+// 🔥 장바구니 API 응답용 (CartPage와 동일 구조만 사용)
+interface CartItemForCheckout {
+    cartNo: number;
+    itemNo: number;
+    itemName: string;
+    thumbnail: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    membershipOnly: boolean;
+    soldOut: boolean;
+    optionLabel: string | null;
+}
+
 // ===== 백엔드 CreateGoodsOrderReq 1:1 매칭 =====
 interface CreateGoodsOrderReq {
     itemId?: number | null;
@@ -157,6 +171,9 @@ export default function GoodsCheckoutPage() {
     const [itemId, setItemId] = useState<number | null>(null);
     const [quantity, setQuantity] = useState<number>(1);
 
+    // 🔥 장바구니로 들어온 경우 선택된 cartNo 목록
+    const [cartItemIds, setCartItemIds] = useState<number[]>([]);
+
     const [data, setData] = useState<CheckoutData | null>(null);
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -199,6 +216,14 @@ export default function GoodsCheckoutPage() {
 
     // 1) 마운트 시 URL 파라미터 파싱 + 주문자/상품 정보 로드
     useEffect(() => {
+        // 🔥 새로 추가: cartNos 파라미터 파싱
+        const cartNosParam = searchParams.get("cartNos");
+        const parsedCartNos =
+            cartNosParam
+                ?.split(",")
+                .map((v) => Number(v))
+                .filter((n) => !Number.isNaN(n)) ?? [];
+
         const itemNoParam = searchParams.get("itemNo");
         const qtyParam = searchParams.get("quantity");
 
@@ -213,11 +238,77 @@ export default function GoodsCheckoutPage() {
                 setLoading(true);
                 setErrorMsg(null);
 
+                // 🔥 1) cartNos 있는 경우: 장바구니 기반 결제
+                if (parsedCartNos.length > 0) {
+                    // 1-1) 회원 정보
+                    const memberRes =
+                        await apiClient.get<ApiResult<MemberMeRes>>(
+                            "/member/readOne"
+                        );
+                    if (!memberRes.data.isSuccess) {
+                        throw new Error(
+                            memberRes.data.resMessage ||
+                            "회원 정보를 불러오지 못했습니다."
+                        );
+                    }
+                    const member = memberRes.data.result;
+
+                    // 1-2) 장바구니 전체 조회 후 선택된 것만 필터
+                    const cartRes =
+                        await apiClient.get<ApiResult<CartItemForCheckout[]>>(
+                            "/cart"
+                        );
+                    if (!cartRes.data.isSuccess) {
+                        throw new Error(
+                            cartRes.data.resMessage ||
+                            "장바구니 정보를 불러오지 못했습니다."
+                        );
+                    }
+
+                    const cartItems = cartRes.data.result ?? [];
+                    const selected = cartItems.filter((ci) =>
+                        parsedCartNos.includes(ci.cartNo)
+                    );
+
+                    if (selected.length === 0) {
+                        throw new Error(
+                            "선택한 장바구니 상품이 없습니다."
+                        );
+                    }
+
+                    const items: CheckoutItem[] = selected.map((ci) => ({
+                        itemNo: ci.itemNo,
+                        imageUrl: ci.thumbnail,
+                        title: ci.itemName,
+                        subtitle: ci.optionLabel,
+                        description: null,
+                        price: ci.unitPrice,
+                        quantity: ci.quantity,
+                    }));
+
+                    const totalAmount = items.reduce(
+                        (sum, i) => sum + i.price * i.quantity,
+                        0
+                    );
+
+                    const checkoutData: CheckoutData = {
+                        buyerName: member.memberName,
+                        buyerEmail: member.memberEmail,
+                        items,
+                        totalAmount,
+                    };
+
+                    setCartItemIds(parsedCartNos);
+                    setData(checkoutData);
+                    return; // 🔥 장바구니 모드 끝
+                }
+
+                // 🔥 2) cartNos 없으면 기존 단건구매 로직 그대로
                 if (!parsedItemId) {
                     throw new Error("주문할 상품 정보가 없습니다.");
                 }
 
-                // 1) 회원 정보
+                // 2-1) 회원 정보
                 const memberRes =
                     await apiClient.get<ApiResult<MemberMeRes>>(
                         "/member/readOne"
@@ -230,7 +321,7 @@ export default function GoodsCheckoutPage() {
                 }
                 const member = memberRes.data.result;
 
-                // 2) 상품 상세
+                // 2-2) 상품 상세
                 const itemRes =
                     await apiClient.get<ApiResult<ItemDetailRes>>(
                         `/item/${parsedItemId}`
@@ -318,17 +409,16 @@ export default function GoodsCheckoutPage() {
     // ===== 주문 생성 (/order/goods - CreateOrderReq<Goods> 구조로 전송) =====
     const createGoodsOrder = async (): Promise<number> => {
         if (!data) throw new Error("결제 데이터가 없습니다.");
-        if (!itemId) throw new Error("상품 정보가 없습니다.");
+        if (!itemId && cartItemIds.length === 0) {
+            throw new Error("상품 정보가 없습니다.");
+        }
 
         const err = validateGoodsForm();
         if (err) throw new Error(err);
 
-        // 1) payload 부분만 먼저 만든다
+        // 1) payload 기본 필드
         const payload: CreateGoodsOrderReq = {
-            itemId,
-            quantity, // 단건 주문 → quantity 사용
-            // cartItemIds: undefined, // 장바구니 미사용이면 생략
-            cartNo: 0, // 단건 구매라 의미 없는 값이지만 필드 맞추기용
+            cartNo: 0, // 단건/장바구니 공통 기본값
             receiverName: goodsForm.receiverName,
             receiverPhone: goodsForm.receiverPhone,
             receiverAddress: goodsForm.receiverAddress,
@@ -338,6 +428,14 @@ export default function GoodsCheckoutPage() {
 
         if (goodsForm.memo.trim().length > 0) {
             payload.memo = goodsForm.memo;
+        }
+
+        // 🔥 장바구니모드 vs 단건모드 분기
+        if (cartItemIds.length > 0) {
+            payload.cartItemIds = cartItemIds;
+        } else {
+            payload.itemId = itemId;
+            payload.quantity = quantity; // 단건 주문 → quantity 사용
         }
 
         // 2) 백엔드 CreateOrderReq 형태로 감싸기

@@ -437,18 +437,10 @@ export default function ShopDetailPage() {
             // ============================
             if (isPopItem && mode === "BUY") {
                 const params = new URLSearchParams({
-                    itemNo: String(item.itemNo),
-                    quantity: String(qty),
-                    itemName: item.itemName,
-                    price: String(item.itemPrice),
+                    popId: String(item.itemNo),   // ✅ popId 로 보냄
+                    qty: String(qty),             // ✅ qty 로 보냄
+                    // variant 는 여기서 안 넘기고, checkout 페이지에서 입력받음
                 });
-
-                if (optionKind === "PLAYER" && selectedPlayer) {
-                    params.append("player", selectedPlayer);
-                }
-                if (optionKind === "SIZE" && selectedSize) {
-                    params.append("size", selectedSize);
-                }
 
                 setIsOptionModalOpen(false);
                 router.push(`/order/pop/checkout?${params.toString()}`);

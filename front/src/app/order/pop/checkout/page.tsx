@@ -1,6 +1,7 @@
+// src/app/order/pop/checkout/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 import axios, { AxiosError } from "axios";
@@ -36,21 +37,11 @@ interface TossPrepareResponse {
     };
 }
 
-interface CheckoutItem {
-    itemNo: number;
-    imageUrl?: string | null;
-    title: string;
-    subtitle?: string | null;
-    description?: string | null;
-    price: number;
-    quantity: number;
-}
-
-interface CheckoutData {
-    buyerName: string;
-    buyerEmail: string;
-    items: CheckoutItem[];
-    totalAmount: number;
+// 🔥 /member/readOne 응답 (필요한 것만)
+interface MemberReadOneRes {
+    memberEmail: string;
+    memberName?: string;      // 실제 DTO 필드명에 맞게 조정 (memberNickName 쓰면 거기로 바꾸면 됨)
+    memberNickName?: string;
 }
 
 // Toss
@@ -118,18 +109,37 @@ export default function PopCheckoutPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    const popIdParam = searchParams.get("popId");
-    const qtyParam = searchParams.get("qty");
-    const variantParam = searchParams.get("variant") ?? "";
+    // 1) URL 쿼리에서 POP 정보 가져오기
+    const {
+        popId,
+        quantity,
+        itemName,
+        price,
+        thumbnail,
+        initialVariant,
+    } = useMemo(() => {
+        const popIdParam =
+            searchParams.get("popId") ?? searchParams.get("itemNo");
+        const qtyParam =
+            searchParams.get("qty") ?? searchParams.get("quantity");
+        const itemNameParam = searchParams.get("itemName") ?? "";
+        const priceParam = searchParams.get("price");
+        const thumbParam = searchParams.get("thumbnail") ?? "";
+        const variantParam = searchParams.get("variant") ?? "";
 
-    const popId = popIdParam ? Number(popIdParam) : null;
-    const quantity = qtyParam ? Number(qtyParam) : 1;
+        return {
+            popId: popIdParam ? Number(popIdParam) : null,
+            quantity: qtyParam ? Number(qtyParam) : 1,
+            itemName: itemNameParam,
+            price: priceParam ? Number(priceParam) : 0,
+            thumbnail: thumbParam || null,
+            initialVariant: variantParam,
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams.toString()]);
 
-    const [variant, setVariant] =
-        useState<string>(variantParam);
-
-    const [data, setData] = useState<CheckoutData | null>(null);
-    const [loading, setLoading] = useState(true);
+    // 2) 화면 상태
+    const [variant, setVariant] = useState<string>(initialVariant);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const [paymentMethod, setPaymentMethod] =
@@ -137,14 +147,16 @@ export default function PopCheckoutPage() {
 
     const [pointInput, setPointInput] = useState("0");
 
-    const [agreePrivacy, setAgreePrivacy] =
-        useState(false);
-    const [agreeCommunity, setAgreeCommunity] =
-        useState(false);
-    const [agreePaymentTerms, setAgreePaymentTerms] =
-        useState(false);
+    const [agreePrivacy, setAgreePrivacy] = useState(false);
+    const [agreeCommunity, setAgreeCommunity] = useState(false);
+    const [agreePaymentTerms, setAgreePaymentTerms] = useState(false);
     const [agreeAll, setAgreeAll] = useState(false);
 
+    // 🔥 JWT 토큰 기반 로그인 유저 정보 (백엔드 /member/readOne 호출)
+    const [buyerName, setBuyerName] = useState<string>("");
+    const [buyerEmail, setBuyerEmail] = useState<string>("");
+
+    // 3) 전체 동의 체크박스 연동
     useEffect(() => {
         if (agreeAll) {
             setAgreePrivacy(true);
@@ -165,57 +177,79 @@ export default function PopCheckoutPage() {
         }
     }, [agreePrivacy, agreeCommunity, agreePaymentTerms]);
 
+    const totalAmount = useMemo(() => {
+        if (!price || !quantity) return 0;
+        return price * quantity;
+    }, [price, quantity]);
+
     const canPay =
-        !!data &&
+        !!popId &&
+        price > 0 &&
+        !!itemName &&
+        !!variant.trim() &&
+        !!buyerEmail &&          // 로그인 유저 정보까지 있어야 결제 가능
         agreePrivacy &&
         agreeCommunity &&
         agreePaymentTerms;
 
-    // ===== 화면용 데이터 – POP 프리뷰 API =====
+    // 4) 기본 값 검증
     useEffect(() => {
-        const load = async () => {
+        if (!popId || price <= 0 || !itemName) {
+            setErrorMsg(
+                "잘못된 접근입니다. POP 상품 페이지에서 다시 시도해 주세요."
+            );
+        } else {
+            setErrorMsg(null);
+        }
+    }, [popId, price, itemName]);
+
+    // 5) 🔥 /member/readOne 으로 로그인 유저 정보 가져오기 (JWT 사용)
+    useEffect(() => {
+        const loadMember = async () => {
             try {
-                setLoading(true);
-                setErrorMsg(null);
-
-                if (!popId) {
-                    throw new Error("popId 가 필요합니다.");
-                }
-
                 const res =
-                    await apiClient.get<ApiResult<CheckoutData>>(
-                        "/checkout/pop",
-                        {
-                            params: {
-                                popId,
-                                qty: quantity,
-                                variant: variantParam,
-                            },
-                        }
+                    await apiClient.get<ApiResult<MemberReadOneRes>>(
+                        "/member/readOne",
                     );
 
                 if (!res.data.isSuccess) {
                     throw new Error(
                         res.data.resMessage ||
-                        "결제 정보를 불러오지 못했습니다."
+                        "회원 정보를 불러오지 못했습니다."
                     );
                 }
 
-                setData(res.data.result);
+                const m = res.data.result;
+                setBuyerEmail(m.memberEmail);
+                // 닉네임/이름 중 하나 선택해서 사용
+                setBuyerName(
+                    m.memberNickName ||
+                    m.memberName ||
+                    m.memberEmail.split("@")[0]
+                );
             } catch (err) {
+                // 401이면 로그인 페이지로 보내버림
+                if (
+                    axios.isAxiosError(err) &&
+                    err.response?.status === 401
+                ) {
+                    alert("로그인이 필요합니다.");
+                    router.push("/login");
+                    return;
+                }
+
+                console.error("회원 정보 조회 실패 =", err);
                 setErrorMsg(
                     extractError(
                         err,
-                        "결제 정보를 불러오지 못했습니다."
+                        "회원 정보를 불러오지 못했습니다."
                     )
                 );
-            } finally {
-                setLoading(false);
             }
         };
 
-        load();
-    }, [popId, quantity, variantParam]);
+        loadMember();
+    }, [router]);
 
     const validatePop = (): string | null => {
         if (!popId) return "popId 가 필요합니다.";
@@ -224,7 +258,7 @@ export default function PopCheckoutPage() {
         return null;
     };
 
-    // ===== 주문 생성 =====
+    // ===== 주문 생성 (POST /order/POP) =====
     const createPopOrder = async (): Promise<number> => {
         const err = validatePop();
         if (err) throw new Error(err);
@@ -235,14 +269,21 @@ export default function PopCheckoutPage() {
             variant: variant || undefined,
         };
 
-        const res = await apiClient.post<CreateOrderRes>(
+        const res = await apiClient.post<ApiResult<CreateOrderRes>>(
             "/order/POP",
             body
         );
-        return res.data.orderNo;
+
+        if (!res.data.isSuccess) {
+            throw new Error(
+                res.data.resMessage || "POP 주문 생성에 실패했습니다."
+            );
+        }
+
+        return res.data.result.orderNo;
     };
 
-    // ===== Toss prepare =====
+    // ===== Toss prepare (POST /api/pay/toss/prepare) =====
     const prepareToss = async (
         orderNo: number
     ): Promise<TossPrepareResponse["data"]> => {
@@ -272,11 +313,15 @@ export default function PopCheckoutPage() {
 
     // ===== 결제 버튼 =====
     const handlePay = async () => {
-        if (!canPay) {
-            alert("주문 내용과 약관에 모두 동의해 주세요.");
+        if (paymentMethod === "EXIMBAY") {
+            alert("Eximbay 결제는 아직 준비 중입니다.");
             return;
         }
-        if (!data) return;
+
+        if (!canPay) {
+            alert("주문 정보, 스타 선택, 약관 동의를 모두 확인해 주세요.");
+            return;
+        }
 
         try {
             const orderNo = await createPopOrder();
@@ -294,10 +339,11 @@ export default function PopCheckoutPage() {
                 amount: prepared.amount,
                 orderId: prepared.orderId,
                 orderName: prepared.orderName,
-                successUrl: `${window.location.origin}/order/toss/success`,
-                failUrl: `${window.location.origin}/order/toss/fail`,
-                customerEmail: data.buyerEmail,
-                customerName: data.buyerName,
+                // 형님 프로젝트 설정에 맞는 URL로
+                successUrl: `${window.location.origin}/toss/success`,
+                failUrl: `${window.location.origin}/toss/fail`,
+                customerEmail: buyerEmail || undefined,
+                customerName: buyerName || undefined,
             };
 
             await tossClient.requestPayment(payType, base);
@@ -318,20 +364,15 @@ export default function PopCheckoutPage() {
                     결제하기
                 </h1>
 
-                {loading && (
-                    <div className="text-sm text-neutral-400">
-                        결제 정보를 불러오는 중입니다…
-                    </div>
-                )}
                 {errorMsg && (
-                    <div className="text-sm text-red-400 mb-4">
+                    <div className="text-sm text-red-400 mb-6">
                         {errorMsg}
                     </div>
                 )}
 
-                {data && (
+                {!errorMsg && (
                     <div className="flex flex-col gap-8">
-                        {/* 주문자 */}
+                        {/* 주문자 (JWT 기반 /member/readOne) */}
                         <section className="border-t border-neutral-800 pt-6">
                             <div className="flex justify-between items-start mb-4">
                                 <div>
@@ -339,10 +380,10 @@ export default function PopCheckoutPage() {
                                         주문자
                                     </div>
                                     <div className="text-lg font-semibold">
-                                        {data.buyerName}
+                                        {buyerName || "회원 정보 로딩 중"}
                                     </div>
                                     <div className="text-xs text-neutral-400 mt-1">
-                                        {data.buyerEmail}
+                                        {buyerEmail || ""}
                                     </div>
                                 </div>
                                 <button
@@ -363,11 +404,11 @@ export default function PopCheckoutPage() {
                             </div>
                             <div className="flex gap-4">
                                 <div className="w-24 h-32 bg-neutral-900 rounded-lg flex items-center justify-center text-[11px] text-neutral-500 overflow-hidden">
-                                    {data.items[0].imageUrl ? (
+                                    {thumbnail ? (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img
-                                            src={data.items[0].imageUrl!}
-                                            alt={data.items[0].title}
+                                            src={thumbnail}
+                                            alt={itemName}
                                             className="w-full h-full object-cover"
                                         />
                                     ) : (
@@ -377,24 +418,17 @@ export default function PopCheckoutPage() {
                                 <div className="flex-1 flex flex-col justify-between">
                                     <div>
                                         <div className="text-sm font-semibold">
-                                            {data.items[0].title}
+                                            {itemName}
                                         </div>
-                                        {data.items[0].subtitle && (
-                                            <div className="text-xs text-neutral-400 mt-0.5">
-                                                {data.items[0].subtitle}
-                                            </div>
-                                        )}
-                                        {data.items[0].description && (
-                                            <div className="text-xs text-neutral-400 mt-0.5">
-                                                {data.items[0].description}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="mt-2 text-sm font-semibold">
-                                        {formatPrice(data.items[0].price)}
-                                        <span className="ml-1 text-[11px] text-neutral-500">
-                      (세금 포함가)
-                    </span>
+                                        <div className="mt-2 text-sm font-semibold">
+                                            {formatPrice(price)}
+                                            <span className="ml-1 text-[11px] text-neutral-500">
+                                                (세금 포함가)
+                                            </span>
+                                        </div>
+                                        <div className="mt-1 text-xs text-neutral-400">
+                                            수량 {quantity}개
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -441,12 +475,12 @@ export default function PopCheckoutPage() {
                                         />
                                         <span>Toss 퀵계좌이체</span>
                                         <span className="ml-1 text-[11px] text-red-400">
-                      혜택
-                    </span>
+                                            혜택
+                                        </span>
                                     </div>
                                     <span className="ml-6 text-[11px] text-neutral-500">
-                    0.5% 즉시 할인 (예시 문구)
-                  </span>
+                                        0.5% 즉시 할인 (예시 문구)
+                                    </span>
                                 </label>
 
                                 <label className="flex items-center gap-2 cursor-pointer">
@@ -515,28 +549,28 @@ export default function PopCheckoutPage() {
                             </div>
                             <div className="flex flex-col gap-2 text-sm">
                                 <div className="flex justify-between">
-                  <span className="text-neutral-400">
-                    총 상품 금액
-                  </span>
+                                    <span className="text-neutral-400">
+                                        총 상품 금액
+                                    </span>
                                     <span>
-                    {formatPrice(data.totalAmount)}
-                  </span>
+                                        {formatPrice(totalAmount)}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between">
-                  <span className="text-neutral-400">
-                    0P 사용
-                  </span>
+                                    <span className="text-neutral-400">
+                                        0P 사용
+                                    </span>
                                     <span>-0원</span>
                                 </div>
                             </div>
 
                             <div className="mt-4 flex justify-between items-center">
-                <span className="text-sm text-neutral-400">
-                  총 결제 금액
-                </span>
+                                <span className="text-sm text-neutral-400">
+                                    총 결제 금액
+                                </span>
                                 <span className="text-2xl font-semibold">
-                  {formatPrice(data.totalAmount)}
-                </span>
+                                    {formatPrice(totalAmount)}
+                                </span>
                             </div>
 
                             <ul className="mt-4 text-[11px] text-neutral-500 leading-relaxed list-disc list-inside">
@@ -561,24 +595,24 @@ export default function PopCheckoutPage() {
                                 <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
                                     <span>(필수) t1.fan 커뮤니티 약관</span>
                                     <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
+                                        &gt;
+                                    </span>
                                 </button>
                                 <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                  <span>
-                    (필수) 개인정보 수집 및 이용 안내
-                  </span>
+                                    <span>
+                                        (필수) 개인정보 수집 및 이용 안내
+                                    </span>
                                     <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
+                                        &gt;
+                                    </span>
                                 </button>
                                 <button className="w-full flex justify-between items-center bg-black border border-neutral-800 rounded-xl px-4 py-2 hover:bg-neutral-900">
-                  <span>
-                    (필수) 결제서비스 이용약관
-                  </span>
+                                    <span>
+                                        (필수) 결제서비스 이용약관
+                                    </span>
                                     <span className="text-neutral-500 text-[11px]">
-                    &gt;
-                  </span>
+                                        &gt;
+                                    </span>
                                 </button>
                             </div>
                         </section>
@@ -595,8 +629,8 @@ export default function PopCheckoutPage() {
                                     }
                                 />
                                 <span>
-                  주문 내용과 약관에 동의합니다.
-                </span>
+                                    주문 내용과 약관에 동의합니다.
+                                </span>
                             </label>
 
                             <button
