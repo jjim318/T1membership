@@ -57,6 +57,31 @@ public class PopOrderCreator implements OrderCreator<CreatePopOrderReq> {
         order.setOrderTotalPrice(price);                // 총 결제 금액(POP은 1개 고정)
         // order.setOrderType(OrderType.POP);  // 주문 타입이 있을 경우
 
+        // 🔥🔥 POP 은 배송이 없으니까, NOT NULL 배송 필드에 기본값 채워주기
+        // 이름은 웬만하면 회원 이름/닉네임/이메일 중 하나로
+        String receiverName = null;
+        // MemberEntity에 있는 필드 이름에 맞게 골라 쓰시면 됩니다
+        // 예시: getMemberName(), getMemberNickName()
+        try {
+            // 있는 거 위주로 적당히 사용
+            receiverName = memberEntity.getMemberName();
+        } catch (Exception ignored) {}
+
+        if (receiverName == null || receiverName.isBlank()) {
+            try {
+                receiverName = memberEntity.getMemberNickName();
+            } catch (Exception ignored) {}
+        }
+        if (receiverName == null || receiverName.isBlank()) {
+            receiverName = memberEntity.getMemberEmail();
+        }
+
+        order.setReceiverName(receiverName);
+        order.setReceiverPhone("000-0000-0000");           // 형식 아무거나, NOT NULL만 피하면 됨
+        order.setReceiverAddress("POP 상품 (배송 없음)");   // 진짜 배송 안 함 표시
+        order.setReceiverZipCode("00000");                 // 더미 우편번호
+        order.setReceiverDetailAddress("온라인 POP 이용권"); // 이건 nullable 이라 안 채워도 되지만 같이 넣어도 됨
+
         // 7) 주문-아이템 스냅샷 생성
         // - 공통 팩토리 메서드 사용 (단가/합계/스냅샷 계산은 OrderItemEntity.of에서 처리)
         OrderItemEntity orderItem = OrderItemEntity.of(popItem, 1);
