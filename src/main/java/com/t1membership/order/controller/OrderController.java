@@ -1,10 +1,12 @@
 package com.t1membership.order.controller;
 
 import com.t1membership.ApiResult;
+import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.order.dto.req.common.CancelOrderReq;
 import com.t1membership.order.dto.req.common.SearchOrderReq;
 import com.t1membership.order.dto.req.user.CreateGoodsOrderReq;
 import com.t1membership.order.dto.req.user.CreateMembershipOrderReq;
+import com.t1membership.order.dto.req.user.CreateOrderReq;
 import com.t1membership.order.dto.req.user.CreatePopOrderReq;
 import com.t1membership.order.dto.res.common.CancelOrderRes;
 import com.t1membership.order.dto.res.common.SummaryOrderRes;
@@ -23,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -60,9 +63,17 @@ public class OrderController {
 
     // 주문 생성 (굿즈)
     @PostMapping("/goods")
-    public ApiResult<CreateOrderRes> createGoodsOrder(@AuthenticationPrincipal String email,
-                                           @RequestBody @Valid CreateGoodsOrderReq req) {
-        CreateOrderRes res = orderService.createGoodsOrder(email, req);
+    public ApiResult<CreateOrderRes> createGoodsOrder(
+            @AuthenticationPrincipal String email,
+            @RequestBody @Valid CreateOrderReq req
+    ) {
+        if (req.getType() != ItemCategory.MD) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "굿즈 주문(type=MD)만 가능합니다.");
+        }
+
+        CreateGoodsOrderReq goodsReq = (CreateGoodsOrderReq) req.getPayload();
+
+        CreateOrderRes res = orderService.createGoodsOrder(email, goodsReq);
         return new ApiResult<>(res);
     }
 

@@ -20,11 +20,6 @@ public class CreateOrderReq {
     @NotNull
     private ItemCategory type;  // GOODS / MEMBERSHIP / POP
 
-    @Valid//payload 객체 안에 있는 필드들까지 재귀적으로 검증
-    // CreateGoodsOrderReq 내부의 @NotBlank, @Pattern 같은 것도 같이 체크
-    @NotNull
-    private Payload payload;
-
     /**
      * payload 다형성 루트
      * - type=GOODS -> CreateGoodsOrderReq 로 역직렬화
@@ -37,10 +32,16 @@ public class CreateOrderReq {
             property = "type"//어떤 필드를 보고 결정할지 지정
     )//Jackson에게 "이 payload가 어떤 구체 클래스인지" 알려주는 힌트.
     @JsonSubTypes({
-            @JsonSubTypes.Type(value = CreateGoodsOrderReq.class, name = "GOODS"),
+            @JsonSubTypes.Type(value = CreateGoodsOrderReq.class, name = "MD"),
             @JsonSubTypes.Type(value = CreateMembershipOrderReq.class, name = "MEMBERSHIP"),
             @JsonSubTypes.Type(value = CreatePopOrderReq.class, name = "POP")
     })//@JsonTypeInfo에서 지정한 type 값과 실제 클래스 매핑 테이블.
     //타입별 DTO를 따로 쓸 수 있어 유효성 검증/필드 분리가 깔끔
+
+    @Valid//payload 객체 안에 있는 필드들까지 재귀적으로 검증
+    // CreateGoodsOrderReq 내부의 @NotBlank, @Pattern 같은 것도 같이 체크
+    @NotNull
+    private Payload payload;
+
     public interface Payload {}
 }
