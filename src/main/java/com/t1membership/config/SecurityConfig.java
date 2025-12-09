@@ -140,11 +140,11 @@ public class SecurityConfig {
 
                 // 장바구니
                 .requestMatchers("/cart/**")
-                .hasAnyRole("USER")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 댓글 작성/수정/삭제
                 .requestMatchers("/comment/**")
-                .hasAnyRole("USER")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")
