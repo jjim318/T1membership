@@ -177,7 +177,7 @@ export default function AdminBannerPage() {
             setSaving(true);
             const payload = banners.map((b, idx) => ({
                 boardNo: b.boardNo,
-                bannerOrder: idx + 1,
+                sortOrder: idx + 1,
             }));
             await apiClient.put("/admin/banner/order", payload);
             alert("배너 설정이 저장되었습니다.");
