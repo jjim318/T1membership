@@ -11,11 +11,23 @@ import Link from "next/link";
 // 백엔드 ItemCategory enum
 type ItemCategory = "ALL" | "MD" | "MEMBERSHIP" | "POP";
 
-// 백엔드 ItemSellStatus → 지금은 SELL 이라서 string 포함
-type ItemSellStatus = "SELL" | "SOLDOUT" | string;
+// 백엔드 ItemSellStatus
+type ItemSellStatus = "SELL" | "SOLD_OUT" | string;
 
-// 🔥 백엔드 PopPlanType enum과 맞춤 (필요한 값만)
+// 백엔드 PopPlanType enum과 맞춤 (필요한 값만)
 type PopPlanType = "GENERAL" | "MEMBERSHIP_ONLY" | string;
+
+// 🔥 /member/readOne 응답 타입 (형님이 보내준 JSON 기준)
+interface MemberReadOneRes {
+    memberName: string;
+    memberNickName: string;
+    memberEmail: string;
+    memberPhone: string;
+    memberImage: string;
+    memberGender: "MALE" | "FEMALE" | string;
+    memberBirthY: string;
+    memberRole: string; // "ADMIN", "USER", "ADMIN_CONTENT" 등
+}
 
 // 상품 요약
 interface ItemSummary {
@@ -28,7 +40,7 @@ interface ItemSummary {
 
     thumbnailUrl?: string | null;
 
-    // 🔥 선택: 백엔드에서 보내주면 자동 매핑됨
+    // 선택: 백엔드에서 보내주면 자동 매핑됨
     popPlanType?: PopPlanType;
     membershipOnly?: boolean;
 }
@@ -91,7 +103,7 @@ function mapShopCategoryToItemCategory(cat: ShopCategory): ItemCategory | "ALL" 
     }
 }
 
-// 🔥 탭 -> 백엔드 PopPlanType 매핑
+// 탭 -> 백엔드 PopPlanType 매핑
 function mapShopCategoryToPopPlanType(cat: ShopCategory): PopPlanType | undefined {
     switch (cat) {
         case "[멤버십] POP":
@@ -113,18 +125,52 @@ export default function ShopPage() {
     const [loading, setLoading] = useState<boolean>(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+    // 🔥 관리자 여부
+    const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
     // TODO: 페이지네이션 쓰고 싶으면 page 상태도 추가
     const page = 0;
     const size = 12;
+
+    // 🔥 마운트 시 로그인 유저 정보 조회해서 관리자 여부 체크
+    useEffect(() => {
+        const fetchMe = async () => {
+            try {
+                // 형님 백엔드 기준: /member/readOne
+                const res = await apiClient.get<ApiResult<MemberReadOneRes>>(
+                    "/member/readOne"
+                );
+
+                if (!res.data.isSuccess) {
+                    console.warn("[Shop] /member/readOne isSuccess=false:", res.data);
+                    return;
+                }
+
+                const role = res.data.result.memberRole;
+                console.log("[Shop] current member role =", role);
+
+                // role 문자열에 "ADMIN" 이라는 글자가 들어 있으면 전부 관리자 취급
+                // (ADMIN, ADMIN_CONTENT, ROLE_ADMIN 등 모두 커버)
+                if (role && role.includes("ADMIN")) {
+                    setIsAdmin(true);
+                }
+            } catch (e) {
+                // 비로그인 / 권한 없음 등
+                console.warn("[Shop] /member/readOne 조회 실패 (비로그인 or 권한없음):", e);
+            }
+        };
+
+        fetchMe();
+    }, []);
 
     // 카테고리가 바뀔 때마다 백엔드에서 다시 조회
     useEffect(() => {
         const loadItems = async () => {
             try {
-                // T1 ZONE 은 아직 데이터 없다고 가정 → 바로 빈 배열
                 const backendCategory = mapShopCategoryToItemCategory(activeCategory);
                 const popPlanType = mapShopCategoryToPopPlanType(activeCategory);
 
+                // T1 ZONE 은 아직 데이터 없다고 가정 → 바로 빈 배열
                 if (activeCategory === "T1 ZONE") {
                     setItems([]);
                     return;
@@ -133,7 +179,7 @@ export default function ShopPage() {
                 setLoading(true);
                 setErrorMsg(null);
 
-                // 🔥 params 객체를 먼저 만든 다음, popPlanType이 있을 때만 추가
+                // params 객체를 먼저 만든 다음, popPlanType이 있을 때만 추가
                 const params: Record<string, any> = {
                     page,
                     size,
@@ -146,17 +192,12 @@ export default function ShopPage() {
                     params.popPlanType = popPlanType;
                 }
 
-                const res = await apiClient.get<ApiResult<PageResponse<ItemSummary>>>(
-                    "/item",
-                    { params }
-                );
+                const res = await apiClient.get<
+                    ApiResult<PageResponse<ItemSummary>>
+                >("/item", { params });
 
-                // 결과는 항상 res.data.result 안에 있음
                 const pageData = res.data.result;
-
-                // dtoList로 아이템 목록 설정
                 setItems(pageData.dtoList);
-
             } catch (error) {
                 console.error(error);
                 setErrorMsg("상품 목록을 불러오지 못했습니다.");
@@ -184,7 +225,7 @@ export default function ShopPage() {
                     </div>
                 </section>
 
-                {/* 카테고리 탭 영역 (정렬 버튼 제거) */}
+                {/* 카테고리 탭 영역 */}
                 <section className="mb-6 border-b border-zinc-800 pb-2">
                     <div className="flex gap-6 text-sm">
                         {categories.map((cat) => {
@@ -241,16 +282,16 @@ export default function ShopPage() {
                                 return (
                                     <Link
                                         key={item.itemNo}
-                                        href={`/shop/${item.itemNo}`} // ★ 상세 페이지로 이동
+                                        href={`/shop/${item.itemNo}`} // 상세 페이지로 이동
                                         className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
                                     >
-                                        {/* 썸네일*/}
+                                        {/* 썸네일 */}
                                         <div className="relative h-56 w-full bg-zinc-900">
                                             <Image
                                                 src={
                                                     item.thumbnailUrl ||
                                                     "/shop/placeholder.png"
-                                                } // ★ 백에서 온 썸네일 우선 사용
+                                                }
                                                 alt={item.itemName}
                                                 fill
                                                 className="object-cover transition-transform group-hover:scale-105"
@@ -267,8 +308,8 @@ export default function ShopPage() {
 
                                         {/* 텍스트 영역 */}
                                         <div className="flex flex-1 flex-col px-4 py-3">
-                                            {/* 상단 작은 라벨 : 지금은 MD 상품에만 붙음 */}
-                                            {(item.membershipOnly) && (
+                                            {/* 상단 작은 라벨 : 멤버십 전용일 때만 */}
+                                            {item.membershipOnly && (
                                                 <span className="mb-1 text-[11px] text-amber-300">
                                                     멤버십 전용
                                                 </span>
@@ -302,6 +343,30 @@ export default function ShopPage() {
                                 더보기
                             </button>
                         </section>
+
+                        {/* 🔥 관리자 전용 상품 등록 / 관리 버튼들 */}
+                        {isAdmin && (
+                            <section className="mt-4 flex justify-end gap-3">
+
+                                {/* 상품 등록 버튼 */}
+                                <Link
+                                    href="/admin/items/new"
+                                    className="inline-flex items-center gap-2 rounded-full border border-emerald-400 px-6 py-2 text-xs font-semibold text-emerald-300 hover:border-emerald-300 hover:text-emerald-200"
+                                >
+                                    상품 등록
+                                </Link>
+
+                                {/* 상품 관리 버튼 */}
+                                <Link
+                                    href="/admin/items"
+                                    className="inline-flex items-center gap-2 rounded-full border border-amber-400 px-6 py-2 text-xs font-semibold text-amber-300 hover:border-amber-300 hover:text-amber-200"
+                                >
+                                    상품 관리
+                                </Link>
+
+                            </section>
+                        )}
+
                     </>
                 )}
             </main>

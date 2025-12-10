@@ -29,6 +29,10 @@ interface EditForm {
     thumbnailUrl: string; // 백엔드에 저장되는 값 (/files/uuid.jpg 등)
 }
 
+interface DeleteBoardRes {
+    boardNo: number; // 실제 응답 필드에 맞게 필요하면 더 추가
+}
+
 function formatDateLabel(dateStr?: string | null): string {
     if (!dateStr) return "-";
     const d = new Date(dateStr);
@@ -259,8 +263,8 @@ export default function AdminContentManagePage() {
             setDeleting(true);
             setErrorMsg(null);
 
-            const res = await apiClient.delete<ApiResult<null>>(
-                `/admin/board/${form.boardNo}`,
+            const res = await apiClient.delete<ApiResult<DeleteBoardRes>>(
+                `/board/${form.boardNo}`,
             );
 
             if (!res.data.isSuccess) {
