@@ -213,7 +213,7 @@ export default function AdminOrderListPage() {
 
             {/* 테이블 */}
             <section className="bg-[#111] border border-neutral-800 rounded-2xl overflow-hidden flex-1 flex flex-col">
-                <div className="px-4 py-2 border-b border-neutral-800 flex justify-between items-center text-xs text-neutral-400">
+                <div className="px-4 py-2 border-b border-neutral-800 flex justify-between items-center text-xs text-neutral-400 whitespace-nowrap">
                     <span>
                         주문 목록 (현재 페이지{" "}
                         {page + 1} / {Math.max(totalPages, 1)})
@@ -228,28 +228,28 @@ export default function AdminOrderListPage() {
                 )}
 
                 <div className="flex-1 overflow-auto">
-                    <table className="min-w-full text-xs">
+                    <table className="min-w-full text-xs table-fixed">
                         <thead className="bg-black border-b border-neutral-800">
                         <tr className="text-neutral-400">
-                            <th className="px-4 py-2 text-left">
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[90px]">
                                 주문번호
                             </th>
-                            <th className="px-4 py-2 text-left">
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[150px]">
                                 주문시각
                             </th>
-                            <th className="px-4 py-2 text-left">
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[200px]">
                                 이메일
                             </th>
-                            <th className="px-4 py-2 text-left">
+                            <th className="px-4 py-2 text-left whitespace-nowrap">
                                 대표 상품
                             </th>
-                            <th className="px-4 py-2 text-right">
+                            <th className="px-4 py-2 text-right whitespace-nowrap w-[110px]">
                                 결제 금액
                             </th>
-                            <th className="px-4 py-2 text-center">
+                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">
                                 상태
                             </th>
-                            <th className="px-4 py-2 text-center">
+                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">
                                 관리
                             </th>
                         </tr>
@@ -260,7 +260,7 @@ export default function AdminOrderListPage() {
                                 <tr>
                                     <td
                                         colSpan={7}
-                                        className="px-4 py-6 text-center text-neutral-500"
+                                        className="px-4 py-6 text-center text-neutral-500 whitespace-nowrap"
                                     >
                                         주문이 없습니다.
                                     </td>
@@ -272,44 +272,48 @@ export default function AdminOrderListPage() {
                                 key={o.orderNo}
                                 className="border-b border-neutral-900 hover:bg-neutral-900/60"
                             >
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 whitespace-nowrap">
                                     {o.orderNo}
                                 </td>
-                                <td className="px-4 py-2 text-neutral-300">
+                                <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
                                     {formatDateTime(o.orderDate)}
                                 </td>
-                                <td className="px-4 py-2 text-neutral-300">
-                                    {o.memberEmail}
+                                <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
+                                    <span className="block max-w-[220px] truncate">
+                                        {o.memberEmail}
+                                    </span>
                                 </td>
-                                <td className="px-4 py-2 text-neutral-300">
-                                    {o.itemName ?? "-"}
-                                    {o.itemCount > 1 && (
-                                        <span className="text-neutral-500">
+                                <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
+                                    <div className="flex items-center gap-1 max-w-[260px]">
+                                        <span className="truncate">
+                                            {o.itemName ?? "-"}
+                                        </span>
+                                        {o.itemCount > 1 && (
+                                            <span className="text-neutral-500 flex-shrink-0 whitespace-nowrap">
                                                 {" "}
-                                            외{" "}
-                                            {o.itemCount - 1}
-                                            개
+                                                외 {o.itemCount - 1}개
                                             </span>
-                                    )}
+                                        )}
+                                    </div>
                                 </td>
-                                <td className="px-4 py-2 text-right text-neutral-100">
+                                <td className="px-4 py-2 text-right text-neutral-100 whitespace-nowrap">
                                     {formatPrice(
                                         o.orderTotalPrice
                                     )}
                                 </td>
-                                <td className="px-4 py-2 text-center">
-                                        <span className="px-2 py-1 rounded-full text-[11px] bg-neutral-900 text-white">
-                                            {statusLabel(
-                                                o.orderStatus
-                                            )}
-                                        </span>
+                                <td className="px-4 py-2 text-center whitespace-nowrap">
+                                    <span className="px-2 py-1 rounded-full text-[11px] bg-neutral-900 text-white">
+                                        {statusLabel(
+                                            o.orderStatus
+                                        )}
+                                    </span>
                                 </td>
-                                <td className="px-4 py-2 text-center">
+                                <td className="px-4 py-2 text-center whitespace-nowrap">
                                     <button
-                                        className="px-3 py-1 text-[11px] border border-neutral-600 rounded-2xl hover:bg-neutral-800"
+                                        className="px-3 py-1 text-[11px] border border-neutral-600 rounded-2xl hover:bg-neutral-800 whitespace-nowrap"
                                         onClick={() =>
                                             router.push(
-                                                `/admin/order/${o.orderNo}`
+                                                `/admin/orders/${o.orderNo}`
                                             )
                                         }
                                     >
@@ -323,7 +327,7 @@ export default function AdminOrderListPage() {
                 </div>
 
                 {/* 페이징 */}
-                <div className="px-4 py-2 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400">
+                <div className="px-4 py-2 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400 whitespace-nowrap">
                     <div className="flex items-center gap-2">
                         <button
                             className="px-2 py-1 border border-neutral-700 rounded disabled:opacity-40"

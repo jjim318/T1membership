@@ -8,7 +8,9 @@ import { apiClient } from "@/lib/apiClient";
 
 type OrderStatus = string;
 
+// 🔥 라인 정보 (백엔드 UserDetailOrderRes에 맞춰야 함)
 interface OrderItemRes {
+    orderItemNo: number;               // 부분 취소용 PK
     itemNo: number | null;
     itemNameSnapshot: string;
     itemOptionSnapshot?: string | null;
@@ -16,6 +18,9 @@ interface OrderItemRes {
     priceAtOrder: number;
     quantity: number;
     lineTotal: number;
+
+    // 🔥 MD / POP / MEMBERSHIP 등
+    itemCategorySnapshot?: string | null;
 }
 
 // 백엔드 UserDetailOrderRes 타입
@@ -43,6 +48,18 @@ interface UserDetailOrderRes {
     membershipMonths?: number | null;
     membershipStartDate?: string | null;
     membershipEndDate?: string | null;
+}
+
+// 🔥 취소 요청/응답 타입
+interface CancelOrderReq {
+    orderNo: number;
+    reason: string;
+    orderItemNos?: number[] | null;
+}
+
+interface CancelOrderRes {
+    orderNo: number;
+    orderStatus: string;
 }
 
 // ========= 헬퍼 =========
@@ -73,16 +90,56 @@ function formatMoney(value: number): string {
     return value.toLocaleString("ko-KR");
 }
 
+// 🔥 상태 한글 라벨 (백엔드 enum 이름에 맞춰 사용)
 function getStatusLabel(status: OrderStatus): string {
     const upper = (status ?? "").toUpperCase();
+
+    // 🔥 부분 취소 우선 처리
+    if (
+        upper === "PARTIALLY_CANCELED" ||           // enum 이름
+        upper === "PARTIAL_CANCEL" ||               // 혹시 이름 바뀔 대비
+        (upper.includes("PART") && upper.includes("CANCEL"))
+    ) {
+        return "부분 취소";
+    }
+
+    // 정확 매칭 우선
+    if (upper === "ORDERED") return "결제 대기";
+    if (upper === "PAID") return "결제 완료";
+
+    // 그 외 보조 매칭
     if (upper.includes("PENDING") || upper.includes("WAIT")) return "결제 대기";
-    if (upper.includes("PAID") || upper.includes("CONFIRM")) return "구매확정";
+    if (upper.includes("PREPARE")) return "상품 준비중";
+    if (upper.includes("CONFIRM") || upper.includes("COMPLETE")) return "구매확정";
     if (upper.includes("SHIP") || upper.includes("DELIVERY")) return "배송 중";
-    if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE"))
-        return "배송 완료";
-    if (upper.includes("CANCEL")) return "취소 완료";
+    if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE")) return "배송 완료";
+    if (upper.includes("CANCEL")) return "취소 완료";    // 🔥 나머지(전체 취소)는 여기로
     if (upper.includes("REFUND")) return "환불 완료";
+
     return status;
+}
+
+// 🔥 부분 취소 상태인지 체크 (UI 용)
+function isPartiallyCanceled(status: OrderStatus): boolean {
+    const upper = (status ?? "").toUpperCase();
+    return (
+        upper === "PARTIALLY_CANCELED" ||
+        upper === "PARTIAL_CANCEL" ||
+        (upper.includes("PART") && upper.includes("CANCEL"))
+    );
+}
+
+// 🔥 백엔드 OrderStatus.isCancelableByUser()와 맞추기
+//  - enum: ORDERED / PAID 에서만 true
+function isUserCancelableStatus(status: OrderStatus): boolean {
+    const upper = (status ?? "").toUpperCase();
+    return upper === "ORDERED" || upper === "PAID";
+}
+
+// 🔥 MD 라인인지 체크
+function isMdItem(item: OrderItemRes): boolean {
+    const cat = (item.itemCategorySnapshot ?? "").toUpperCase();
+    return cat === "MD";
 }
 
 // 멤버십 planCode → 화면용 이름
@@ -107,6 +164,10 @@ export default function OrderDetailPage() {
 
     const [data, setData] = useState<UserDetailOrderRes | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // 🔥 취소 진행 중 상태
+    const [cancelAllLoading, setCancelAllLoading] = useState(false);
+    const [cancelItemLoading, setCancelItemLoading] = useState<number | null>(null);
 
     useEffect(() => {
         if (!orderNoParam) return;
@@ -169,10 +230,128 @@ export default function OrderDetailPage() {
     const isMembershipOrder =
         !!data.membershipPlanCode && items.length === 0;
 
+    const partiallyCanceled = isPartiallyCanceled(data.orderStatus);
+
+    // 🔥 전체 취소 가능 여부 (ORDERED/PAID + 전부 MD + 부분취소 상태 아님)
+    const canCancelAll =
+        !isMembershipOrder &&
+        !partiallyCanceled &&
+        items.length > 0 &&
+        isUserCancelableStatus(data.orderStatus) &&
+        items.every((it) => isMdItem(it));
+
+    // 🔥 개별 라인 취소 가능 여부
+    const canCancelItem = (item: OrderItemRes): boolean => {
+        if (isMembershipOrder) return false;
+        if (!isUserCancelableStatus(data.orderStatus)) return false;
+        return isMdItem(item);
+    };
+
+    // 🔥 주문 전체 취소
+    const handleCancelAll = async () => {
+        if (!data) return;
+        if (!canCancelAll) {
+            alert("MD 상품으로만 구성된 주문이 아니거나, 취소 가능한 상태가 아닙니다.");
+            return;
+        }
+
+        const ok = window.confirm(
+            "주문을 전체 취소하시겠습니까?\n(멤버십/POP 주문은 여기서 취소되지 않습니다.)",
+        );
+        if (!ok) return;
+
+        const reason = window.prompt("취소 사유를 입력해 주세요.");
+        if (!reason || reason.trim().length === 0) {
+            alert("취소 사유를 입력해야 합니다.");
+            return;
+        }
+
+        setCancelAllLoading(true);
+        try {
+            const body: CancelOrderReq = {
+                orderNo: data.orderNo,
+                reason: reason.trim(),
+                orderItemNos: null,
+            };
+
+            await apiClient.patch<CancelOrderRes>("/order/cancel/all", body);
+
+            alert("주문 전체 취소가 접수되었습니다.");
+            router.replace("/mypage/orders");
+        } catch (e) {
+            console.error("[OrderDetail] cancel all error", e);
+            if (axios.isAxiosError(e)) {
+                const msg =
+                    (e.response?.data as any)?.resMessage ||
+                    (e.response?.data as any)?.message ||
+                    "주문 전체 취소에 실패했습니다.";
+                alert(msg);
+            } else {
+                alert("주문 전체 취소에 실패했습니다.");
+            }
+        } finally {
+            setCancelAllLoading(false);
+        }
+    };
+
+    // 🔥 개별 라인 취소
+    const handleCancelItem = async (item: OrderItemRes) => {
+        if (!data) return;
+        if (!canCancelItem(item)) {
+            alert("MD 상품이 아니거나, 취소 가능한 상태가 아닙니다.");
+            return;
+        }
+
+        const ok = window.confirm(
+            `해당 상품을 취소하시겠습니까?\n\n상품명: ${item.itemNameSnapshot}\n수량: ${item.quantity}개`,
+        );
+        if (!ok) return;
+
+        const reason = window.prompt("해당 상품의 취소 사유를 입력해 주세요.");
+        if (!reason || reason.trim().length === 0) {
+            alert("취소 사유를 입력해야 합니다.");
+            return;
+        }
+
+        setCancelItemLoading(item.orderItemNo);
+        try {
+            const body: CancelOrderReq = {
+                orderNo: data.orderNo,
+                reason: reason.trim(),
+                orderItemNos: [item.orderItemNo],
+            };
+
+            await apiClient.patch<CancelOrderRes>(
+                `/order/${data.orderNo}/cancel-items`,
+                body,
+            );
+
+            alert("해당 상품 취소가 접수되었습니다.");
+
+            const refreshed = await apiClient.get<UserDetailOrderRes>(
+                `/order/${data.orderNo}`,
+            );
+            setData(refreshed.data);
+        } catch (e) {
+            console.error("[OrderDetail] cancel item error", e);
+            if (axios.isAxiosError(e)) {
+                const msg =
+                    (e.response?.data as any)?.resMessage ||
+                    (e.response?.data as any)?.message ||
+                    "상품 취소에 실패했습니다.";
+                alert(msg);
+            } else {
+                alert("상품 취소에 실패했습니다.");
+            }
+        } finally {
+            setCancelItemLoading(null);
+        }
+    };
+
     return (
         <main className="min-h-screen bg-black text-white pt-16">
             <div className="max-w-5xl mx-auto px-4 md:px-6 py-8">
-                {/* 상단: 날짜 + 주문 번호 */}
+                {/* 상단: 날짜 + 주문 번호 + 상태 */}
                 <section className="mb-4">
                     <h1 className="text-xl md:text-2xl font-bold">
                         {formatDate(data.createdAt)} 주문
@@ -180,10 +359,19 @@ export default function OrderDetailPage() {
                     <p className="mt-1 text-xs md:text-sm text-zinc-400">
                         주문 번호 {data.orderNo}
                     </p>
+                    <p className="mt-1 text-xs md:text-sm text-zinc-300">
+                        현재 상태: {getStatusLabel(data.orderStatus)}
+                    </p>
                 </section>
 
                 {/* 안내 바 */}
                 <section className="space-y-2 mb-4 text-[11px] md:text-xs text-zinc-300">
+                    {partiallyCanceled && (
+                        <div className="rounded-md bg-zinc-800 px-3 py-2">
+                            일부 상품이 취소된 주문입니다.
+                        </div>
+                    )}
+
                     {isMembershipOrder ? (
                         <>
                             <div className="rounded-md bg-zinc-800 px-3 py-2">
@@ -197,63 +385,89 @@ export default function OrderDetailPage() {
                     ) : (
                         <>
                             <div className="rounded-md bg-zinc-800 px-3 py-2">
-                                배송없이 행사현장에서 직접 받는 상품이에요.
-                            </div>
-                            <div className="rounded-md bg-zinc-800 px-3 py-2">
-                                부분 취소 또는 일부 수량에 대한 교환/반품을 원하시면
-                                &apos;1:1 문의하기&apos;를 통해 문의해 주세요.
+                                MD 상품은 결제 대기/결제 완료 상태에서 취소/환불 신청이 가능합니다.
+                                POP 및 멤버십 상품은 고객센터를 통해 문의해 주세요.
                             </div>
                         </>
                     )}
                 </section>
 
-                {/* 🔥 주문 상품 전체 리스트 */}
+                {/* 주문 상품 리스트 */}
                 {!isMembershipOrder && items.length > 0 && (
                     <section className="mb-8">
                         <h2 className="text-sm md:text-base font-semibold mb-3">
                             주문 상품
                         </h2>
                         <ul className="space-y-3">
-                            {items.map((item, idx) => (
-                                <li
-                                    key={`${item.itemNo ?? "item"}-${idx}`}
-                                    className="flex gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-xs md:text-sm"
-                                >
-                                    {/* 썸네일 */}
-                                    <div className="w-16 h-16 rounded-lg bg-zinc-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                            src={item.itemImageSnapshot || "/icons/t1.png"}
-                                            alt={item.itemNameSnapshot}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    </div>
+                            {items.map((item, idx) => {
+                                const md = isMdItem(item);
+                                const itemCancelable = canCancelItem(item);
 
-                                    {/* 정보 */}
-                                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                        <div className="font-semibold truncate">
-                                            {item.itemNameSnapshot}
+                                return (
+                                    <li
+                                        key={`${item.itemNo ?? "item"}-${idx}`}
+                                        className="flex gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-xs md:text-sm"
+                                    >
+                                        {/* 썸네일 */}
+                                        <div className="w-16 h-16 rounded-lg bg-zinc-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img
+                                                src={item.itemImageSnapshot || "/icons/t1.png"}
+                                                alt={item.itemNameSnapshot}
+                                                className="w-full h-full object-cover"
+                                            />
                                         </div>
-                                        {item.itemOptionSnapshot && (
-                                            <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
-                                                {item.itemOptionSnapshot}
+
+                                        {/* 정보 */}
+                                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                            <div className="font-semibold truncate">
+                                                {item.itemNameSnapshot}
                                             </div>
-                                        )}
+                                            {item.itemOptionSnapshot && (
+                                                <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
+                                                    {item.itemOptionSnapshot}
+                                                </div>
+                                            )}
 
-                                        <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
-                                            개당 {formatMoney(item.priceAtOrder)}원 ·{" "}
-                                            수량 {item.quantity}개
-                                        </div>
-                                    </div>
+                                            <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
+                                                개당 {formatMoney(item.priceAtOrder)}원 ·{" "}
+                                                수량 {item.quantity}개
+                                            </div>
 
-                                    {/* 금액 */}
-                                    <div className="text-right flex flex-col justify-center items-end">
-                                        <div className="text-sm md:text-base font-semibold">
-                                            {formatMoney(item.lineTotal)}원
+                                            {/* 🔥 MD 뱃지만 표시 */}
+                                            {md && (
+                                                <div className="mt-1 text-[11px] md:text-xs text-emerald-400">
+                                                    MD 상품
+                                                </div>
+                                            )}
                                         </div>
-                                    </div>
-                                </li>
-                            ))}
+
+                                        {/* 금액 + 취소 버튼/문구 */}
+                                        <div className="text-right flex flex-col justify-between items-end gap-2">
+                                            <div className="text-sm md:text-base font-semibold">
+                                                {formatMoney(item.lineTotal)}원
+                                            </div>
+
+                                            {itemCancelable ? (
+                                                <button
+                                                    type="button"
+                                                    className="px-2 py-1 rounded-lg border border-zinc-700 text-[11px] md:text-xs hover:bg-zinc-800 disabled:opacity-60"
+                                                    disabled={cancelItemLoading === item.orderItemNo}
+                                                    onClick={() => handleCancelItem(item)}
+                                                >
+                                                    {cancelItemLoading === item.orderItemNo
+                                                        ? "취소 처리 중…"
+                                                        : "이 상품 취소"}
+                                                </button>
+                                            ) : (
+                                                <span className="text-[11px] md:text-xs text-zinc-500">
+                                                    취소/환불 불가
+                                                </span>
+                                            )}
+                                        </div>
+                                    </li>
+                                );
+                            })}
                         </ul>
                     </section>
                 )}
@@ -314,7 +528,7 @@ export default function OrderDetailPage() {
                             <dt className="text-zinc-500">결제 일시</dt>
                             <dd>{formatDateTime(data.createdAt)}</dd>
                         </div>
-                        <div className="flex justify_between">
+                        <div className="flex justify-between">
                             <dt className="text-zinc-500">상품 금액</dt>
                             <dd>{formatMoney(data.orderTotalPrice)}원</dd>
                         </div>
@@ -329,17 +543,6 @@ export default function OrderDetailPage() {
                             </dd>
                         </div>
                     </dl>
-                </section>
-
-                {/* 적립 예정 포인트 */}
-                <section className="mb-8">
-                    <h2 className="text-sm md:text-base font-semibold mb-3">
-                        적립 예정 T1 Point
-                    </h2>
-                    <div className="flex justify-between text-xs md:text-sm">
-                        <span className="text-zinc-500">예정 포인트</span>
-                        <span className="font-semibold">+ 0 P</span>
-                    </div>
                 </section>
 
                 {/* 주문자 / 배송 정보 */}
@@ -389,8 +592,19 @@ export default function OrderDetailPage() {
                     </div>
                 </section>
 
-                {/* 고객센터 버튼 */}
-                <section className="mb-4">
+                {/* 하단 버튼: 전체 취소 + 고객센터 */}
+                <section className="mb-4 space-y-2">
+                    {canCancelAll && (
+                        <button
+                            type="button"
+                            className="w-full py-3 rounded-xl bg-red-600 text-sm md:text-base font-semibold hover:bg-red-500 disabled:opacity-60"
+                            disabled={cancelAllLoading}
+                            onClick={handleCancelAll}
+                        >
+                            {cancelAllLoading ? "전체 취소 처리 중…" : "주문 전체 취소"}
+                        </button>
+                    )}
+
                     <button
                         type="button"
                         className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm md:text-base hover:bg-zinc-800"

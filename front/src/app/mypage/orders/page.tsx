@@ -15,6 +15,9 @@ interface SummaryOrderRes {
     orderStatus: string;      // 주문 상태 (enum 문자열)
     itemCount: number;        // 상품 개수(또는 총 수량)
     itemName: string | null;  // 대표 상품 이름
+
+    // 🔥 백엔드 SummaryOrderRes.itemCategory ("MD" | "POP" | "MEMBERSHIP" ...)
+    itemCategory?: string | null;
 }
 
 // Spring Data Page
@@ -29,7 +32,13 @@ interface PageResult<T> {
 }
 
 // 상단 카테고리 탭 (전체 / 상품 / 이용권 / 후원 / 멤버십 / 티켓)
-type CategoryTab = "ALL" | "PRODUCT" | "PASS" | "DONATION" | "MEMBERSHIP" | "TICKET";
+type CategoryTab =
+    | "ALL"
+    | "PRODUCT"
+    | "PASS"
+    | "DONATION"
+    | "MEMBERSHIP"
+    | "TICKET";
 
 // 두 번째 줄 탭 (전체 / 취소·교환·반품)
 type StatusFilter = "ALL" | "CANCEL";
@@ -54,11 +63,25 @@ function formatMoney(value: number): string {
 // 상태 한글 라벨
 function getStatusLabel(status: string): string {
     const upper = status.toUpperCase();
-    if (upper.includes("PENDING") || upper.includes("WAIT")) return "결제 대기";
-    if (upper.includes("PAID") || upper.includes("PAY_COMPLETE")) return "구매확정";
-    if (upper.includes("SHIP") || upper.includes("DELIVERY")) return "배송 중";
-    if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE")) return "배송 완료";
-    if (upper.includes("CANCEL")) return "취소 완료";
+
+    // 🔥 먼저 부분 취소 상태부터 처리
+    if (
+        upper === "PARTIALLY_CANCELED" ||          // 백엔드 enum
+        upper === "PARTIAL_CANCEL" ||              // 혹시 다른 이름 대비
+        (upper.includes("PART") && upper.includes("CANCEL"))
+    ) {
+        return "부분 취소";
+    }
+
+    if (upper.includes("PENDING") || upper.includes("WAIT"))
+        return "결제 대기";
+    if (upper.includes("PAID") || upper.includes("PAY_COMPLETE"))
+        return "구매확정";
+    if (upper.includes("SHIP") || upper.includes("DELIVERY"))
+        return "배송 중";
+    if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE"))
+        return "배송 완료";
+    if (upper.includes("CANCEL")) return "취소 완료"; // 👉 전체 취소
     if (upper.includes("REFUND")) return "환불 완료";
     return status;
 }
@@ -69,15 +92,40 @@ function isCanceledStatus(status: string): boolean {
     return upper.includes("CANCEL") || upper.includes("REFUND");
 }
 
+// 🔥 itemCategory("MD" | "POP" | "MEMBERSHIP" ...) → 상단 탭(CategoryTab)으로 매핑
+function mapCategoryToTab(cat?: string | null): CategoryTab {
+    // 공백 제거 + 대문자
+    const c = (cat ?? "").trim().toUpperCase();
+
+    // ✅ 상품 = MD
+    if (c === "MD") return "PRODUCT";
+
+    // ✅ 이용권 = POP
+    if (c === "POP") return "PASS";
+
+    // ✅ 멤버십 = MEMBERSHIP
+    if (c === "MEMBERSHIP") return "MEMBERSHIP";
+
+    // DONATION, TICKET 생기면 여기 추가
+    // if (c === "DONATION") return "DONATION";
+    // if (c === "TICKET") return "TICKET";
+
+    // 그 외/값 없음 → 전체
+    return "ALL";
+}
+
 export default function MyOrdersPage() {
     const router = useRouter();
 
     const [categoryTab, setCategoryTab] = useState<CategoryTab>("ALL");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-    const [pageData, setPageData] = useState<PageResult<SummaryOrderRes> | null>(null);
+    const [pageData, setPageData] =
+        useState<PageResult<SummaryOrderRes> | null>(null);
     const [loading, setLoading] = useState(false);
+
     const [page, setPage] = useState(0);
-    const size = 10;
+    const size = 10; // 기본 페이지당 개수
+    const bigSize = 1000; // 필터 있을 때 한 번에 가져올 최대 개수 (적당히 크게)
 
     // 로그인 체크
     useEffect(() => {
@@ -95,12 +143,21 @@ export default function MyOrdersPage() {
             try {
                 setLoading(true);
 
-                const res = await apiClient.get<PageResult<SummaryOrderRes>>(
-                    "/order/my_orders",
-                    {
-                        params: { page, size },
-                    },
-                );
+                const isAllAll =
+                    categoryTab === "ALL" && statusFilter === "ALL";
+
+                // 🔥 전체/전체일 때만 서버 페이징 사용
+                //   그 외 탭(상품/멤버십/이용권...)은 page=0 + size=bigSize 로 전체 가져옴
+                const pageParam = isAllAll ? page : 0;
+                const sizeParam = isAllAll ? size : bigSize;
+
+                const res =
+                    await apiClient.get<PageResult<SummaryOrderRes>>(
+                        "/order/my_orders",
+                        {
+                            params: { page: pageParam, size: sizeParam },
+                        },
+                    );
 
                 setPageData(res.data);
             } catch (e) {
@@ -117,27 +174,33 @@ export default function MyOrdersPage() {
         };
 
         void load();
-    }, [page, router]);
+    }, [page, categoryTab, statusFilter, router]);
 
-    // 필터 적용된 주문 목록
+    // 🔥 필터 적용된 주문 목록
     const filteredOrders = useMemo(() => {
         if (!pageData) return [];
 
         return pageData.content.filter((o) => {
-            // 🔥 현재는 카테고리 정보가 없으니까 categoryTab은 ALL만 쓰고,
-            //   나중에 OrderEntity/DTO에 type 붙이면 여기서 필터 로직 추가
-            const byCategory = categoryTab === "ALL";
-
+            // 상태 필터 (전체 / 취소·교환·반품)
             const byStatus =
-                statusFilter === "ALL"
-                    ? true
-                    : isCanceledStatus(o.orderStatus);
+                statusFilter === "ALL" ? true : isCanceledStatus(o.orderStatus);
+
+            // 카테고리 필터 (ALL / PRODUCT / PASS / MEMBERSHIP ...)
+            const orderTab = mapCategoryToTab(o.itemCategory);
+            const byCategory =
+                categoryTab === "ALL" ? true : orderTab === categoryTab;
 
             return byCategory && byStatus;
         });
     }, [pageData, categoryTab, statusFilter]);
 
     const totalPages = pageData?.totalPages ?? 0;
+
+    // 🔥 페이지네이션은 "전체 / 전체" 에서만 보여주기
+    const showPagination =
+        totalPages > 1 &&
+        categoryTab === "ALL" &&
+        statusFilter === "ALL";
 
     // =====================
     //   렌더링
@@ -147,30 +210,34 @@ export default function MyOrdersPage() {
         <main className="min-h-screen bg-black text-white pt-16">
             <div className="max-w-5xl mx-auto px-4 md:px-6 py-8">
                 {/* 제목 */}
-                <h1 className="text-2xl md:text-3xl font-bold mb-6">주문 내역</h1>
+                <h1 className="text-2xl md:text-3xl font-bold mb-6">
+                    주문 내역
+                </h1>
 
                 {/* 상단 탭 (전체 / 상품 / 이용권 / 후원 / 멤버십 / 티켓) */}
                 <div className="flex gap-4 text-sm md:text-base mb-3 border-b border-zinc-800 pb-2">
-                    {([
-                        ["ALL", "전체"],
-                        ["PRODUCT", "상품"],
-                        ["PASS", "이용권"],
-                        ["DONATION", "후원"],
-                        ["MEMBERSHIP", "멤버십"],
-                        ["TICKET", "티켓"],
-                    ] as [CategoryTab, string][]).map(([value, label]) => (
+                    {(
+                        [
+                            ["ALL", "전체"],
+                            ["PRODUCT", "상품"],
+                            ["PASS", "이용권"],
+                            ["DONATION", "후원"],
+                            ["MEMBERSHIP", "멤버십"],
+                            ["TICKET", "티켓"],
+                        ] as [CategoryTab, string][]
+                    ).map(([value, label]) => (
                         <button
                             key={value}
                             type="button"
-                            onClick={() => setCategoryTab(value)}
-                            className={`
-                                pb-1
-                                ${
+                            onClick={() => {
+                                setCategoryTab(value);
+                                setPage(0); // 탭 바뀔 때 페이지 0으로
+                            }}
+                            className={`pb-1 ${
                                 categoryTab === value
                                     ? "border-b-2 border-white text-white font-semibold"
                                     : "text-zinc-400 hover:text-zinc-200"
-                            }
-                            `}
+                            }`}
                         >
                             {label}
                         </button>
@@ -181,29 +248,29 @@ export default function MyOrdersPage() {
                 <div className="flex gap-2 mb-6">
                     <button
                         type="button"
-                        onClick={() => setStatusFilter("ALL")}
-                        className={`
-                            px-4 py-1.5 rounded-full text-xs md:text-sm
-                            ${
+                        onClick={() => {
+                            setStatusFilter("ALL");
+                            setPage(0);
+                        }}
+                        className={`px-4 py-1.5 rounded-full text-xs md:text-sm ${
                             statusFilter === "ALL"
                                 ? "bg-white text-black font-semibold"
                                 : "bg-zinc-900 text-zinc-300 border border-zinc-700"
-                        }
-                        `}
+                        }`}
                     >
                         전체
                     </button>
                     <button
                         type="button"
-                        onClick={() => setStatusFilter("CANCEL")}
-                        className={`
-                            px-4 py-1.5 rounded-full text-xs md:text-sm
-                            ${
+                        onClick={() => {
+                            setStatusFilter("CANCEL");
+                            setPage(0);
+                        }}
+                        className={`px-4 py-1.5 rounded-full text-xs md:text-sm ${
                             statusFilter === "CANCEL"
                                 ? "bg-white text-black font-semibold"
                                 : "bg-zinc-900 text-zinc-300 border border-zinc-700"
-                        }
-                        `}
+                        }`}
                     >
                         취소/교환/반품
                     </button>
@@ -220,24 +287,29 @@ export default function MyOrdersPage() {
                     </div>
                 ) : (
                     <>
-                        {/* 각 주문 블록 – T1.fan 구조 비슷하게 */}
                         <div className="space-y-8">
                             {filteredOrders.map((order) => {
-                                // 🔥 대표 상품명 + 외 N건
                                 const displayName =
                                     order.itemName == null
                                         ? "상품명 정보 없음"
                                         : order.itemCount > 1
-                                            ? `${order.itemName} 외 ${order.itemCount - 1}건`
+                                            ? `${order.itemName} 외 ${
+                                                order.itemCount - 1
+                                            }건`
                                             : order.itemName;
 
-                                const quantityText = `총 수량 ${order.itemCount}개`; // itemCount를 총 수량으로 사용
+                                const quantityText = `총 수량 ${order.itemCount}개`;
 
                                 return (
-                                    <section key={order.orderNo} className="space-y-2">
+                                    <section
+                                        key={order.orderNo}
+                                        className="space-y-2"
+                                    >
                                         {/* 날짜 + 상세 보기 */}
                                         <div className="flex items-center justify-between text-xs md:text-sm text-zinc-400">
-                                            <span>{formatDate(order.orderDate)}</span>
+                                            <span>
+                                                {formatDate(order.orderDate)}
+                                            </span>
                                             <button
                                                 type="button"
                                                 onClick={() =>
@@ -254,14 +326,14 @@ export default function MyOrdersPage() {
 
                                         {/* 주문 카드 */}
                                         <div className="bg-zinc-900 rounded-2xl p-4 md:p-5">
-                                            {/* 상태 라벨 */}
                                             <div className="text-[11px] md:text-xs text-zinc-400 mb-2">
-                                                {getStatusLabel(order.orderStatus)}
+                                                {getStatusLabel(
+                                                    order.orderStatus,
+                                                )}
                                             </div>
 
-                                            {/* 내용: 썸네일 + 상품명 + 금액/개수 */}
                                             <div className="flex gap-3">
-                                                {/* 썸네일 – 지금은 기본 T1 로고, 나중에 이미지 필드 생기면 교체 */}
+                                                {/* 썸네일 – 임시 T1 로고 */}
                                                 <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-zinc-800 overflow-hidden flex items-center justify-center flex-shrink-0">
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                     <img
@@ -271,14 +343,15 @@ export default function MyOrdersPage() {
                                                     />
                                                 </div>
 
-                                                {/* 텍스트 영역 */}
                                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
                                                     <div className="text-sm md:text-base font-medium truncate">
                                                         {displayName}
                                                     </div>
                                                     <div className="mt-1 text-xs md:text-sm text-zinc-400">
-                                                        {formatMoney(order.orderTotalPrice)}원 ·{" "}
-                                                        {quantityText}
+                                                        {formatMoney(
+                                                            order.orderTotalPrice,
+                                                        )}
+                                                        원 · {quantityText}
                                                     </div>
                                                 </div>
                                             </div>
@@ -288,21 +361,20 @@ export default function MyOrdersPage() {
                             })}
                         </div>
 
-                        {/* 페이지네이션 */}
-                        {totalPages > 1 && (
+                        {/* 페이지네이션 – 전체/전체에서만 표시 */}
+                        {showPagination && (
                             <div className="mt-8 flex justify-center gap-3 text-xs md:text-sm">
                                 <button
                                     type="button"
                                     disabled={page === 0}
-                                    onClick={() => setPage((p) => Math.max(p - 1, 0))}
-                                    className={`
-                                        px-3 py-1.5 rounded-full border
-                                        ${
+                                    onClick={() =>
+                                        setPage((p) => Math.max(p - 1, 0))
+                                    }
+                                    className={`px-3 py-1.5 rounded-full border ${
                                         page === 0
                                             ? "border-zinc-700 text-zinc-600 cursor-default"
                                             : "border-zinc-600 text-zinc-200 hover:bg-zinc-800"
-                                    }
-                                    `}
+                                    }`}
                                 >
                                     이전
                                 </button>
@@ -316,17 +388,17 @@ export default function MyOrdersPage() {
                                         setPage((p) =>
                                             totalPages === 0
                                                 ? p
-                                                : Math.min(p + 1, totalPages - 1),
+                                                : Math.min(
+                                                    p + 1,
+                                                    totalPages - 1,
+                                                ),
                                         )
                                     }
-                                    className={`
-                                        px-3 py-1.5 rounded-full border
-                                        ${
+                                    className={`px-3 py-1.5 rounded-full border ${
                                         page >= totalPages - 1
                                             ? "border-zinc-700 text-zinc-600 cursor-default"
                                             : "border-zinc-600 text-zinc-200 hover:bg-zinc-800"
-                                    }
-                                    `}
+                                    }`}
                                 >
                                     다음
                                 </button>

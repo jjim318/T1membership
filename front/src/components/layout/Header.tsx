@@ -18,8 +18,8 @@ interface MemberInfo {
 
 interface JwtPayload {
     sub?: string;
-    roles?: string[];        // ["USER","ADMIN"]
-    memberRole?: string;     // "ADMIN" 같은 단일 스트링일 수도 있음
+    roles?: string[]; // ["USER","ADMIN"]
+    memberRole?: string; // "ADMIN" 같은 단일 스트링일 수도 있음
     [key: string]: unknown;
 }
 
@@ -34,7 +34,7 @@ function parseJwt(token: string): JwtPayload | null {
             atob(base64)
                 .split("")
                 .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-                .join("")
+                .join(""),
         );
         return JSON.parse(jsonPayload);
     } catch (e) {
@@ -150,8 +150,9 @@ export default function Header() {
         <header
             className="
                 fixed top-0 left-0 right-0 z-50
-                bg-black/90 text-white backdrop-blur-sm
-                border-b border-zinc-800
+                bg-black text-white
+                /* 🔥 줄/테두리, 블러 전부 제거 */
+                border-none border-b-0 shadow-none
             "
         >
             <div className="mx-auto max-w-6xl px-3 md:px-6 h-14 flex items-center justify-between gap-3">
@@ -201,8 +202,7 @@ export default function Header() {
 
                 {/* 오른쪽: 아이콘들 */}
                 <div className="flex items-center gap-3 md:gap-5 text-white shrink-0">
-
-                    {/* 🔥 ADMIN 버튼 (종 왼쪽) */}
+                    {/* ADMIN 버튼 */}
                     {isLogin && isAdmin && (
                         <button
                             onClick={() => router.push("/admin")}
@@ -217,7 +217,7 @@ export default function Header() {
                         </button>
                     )}
 
-                    {/* 🔔 알림 */}
+                    {/* 알림 */}
                     <button
                         onClick={() => handleProtectedClick("/notifications")}
                         className="relative"
@@ -233,7 +233,7 @@ export default function Header() {
                         )}
                     </button>
 
-                    {/* 📅 캘린더 */}
+                    {/* 캘린더 */}
                     <button onClick={() => handleProtectedClick("/schedule")}>
                         <Image
                             src="/icons/calendar.png"
@@ -243,7 +243,7 @@ export default function Header() {
                         />
                     </button>
 
-                    {/* 🛒 장바구니 */}
+                    {/* 장바구니 */}
                     <button
                         onClick={() => handleProtectedClick("/shop/cart")}
                         className="relative"
@@ -255,19 +255,21 @@ export default function Header() {
                             height={24}
                         />
                         {isLogin && cartCount > 0 && (
-                            <span className="
-                                absolute -top-1 -right-1
-                                min-w-[18px] h-[18px] px-[4px]
-                                rounded-full bg-red-500
-                                text-[11px] font-semibold
-                                flex items-center justify-center
-                            ">
+                            <span
+                                className="
+                                    absolute -top-1 -right-1
+                                    min-w-[18px] h-[18px] px-[4px]
+                                    rounded-full bg-red-500
+                                    text-[11px] font-semibold
+                                    flex items-center justify-center
+                                "
+                            >
                                 {cartCount}
                             </span>
                         )}
                     </button>
 
-                    {/* 🙍 프로필 */}
+                    {/* 프로필 */}
                     <button
                         onClick={() => {
                             if (!isLogin) {

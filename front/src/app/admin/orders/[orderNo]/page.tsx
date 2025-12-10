@@ -1,659 +1,525 @@
-// src/app/admin/order/[orderNo]/page.tsx
+// src/app/admin/orders/[orderNo]/page.tsx
 "use client";
 
-import { useEffect, useState, ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import axios from "axios";
 import { apiClient } from "@/lib/apiClient";
-import axios, { AxiosError } from "axios";
 
-type OrderStatus =
-    | "PENDING"
-    | "PAID"
-    | "SHIPPED"
-    | "DELIVERED"
-    | "CANCELED"
-    | "REFUNDED";
+type OrderStatus = string;
 
-interface ErrorBody {
-    resMessage?: string;
-    message?: string;
-}
-
-interface OrderItemRes {
-    itemNo: number;
+// 라인 DTO
+interface AdminOrderItemRes {
+    orderItemNo: number;
+    itemNo: number | null;
     itemNameSnapshot: string;
     itemOptionSnapshot?: string | null;
     itemImageSnapshot?: string | null;
-    priceAtOrder: number;
+    priceAtOrder: number | null;
     quantity: number;
-    lineTotal: number;
+    lineTotal: number | null;
+    itemCategorySnapshot?: string | null;
 }
 
+// 주문 상세 DTO
 interface AdminDetailOrderRes {
-    memberEmail: string;
     orderNo: number;
     orderStatus: OrderStatus;
     createdAt: string;
-    updatedAt: string | null;
-    tossPaymentStatus?: string | null;
+    updatedAt: string;
+    orderTotalPrice: number | null;
 
-    receiverName: string;
-    receiverPhone: string;
-    receiverAddress: string;
+    paymentMethod?: string | null;
+    paymentStatus?: string | null;
+
+    receiverName?: string | null;
+    receiverPhone?: string | null;
+    receiverAddress?: string | null;
     receiverDetailAddress?: string | null;
     receiverZipCode?: string | null;
     memo?: string | null;
 
-    items: OrderItemRes[];
+    memberEmail: string;
+    memberNickName?: string | null;
+
+    items: AdminOrderItemRes[];
 }
 
-interface AdminUpdateOrderAddressReq {
-    orderNo: number;
-    receiverName: string;
-    receiverPhone: string;
-    receiverAddress: string;
-    receiverDetailAddress?: string | null;
-    receiverZipCode?: string | null;
-    memo?: string | null;
-}
-
+// 취소 요청/응답
 interface CancelOrderReq {
     orderNo: number;
+    reason: string;
     orderItemNos?: number[] | null;
-    cancelReason?: string;
 }
 
-const statusLabel = (s: OrderStatus) => {
-    switch (s) {
-        case "PENDING":
-            return "결제대기";
-        case "PAID":
-            return "결제완료";
-        case "SHIPPED":
-            return "배송중";
-        case "DELIVERED":
-            return "배송완료";
-        case "CANCELED":
-            return "취소";
-        case "REFUNDED":
-            return "환불완료";
-        default:
-            return s;
-    }
-};
+interface CancelOrderRes {
+    orderNo: number;
+    orderStatus: string;
+}
 
-const formatDateTime = (t: string | null | undefined) =>
-    t ? new Date(t).toLocaleString("ko-KR") : "-";
-const formatPrice = (n: number) =>
-    `${n.toLocaleString("ko-KR")}원`;
+// ========= 헬퍼 =========
+function formatDate(dateStr: string | null | undefined): string {
+    if (!dateStr) return "-";
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return dateStr;
+    const y = d.getFullYear();
+    const m = `${d.getMonth() + 1}`.padStart(2, "0");
+    const day = `${d.getDate()}`.padStart(2, "0");
+    return `${y}.${m}.${day}`;
+}
 
-const extractError = (err: unknown, fallback: string) => {
-    if (axios.isAxiosError<ErrorBody>(err)) {
-        const ax = err as AxiosError<ErrorBody>;
-        return (
-            ax.response?.data?.resMessage ||
-            ax.response?.data?.message ||
-            fallback
-        );
+function formatDateTime(dateStr: string | null | undefined): string {
+    if (!dateStr) return "-";
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return dateStr;
+    const y = d.getFullYear();
+    const m = `${d.getMonth() + 1}`.padStart(2, "0");
+    const day = `${d.getDate()}`.padStart(2, "0");
+    const hh = `${d.getHours()}`.padStart(2, "0");
+    const mm = `${d.getMinutes()}`.padStart(2, "0");
+    const ss = `${d.getSeconds()}`.padStart(2, "0");
+    return `${y}.${m}.${day} ${hh}:${mm}:${ss}`;
+}
+
+// ✅ null 방어
+function formatMoney(value: number | null | undefined): string {
+    if (value == null || Number.isNaN(value)) return "0";
+    return value.toLocaleString("ko-KR");
+}
+
+// 상태 라벨
+function getStatusLabel(status: OrderStatus): string {
+    const upper = (status ?? "").toUpperCase();
+
+    if (
+        upper === "PARTIALLY_CANCELED" ||
+        upper === "PARTIAL_CANCEL" ||
+        (upper.includes("PART") && upper.includes("CANCEL"))
+    ) {
+        return "부분 취소";
     }
-    if (err instanceof Error) return err.message;
-    return fallback;
-};
+
+    if (upper === "ORDERED") return "결제 대기";
+    if (upper === "PAID") return "결제 완료";
+
+    if (upper.includes("PENDING") || upper.includes("WAIT")) return "결제 대기";
+    if (upper.includes("PREPARE")) return "상품 준비중";
+    if (upper.includes("CONFIRM") || upper.includes("COMPLETE")) return "구매확정";
+    if (upper.includes("SHIP")) return "배송 중";
+    if (upper.includes("DELIVERED")) return "배송 완료";
+    if (upper.includes("CANCEL")) return "취소 완료";
+    if (upper.includes("REFUND")) return "환불 완료";
+
+    return status;
+}
+
+// 부분 취소 상태인지
+function isPartiallyCanceled(status: OrderStatus): boolean {
+    const upper = (status ?? "").toUpperCase();
+    return (
+        upper === "PARTIALLY_CANCELED" ||
+        upper === "PARTIAL_CANCEL" ||
+        (upper.includes("PART") && upper.includes("CANCEL"))
+    );
+}
+
+// 관리자 취소 가능 상태
+function isAdminCancelableStatus(status: OrderStatus): boolean {
+    const upper = (status ?? "").toUpperCase();
+    return upper === "ORDERED" || upper === "PAID";
+}
+
+// MD 상품인지
+function isMdItem(item: AdminOrderItemRes): boolean {
+    const cat = (item.itemCategorySnapshot ?? "").toUpperCase();
+    return cat === "MD";
+}
 
 export default function AdminOrderDetailPage() {
-    const params = useParams<{ orderNo: string }>();
     const router = useRouter();
-    const orderNo = Number(params.orderNo);
+    const params = useParams();
+    const orderNoParam = params?.orderNo;
 
-    const [detail, setDetail] = useState<AdminDetailOrderRes | null>(
-        null
-    );
-    const [loading, setLoading] = useState(false);
-    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [data, setData] = useState<AdminDetailOrderRes | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    // 배송지 폼
-    const [addrForm, setAddrForm] =
-        useState<AdminUpdateOrderAddressReq | null>(null);
-    const [addrSaving, setAddrSaving] = useState(false);
-
-    // 전체/부분 취소
-    const [cancelReasonAll, setCancelReasonAll] = useState("");
-    const [cancelReasonPartial, setCancelReasonPartial] =
-        useState("");
-    const [selectedItemNos, setSelectedItemNos] = useState<
-        number[]
-    >([]);
-    const [cancelProcessing, setCancelProcessing] =
-        useState(false);
-
-    const fetchDetail = async () => {
-        try {
-            setLoading(true);
-            setErrorMsg(null);
-
-            const res = await apiClient.get<AdminDetailOrderRes>(
-                `/admin/order/${orderNo}`
-            );
-            const data = res.data;
-            setDetail(data);
-
-            setAddrForm({
-                orderNo,
-                receiverName: data.receiverName,
-                receiverPhone: data.receiverPhone,
-                receiverAddress: data.receiverAddress,
-                receiverDetailAddress:
-                    data.receiverDetailAddress ?? "",
-                receiverZipCode: data.receiverZipCode ?? "",
-                memo: data.memo ?? "",
-            });
-
-            setSelectedItemNos([]);
-        } catch (err) {
-            const msg = extractError(
-                err,
-                "주문 상세를 불러오지 못했습니다."
-            );
-            setErrorMsg(msg);
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const [cancelAllLoading, setCancelAllLoading] = useState(false);
+    const [cancelItemLoading, setCancelItemLoading] = useState<number | null>(null);
 
     useEffect(() => {
-        if (!Number.isNaN(orderNo)) {
-            fetchDetail();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [orderNo]);
+        const orderNo =
+            typeof orderNoParam === "string"
+                ? orderNoParam
+                : Array.isArray(orderNoParam)
+                    ? orderNoParam[0]
+                    : undefined;
 
-    const changeStatus = async (newStatus: OrderStatus) => {
-        if (!detail) return;
-        if (
-            !confirm(
-                `주문 상태를 '${statusLabel(
-                    newStatus
-                )}'(으)로 변경하시겠습니까?`
-            )
-        )
-            return;
+        if (!orderNo) return;
 
-        try {
-            await apiClient.patch("/admin/order/status", {
-                orderNo: detail.orderNo,
-                orderStatus: newStatus,
-            });
-
-            alert("상태를 변경했습니다.");
-            fetchDetail();
-        } catch (err) {
-            alert(
-                extractError(err, "상태 변경에 실패했습니다.")
-            );
-            console.error(err);
-        }
-    };
-
-    const handleAddrChange = (
-        e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-    ) => {
-        if (!addrForm) return;
-        const { name, value } = e.target;
-        setAddrForm({
-            ...addrForm,
-            [name]: value,
-        });
-    };
-
-    const saveAddress = async () => {
-        if (!addrForm) return;
-        if (!confirm("배송 정보를 수정하시겠습니까?")) return;
-
-        try {
-            setAddrSaving(true);
-            await apiClient.patch("/admin/order/address", {
-                ...addrForm,
-                orderNo,
-            });
-            alert("배송 정보를 수정했습니다.");
-            fetchDetail();
-        } catch (err) {
-            alert(
-                extractError(err, "배송지 수정에 실패했습니다.")
-            );
-            console.error(err);
-        } finally {
-            setAddrSaving(false);
-        }
-    };
-
-    const cancelAll = async () => {
-        if (!detail) return;
-        if (
-            !confirm(
-                `주문번호 ${detail.orderNo} 를 전체 취소하시겠습니까?`
-            )
-        )
-            return;
-
-        const body: CancelOrderReq = {
-            orderNo: detail.orderNo,
-            orderItemNos: null,
-            cancelReason: cancelReasonAll || undefined,
+        const load = async () => {
+            try {
+                const res = await apiClient.get<AdminDetailOrderRes>(
+                    `/admin/order/${orderNo}`,
+                );
+                setData(res.data);
+            } catch (e) {
+                console.error("[AdminOrderDetail] load error", e);
+                if (axios.isAxiosError(e) && e.response?.status === 404) {
+                    alert("해당 주문을 찾을 수 없습니다.");
+                } else {
+                    alert("관리자용 주문 상세 정보를 불러오지 못했습니다.");
+                }
+                router.replace("/admin/orders");
+            } finally {
+                setLoading(false);
+            }
         };
 
-        try {
-            setCancelProcessing(true);
-            await apiClient.patch(
-                "/admin/order/cancel/all",
-                body
-            );
-            alert("전체 취소가 완료되었습니다.");
-            router.push("/admin/order");
-        } catch (err) {
-            alert(
-                extractError(err, "전체 취소에 실패했습니다.")
-            );
-            console.error(err);
-        } finally {
-            setCancelProcessing(false);
-        }
-    };
+        void load();
+    }, [orderNoParam, router]);
 
-    const toggleItem = (itemNo: number) => {
-        setSelectedItemNos((prev) =>
-            prev.includes(itemNo)
-                ? prev.filter((n) => n !== itemNo)
-                : [...prev, itemNo]
+    // ===== 레이아웃에서 이미 bg / pt-16 을 줬으니 여기선 안 준다 =====
+
+    if (loading) {
+        return (
+            <div className="flex min-h-[300px] items-center justify-center">
+                <span className="text-sm text-zinc-400">
+                    주문 상세를 불러오는 중입니다…
+                </span>
+            </div>
         );
+    }
+
+    if (!data) {
+        return (
+            <div className="flex min-h-[300px] items-center justify-center">
+                <span className="text-sm text-zinc-400">
+                    주문 정보를 찾을 수 없습니다.
+                </span>
+            </div>
+        );
+    }
+
+    const items = data.items ?? [];
+    const partiallyCanceled = isPartiallyCanceled(data.orderStatus);
+
+    const canCancelAll =
+        !partiallyCanceled &&
+        items.length > 0 &&
+        isAdminCancelableStatus(data.orderStatus) &&
+        items.every((it) => isMdItem(it));
+
+    const canCancelItem = (item: AdminOrderItemRes): boolean => {
+        if (!isAdminCancelableStatus(data.orderStatus)) return false;
+        return isMdItem(item);
     };
 
-    const cancelPartial = async () => {
-        if (!detail) return;
-        if (selectedItemNos.length === 0) {
-            alert("부분 취소할 상품을 선택하세요.");
+    // =========================
+    //   전체 취소 (관리자)
+    // =========================
+    const handleCancelAll = async () => {
+        if (!data) return;
+        if (!canCancelAll) {
+            alert("전체 취소 가능 상태가 아닙니다.");
             return;
         }
-        if (
-            !confirm(
-                `선택된 ${selectedItemNos.length}개 상품을 부분 취소하시겠습니까?`
-            )
-        )
+
+        const ok = window.confirm(
+            "이 주문을 전체 취소하시겠습니까?\n(멤버십/POP 상품은 현재 로직에서 제외됩니다.)",
+        );
+        if (!ok) return;
+
+        const reason = window.prompt("취소 사유를 입력해 주세요.");
+        if (!reason || reason.trim().length === 0) {
+            alert("취소 사유를 입력해야 합니다.");
             return;
+        }
 
-        const body: CancelOrderReq = {
-            orderNo: detail.orderNo,
-            orderItemNos: selectedItemNos,
-            cancelReason: cancelReasonPartial || undefined,
-        };
-
+        setCancelAllLoading(true);
         try {
-            setCancelProcessing(true);
-            await apiClient.patch(
-                `/admin/order/${detail.orderNo}/cancel-items`,
-                body
+            const body: CancelOrderReq = {
+                orderNo: data.orderNo,
+                reason: reason.trim(),
+                orderItemNos: null,
+            };
+
+            await apiClient.patch<CancelOrderRes>("/admin/order/cancel/all", body);
+
+            alert("관리자 전체 취소가 완료되었습니다.");
+
+            const refreshed = await apiClient.get<AdminDetailOrderRes>(
+                `/admin/order/${data.orderNo}`,
             );
-            alert("부분 취소가 완료되었습니다.");
-            setCancelReasonPartial("");
-            setSelectedItemNos([]);
-            fetchDetail();
-        } catch (err) {
-            alert(
-                extractError(err, "부분 취소에 실패했습니다.")
-            );
-            console.error(err);
+            setData(refreshed.data);
+        } catch (e) {
+            console.error("[AdminOrderDetail] cancel all error", e);
+            if (axios.isAxiosError(e)) {
+                const msg =
+                    (e.response?.data as any)?.resMessage ||
+                    (e.response?.data as any)?.message ||
+                    "주문 전체 취소에 실패했습니다.";
+                alert(msg);
+            } else {
+                alert("주문 전체 취소에 실패했습니다.");
+            }
         } finally {
-            setCancelProcessing(false);
+            setCancelAllLoading(false);
         }
     };
+
+    // =========================
+    //   부분 취소 (관리자)
+    // =========================
+    const handleCancelItem = async (item: AdminOrderItemRes) => {
+        if (!data) return;
+        if (!canCancelItem(item)) {
+            alert("해당 상품은 관리자 취소가 불가능한 상태입니다.");
+            return;
+        }
+
+        const ok = window.confirm(
+            `해당 상품을 부분 취소하시겠습니까?\n\n상품명: ${item.itemNameSnapshot}\n수량: ${item.quantity}개`,
+        );
+        if (!ok) return;
+
+        const reason = window.prompt("해당 상품의 취소 사유를 입력해 주세요.");
+        if (!reason || reason.trim().length === 0) {
+            alert("취소 사유를 입력해야 합니다.");
+            return;
+        }
+
+        setCancelItemLoading(item.orderItemNo);
+        try {
+            const body: CancelOrderReq = {
+                orderNo: data.orderNo,
+                reason: reason.trim(),
+                orderItemNos: [item.orderItemNo],
+            };
+
+            await apiClient.patch<CancelOrderRes>(
+                `/admin/order/${data.orderNo}/cancel-items`,
+                body,
+            );
+
+            alert("관리자 부분 취소가 완료되었습니다.");
+
+            const refreshed = await apiClient.get<AdminDetailOrderRes>(
+                `/admin/order/${data.orderNo}`,
+            );
+            setData(refreshed.data);
+        } catch (e) {
+            console.error("[AdminOrderDetail] cancel item error", e);
+            if (axios.isAxiosError(e)) {
+                const msg =
+                    (e.response?.data as any)?.resMessage ||
+                    (e.response?.data as any)?.message ||
+                    "상품 부분 취소에 실패했습니다.";
+                alert(msg);
+            } else {
+                alert("상품 부분 취소에 실패했습니다.");
+            }
+        } finally {
+            setCancelItemLoading(null);
+        }
+    };
+
+    // =========================
+    //   렌더링
+    // =========================
 
     return (
-        <div className="w-full min-h-screen bg-black text-white px-10 py-8 flex flex-col gap-6">
-            {/* 상단 헤더 + 뒤로가기 */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-semibold">
-                        주문 상세
-                    </h1>
-                    <p className="text-xs text-gray-400 mt-1">
-                        주문번호 {orderNo}
-                    </p>
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-4 md:py-6">
+            {/* 상단 영역 */}
+            <section className="mb-6 flex flex-col gap-2">
+
+                <h1 className="text-xl md:text-2xl font-bold">
+                    주문 #{data.orderNo}
+                </h1>
+                <p className="text-xs md:text-sm text-zinc-400">
+                    주문 일시 {formatDateTime(data.createdAt)}
+                </p>
+                <p className="text-xs md:text-sm text-zinc-300">
+                    상태: {getStatusLabel(data.orderStatus)}
+                </p>
+                <p className="text-xs md:text-sm text-zinc-300">
+                    회원: {data.memberEmail}
+                    {data.memberNickName && ` (${data.memberNickName})`}
+                </p>
+            </section>
+
+            {/* 안내 바 */}
+            <section className="space-y-2 mb-6 text-[11px] md:text-xs text-zinc-300">
+                {partiallyCanceled && (
+                    <div className="rounded-md bg-zinc-800 px-3 py-2">
+                        일부 상품이 취소된 주문입니다.
+                    </div>
+                )}
+                <div className="rounded-md bg-zinc-800 px-3 py-2">
+                    관리자 화면입니다. 결제 상태와 실제 Toss 환불 상태가 다를 수 있으니,
+                    부분 취소/전체 취소 후 정산 내역도 함께 확인해 주세요.
                 </div>
-                <button
-                    className="px-4 py-2 text-xs border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                    onClick={() => router.push("/admin/order")}
-                >
-                    목록으로
-                </button>
-            </div>
+            </section>
 
-            {loading && (
-                <div className="text-sm text-neutral-400">
-                    불러오는 중…
-                </div>
-            )}
-            {errorMsg && (
-                <div className="text-sm text-red-400">{errorMsg}</div>
-            )}
+            {/* 주문 상품 리스트 */}
+            <section className="mb-8">
+                <h2 className="text-sm md:text-base font-semibold mb-3">
+                    주문 상품
+                </h2>
+                {items.length === 0 ? (
+                    <p className="text-xs text-zinc-400">주문 상품이 없습니다.</p>
+                ) : (
+                    <ul className="space-y-3">
+                        {items.map((item, idx) => {
+                            const md = isMdItem(item);
+                            const itemCancelable = canCancelItem(item);
 
-            {detail && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* 왼쪽: 주문/배송/상품 */}
-                    <div className="lg:col-span-2 flex flex-col gap-4">
-                        {/* 주문 기본 정보 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-sm">
-                            <div className="flex items-center justify-between mb-2">
-                                <div>
-                                    <div className="text-xs text-neutral-400">
-                                        주문번호
+                            return (
+                                <li
+                                    key={`${item.itemNo ?? "item"}-${idx}`}
+                                    className="flex gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-xs md:text-sm"
+                                >
+                                    {/* 썸네일 */}
+                                    <div className="w-16 h-16 rounded-lg bg-zinc-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                            src={item.itemImageSnapshot || "/icons/t1.png"}
+                                            alt={item.itemNameSnapshot}
+                                            className="w-full h-full object-cover"
+                                        />
                                     </div>
-                                    <div className="text-lg font-semibold">
-                                        {detail.orderNo}
-                                    </div>
-                                </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <span className="px-3 py-1 rounded-full bg-neutral-900 text-[11px]">
-                                        {statusLabel(
-                                            detail.orderStatus
+
+                                    {/* 정보 */}
+                                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                        <div className="font-semibold truncate">
+                                            {item.itemNameSnapshot}
+                                        </div>
+                                        {item.itemOptionSnapshot && (
+                                            <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
+                                                {item.itemOptionSnapshot}
+                                            </div>
                                         )}
-                                    </span>
-                                    <span className="text-[11px] text-neutral-400">
-                                        결제상태 :{" "}
-                                        {detail.tossPaymentStatus ??
-                                            "-"}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-y-1 text-xs text-neutral-300">
-                                <div>
-                                    <span className="text-neutral-500">
-                                        주문자
-                                    </span>
-                                    <div>{detail.memberEmail}</div>
-                                </div>
-                                <div>
-                                    <span className="text-neutral-500">
-                                        주문일
-                                    </span>
-                                    <div>
-                                        {formatDateTime(
-                                            detail.createdAt
+
+                                        <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
+                                            개당 {formatMoney(item.priceAtOrder)}원 · 수량{" "}
+                                            {item.quantity}개
+                                        </div>
+
+                                        <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
+                                            라인 금액 {formatMoney(item.lineTotal)}원
+                                        </div>
+
+                                        {md && (
+                                            <div className="mt-1 text-[11px] md:text-xs text-emerald-400">
+                                                MD 상품
+                                            </div>
                                         )}
                                     </div>
-                                </div>
-                                <div>
-                                    <span className="text-neutral-500">
-                                        변경일
-                                    </span>
-                                    <div>
-                                        {formatDateTime(
-                                            detail.updatedAt
+
+                                    {/* 금액 + 취소 버튼 */}
+                                    <div className="text-right flex flex-col justify-between items-end gap-2">
+                                        {itemCancelable ? (
+                                            <button
+                                                type="button"
+                                                className="px-2 py-1 rounded-lg border border-zinc-700 text-[11px] md:text-xs hover:bg-zinc-800 disabled:opacity-60"
+                                                disabled={
+                                                    cancelItemLoading === item.orderItemNo
+                                                }
+                                                onClick={() => handleCancelItem(item)}
+                                            >
+                                                {cancelItemLoading === item.orderItemNo
+                                                    ? "취소 처리 중…"
+                                                    : "이 상품 부분 취소"}
+                                            </button>
+                                        ) : (
+                                            <span className="text-[11px] md:text-xs text-zinc-500">
+                                                취소 불가
+                                            </span>
                                         )}
                                     </div>
-                                </div>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                )}
+            </section>
+
+            {/* 결제 정보 */}
+            <section className="mb-8">
+                <h2 className="text-sm md:text-base font-semibold mb-3">
+                    결제 정보
+                </h2>
+                <dl className="space-y-2 text-xs md:text-sm">
+                    <div className="flex justify-between">
+                        <dt className="text-zinc-500">총 결제 금액</dt>
+                        <dd>{formatMoney(data.orderTotalPrice)}원</dd>
+                    </div>
+                    <div className="flex justify-between">
+                        <dt className="text-zinc-500">결제 수단</dt>
+                        <dd>{data.paymentMethod ?? "-"}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                        <dt className="text-zinc-500">결제 상태</dt>
+                        <dd>{data.paymentStatus ?? "-"}</dd>
+                    </div>
+                </dl>
+            </section>
+
+            {/* 배송 정보 */}
+            <section className="mb-10">
+                <h2 className="text-sm md:text-base font-semibold mb-3">
+                    배송지 정보
+                </h2>
+                <div className="space-y-1 text-xs md:text-sm text-zinc-300">
+                    {data.receiverZipCode ||
+                    data.receiverAddress ||
+                    data.receiverDetailAddress ? (
+                        <>
+                            <div>
+                                {data.receiverZipCode
+                                    ? `[${data.receiverZipCode}] `
+                                    : ""}{" "}
+                                {data.receiverAddress ?? ""}{" "}
+                                {data.receiverDetailAddress ?? ""}
                             </div>
-                        </section>
-
-                        {/* 배송 정보 + 수정 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-xs">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-semibold">
-                                    배송 정보
-                                </span>
-                            </div>
-
-                            {addrForm && (
-                                <div className="grid grid-cols-1 gap-2">
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            수령인
-                                        </div>
-                                        <input
-                                            name="receiverName"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5"
-                                            value={addrForm.receiverName}
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            연락처
-                                        </div>
-                                        <input
-                                            name="receiverPhone"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5"
-                                            value={addrForm.receiverPhone}
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            우편번호
-                                        </div>
-                                        <input
-                                            name="receiverZipCode"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5"
-                                            value={
-                                                addrForm.receiverZipCode ??
-                                                ""
-                                            }
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            주소
-                                        </div>
-                                        <input
-                                            name="receiverAddress"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5"
-                                            value={addrForm.receiverAddress}
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            상세 주소
-                                        </div>
-                                        <input
-                                            name="receiverDetailAddress"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5"
-                                            value={
-                                                addrForm.receiverDetailAddress ??
-                                                ""
-                                            }
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div className="text-neutral-500 mb-1">
-                                            요청 메모
-                                        </div>
-                                        <textarea
-                                            name="memo"
-                                            className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-1.5 h-16 resize-none"
-                                            value={addrForm.memo ?? ""}
-                                            onChange={handleAddrChange}
-                                        />
-                                    </div>
-
-                                    <button
-                                        className="mt-1 w-full px-3 py-2 text-[11px] border border-neutral-600 rounded-lg hover:bg-neutral-800 disabled:opacity-50"
-                                        onClick={saveAddress}
-                                        disabled={addrSaving}
-                                    >
-                                        {addrSaving
-                                            ? "저장 중…"
-                                            : "배송 정보 저장"}
-                                    </button>
+                            {data.receiverName && (
+                                <div>수령인: {data.receiverName}</div>
+                            )}
+                            {data.receiverPhone && (
+                                <div>연락처: {data.receiverPhone}</div>
+                            )}
+                            {data.memo && (
+                                <div className="text-zinc-400">
+                                    요청사항: {data.memo}
                                 </div>
                             )}
-                        </section>
-
-                        {/* 상품 목록 + 부분취소 선택 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-xs">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-semibold">
-                                    주문 상품
-                                </span>
-                                <span className="text-[11px] text-neutral-500">
-                                    부분 취소할 상품 선택 가능
-                                </span>
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                {detail.items.map((item) => (
-                                    <label
-                                        key={`${item.itemNo}-${item.itemNameSnapshot}`}
-                                        className="flex gap-2 items-start border border-neutral-800 rounded-xl px-3 py-2 bg-black/40"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            className="mt-1"
-                                            checked={selectedItemNos.includes(
-                                                item.itemNo
-                                            )}
-                                            onChange={() =>
-                                                toggleItem(
-                                                    item.itemNo
-                                                )
-                                            }
-                                        />
-                                        <div className="flex-1">
-                                            <div className="font-semibold text-neutral-100">
-                                                {item.itemNameSnapshot}
-                                            </div>
-                                            {item.itemOptionSnapshot && (
-                                                <div className="text-neutral-400">
-                                                    옵션:{" "}
-                                                    {
-                                                        item.itemOptionSnapshot
-                                                    }
-                                                </div>
-                                            )}
-                                            <div className="flex justify-between mt-1 text-neutral-300">
-                                                <span>
-                                                    수량{" "}
-                                                    {
-                                                        item.quantity
-                                                    }
-                                                    개
-                                                </span>
-                                                <span>
-                                                    {formatPrice(
-                                                        item.lineTotal
-                                                    )}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </label>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
-
-                    {/* 오른쪽: 관리자 액션 */}
-                    <div className="flex flex-col gap-4">
-                        {/* 상태 변경 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-xs">
-                            <div className="text-sm font-semibold mb-2">
-                                상태 변경
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                <button
-                                    className="px-3 py-1 border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                                    onClick={() =>
-                                        changeStatus("PAID")
-                                    }
-                                >
-                                    결제완료
-                                </button>
-                                <button
-                                    className="px-3 py-1 border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                                    onClick={() =>
-                                        changeStatus("SHIPPED")
-                                    }
-                                >
-                                    배송중
-                                </button>
-                                <button
-                                    className="px-3 py-1 border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                                    onClick={() =>
-                                        changeStatus("DELIVERED")
-                                    }
-                                >
-                                    배송완료
-                                </button>
-                                <button
-                                    className="px-3 py-1 border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                                    onClick={() =>
-                                        changeStatus("CANCELED")
-                                    }
-                                >
-                                    주문취소
-                                </button>
-                                <button
-                                    className="px-3 py-1 border border-neutral-700 rounded-xl hover:bg-neutral-800"
-                                    onClick={() =>
-                                        changeStatus("REFUNDED")
-                                    }
-                                >
-                                    환불완료
-                                </button>
-                            </div>
-                        </section>
-
-                        {/* 전체 취소 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-xs">
-                            <div className="text-sm font-semibold mb-2">
-                                전체 취소
-                            </div>
-                            <textarea
-                                className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-2 h-20 resize-none text-[11px]"
-                                placeholder="전체 취소 사유 (선택)"
-                                value={cancelReasonAll}
-                                onChange={(e) =>
-                                    setCancelReasonAll(
-                                        e.target.value
-                                    )
-                                }
-                            />
-                            <button
-                                className="mt-2 w-full px-3 py-2 rounded-lg text-[11px] border border-red-500 text-red-500 hover:bg-red-900/40 disabled:opacity-50"
-                                onClick={cancelAll}
-                                disabled={cancelProcessing}
-                            >
-                                전체 취소 실행
-                            </button>
-                        </section>
-
-                        {/* 부분 취소 */}
-                        <section className="bg-[#111] border border-neutral-800 rounded-2xl px-4 py-3 text-xs">
-                            <div className="text-sm font-semibold mb-2">
-                                부분 취소 (선택 상품)
-                            </div>
-                            <textarea
-                                className="w-full bg-black border border-neutral-700 rounded-lg px-3 py-2 h-20 resize-none text-[11px]"
-                                placeholder="부분 취소 사유 (선택)"
-                                value={cancelReasonPartial}
-                                onChange={(e) =>
-                                    setCancelReasonPartial(
-                                        e.target.value
-                                    )
-                                }
-                            />
-                            <button
-                                className="mt-2 w-full px-3 py-2 rounded-lg text-[11px] border border-orange-500 text-orange-400 hover:bg-orange-900/40 disabled:opacity-50"
-                                onClick={cancelPartial}
-                                disabled={cancelProcessing}
-                            >
-                                선택 상품 부분 취소 실행
-                            </button>
-                        </section>
-                    </div>
+                        </>
+                    ) : (
+                        <div className="text-zinc-500">배송지 정보 없음</div>
+                    )}
                 </div>
-            )}
+            </section>
+
+            {/* 하단 버튼 */}
+            <section className="mb-2 space-y-2">
+                {canCancelAll && (
+                    <button
+                        type="button"
+                        className="w-full py-3 rounded-xl bg-red-600 text-sm md:text-base font-semibold hover:bg-red-500 disabled:opacity-60"
+                        disabled={cancelAllLoading}
+                        onClick={handleCancelAll}
+                    >
+                        {cancelAllLoading ? "전체 취소 처리 중…" : "주문 전체 취소 (관리자)"}
+                    </button>
+                )}
+
+                <button
+                    type="button"
+                    className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm md:text-base hover:bg-zinc-800"
+                    onClick={() => router.push("/admin/orders")}
+                >
+                    주문 목록으로 돌아가기
+                </button>
+            </section>
         </div>
     );
 }
