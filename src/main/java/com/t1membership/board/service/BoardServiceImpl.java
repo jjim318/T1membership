@@ -23,6 +23,7 @@ import com.t1membership.image.service.FileService;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -40,6 +41,7 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Log4j2
 public class BoardServiceImpl implements BoardService {
 
     private final FileService fileService;
@@ -337,7 +339,7 @@ public class BoardServiceImpl implements BoardService {
 
 
     /* =======================
-       삭제 (작성자 or 관리자)
+       삭제 (작성자 or 관리자 or 컨텐츠매니저)
     ======================= */
     @Override
     public DeleteBoardRes deleteBoard(DeleteBoardReq req) {
@@ -345,20 +347,54 @@ public class BoardServiceImpl implements BoardService {
         String email = auth.getName();
 
         if (req.getBoardNo() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "게시글 ID가 필요합니다.");
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "게시글 ID가 필요합니다."
+            );
         }
 
-        BoardEntity board = boardRepository.findById(req.getBoardNo())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
+        log.info("🔥 [DELETE-SERVICE] email={}", email);
 
-        boolean ownerOrAdmin = isAdmin(auth) || email.equalsIgnoreCase(board.getBoardWriter());
+        BoardEntity board = boardRepository.findById(req.getBoardNo())
+                .orElseThrow(() ->
+                        new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "게시글을 찾을 수 없습니다."
+                        )
+                );
+
+        MemberEntity member = memberRepository.findByMemberEmail(email)
+                .orElseThrow(() ->
+                        new ResponseStatusException(
+                                HttpStatus.UNAUTHORIZED,
+                                "회원 정보를 찾을 수 없습니다."
+                        )
+                );
+
+        // 🔥 작성자인지
+        boolean isWriter = email.equalsIgnoreCase(
+                board.getMember().getMemberEmail()
+        );
+
+        // 🔥 관리자 / 컨텐츠 매니저인지 (ADMIN, ADMIN_CONTENT, content_manager=true 포함)
+        boolean isManager = member.isContentManager();
+
+        log.info("🔥 [DELETE-SERVICE] isWriter={}, isManager={}, role={}",
+                isWriter, isManager, member.getMemberRole());
+
+        boolean ownerOrAdmin = isWriter || isManager;
         if (!ownerOrAdmin) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "작성자 또는 관리자만 삭제할 수 있습니다.");
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "작성자 또는 관리자만 삭제할 수 있습니다."
+            );
         }
 
         boardRepository.delete(board);
         return DeleteBoardRes.success(req.getBoardNo());
     }
+
+
 
     @Override
     @Transactional(readOnly = true)
