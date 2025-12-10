@@ -83,6 +83,17 @@ public class OrderItemEntity {
         oi.setItemPriceSnapshot(item.getItemPrice());
         //oi.setItemImageSnapshot(item.getIImage());
 
+        // 🔥🔥 여기 추가: 카테고리 스냅샷 저장
+        if (item.getItemCategory() != null) {
+            oi.setItemCategorySnapshot(item.getItemCategory()); // MD / POP / MEMBERSHIP
+        }
+
+        // 🔥 카테고리 스냅샷
+        oi.setItemCategorySnapshot(item.getItemCategory());
+
+        // 🔥 선수 스냅샷(POP 등에서 사용한다면)
+        // oi.setPlayerSnapshot(item.getPopPlayer());  // ItemEntity 에 맞게 필드명 수정
+
         //라인 합계
         BigDecimal lineTotal = priceAtOrder.multiply(BigDecimal.valueOf(quantity));
         oi.setLineTotal(lineTotal);

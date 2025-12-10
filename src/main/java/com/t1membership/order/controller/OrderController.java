@@ -107,20 +107,18 @@ public class OrderController {
     // 회원 부분 취소
     @PatchMapping("/{orderNo}/cancel-items")
     public ResponseEntity<CancelOrderRes> cancelMyOrderItems(
-            @AuthenticationPrincipal(expression = "username") String memberEmail,
+            @AuthenticationPrincipal String memberEmail,   // 🔥 여기만 수정
             @PathVariable Long orderNo,
             @RequestBody @Valid CancelOrderReq req
     ) {
 
         // 1) path 의 orderNo 를 body 에 강제 세팅
-        //    - 클라이언트가 body에 장난쳐도 path 값이 우선
         req.setOrderNo(orderNo);
 
-        // 2) 부분취소 검증: orderItemNos 가 비어있으면 안 됨
+        // 2) 부분취소 검증
         List<Long> orderItemNos = req.getOrderItemNos();
         if (orderItemNos == null || orderItemNos.isEmpty()) {
             throw new IllegalArgumentException("부분 취소를 위해서는 orderItemNos 가 1개 이상 필요합니다.");
-            // 현업에서는 ResponseStatusException / GlobalExceptionHandler 로 400 매핑 추천
         }
 
         // 3) 서비스 호출 (회원용 취소)
@@ -129,4 +127,5 @@ public class OrderController {
         // 4) 결과 반환
         return ResponseEntity.ok(res);
     }
+
 }

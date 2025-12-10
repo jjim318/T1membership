@@ -2,6 +2,7 @@ package com.t1membership.order.dto.res.user;
 
 import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.domain.OrderItemEntity;
 import com.t1membership.order.dto.res.common.OrderItemRes;
 import lombok.*;
 
@@ -63,16 +64,8 @@ public class UserDetailOrderRes {
                 (o.getOrderItems() == null)
                         ? Collections.emptyList()
                         : o.getOrderItems().stream()
-                        .map(oi -> OrderItemRes.builder()
-                                .itemNo(oi.getItem() != null ? oi.getItem().getItemNo() : null)
-                                .itemNameSnapshot(oi.getItemNameSnapshot())
-                                .itemOptionSnapshot(oi.getItemOptionSnapshot())
-                                .itemImageSnapshot(oi.getItemImageSnapshot())
-                                .priceAtOrder(oi.getPriceAtOrder())
-                                .quantity(oi.getQuantity())
-                                .lineTotal(oi.getLineTotal())
-                                .build()
-                        ).toList();
+                        .map(UserDetailOrderRes::mapOrderItem)   // 🔥 별도 메서드로 분리
+                        .toList();
 
         return UserDetailOrderRes.builder()
                 // ===== 기본 정보 =====
@@ -107,6 +100,39 @@ public class UserDetailOrderRes {
                 .membershipMonths(o.getMembershipMonths())
                 .membershipStartDate(o.getMembershipStartDate())
                 .membershipEndDate(o.getMembershipEndDate())
+                .build();
+    }
+
+    // 🔥 OrderItemEntity → OrderItemRes 변환 전용 메서드
+    private static OrderItemRes mapOrderItem(OrderItemEntity oi) {
+
+        // 원본 상품 엔티티 (null 방어)
+        var item = oi.getItem();
+
+        // 🔥 카테고리 스냅샷: 우선순위
+        // 1) OrderItemEntity 에 itemCategorySnapshot 같은 필드가 있다면 그걸 name() 해서 사용
+        // 2) 없으면 ItemEntity.itemCategory.name() 으로 대체
+        String categorySnapshot = null;
+        if (oi.getItemCategorySnapshot() != null) {           // 이런 필드가 있다면
+            categorySnapshot = oi.getItemCategorySnapshot().name();
+        } else if (item != null && item.getItemCategory() != null) {
+            categorySnapshot = item.getItemCategory().name();
+        }
+
+        return OrderItemRes.builder()
+                .orderItemNo(oi.getOrderItemNo())                           // 🔥 라인 PK
+                .itemNo(item != null ? item.getItemNo() : null)
+                .itemNameSnapshot(oi.getItemNameSnapshot())
+                .itemOptionSnapshot(oi.getItemOptionSnapshot())
+                .itemImageSnapshot(oi.getItemImageSnapshot())
+                .priceAtOrder(oi.getPriceAtOrder())
+                .quantity(oi.getQuantity())
+                .lineTotal(oi.getLineTotal())
+                .itemCategorySnapshot(                                 // ✅ 카테고리 스냅샷
+                        oi.getItemCategorySnapshot() != null
+                                ? oi.getItemCategorySnapshot().name()
+                                : null
+                )                     // 🔥 MD/POP/...
                 .build();
     }
 }

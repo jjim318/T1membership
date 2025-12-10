@@ -14,7 +14,8 @@ public enum OrderStatus {
 
     // 회원이 직접 취소 가능한 상태만 허용
     public boolean isCancelableByUser() {
-        return this == ORDERED || this == PAID;
+        return this == ORDERED
+                || this == PAID;
     }
 
     // 관리자는 좀 더 강하게

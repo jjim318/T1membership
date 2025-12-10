@@ -26,6 +26,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/admin/order")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminOrderController {
     private final AdminOrderService adminOrderService;
     private final OrderQueryService orderQueryService;
