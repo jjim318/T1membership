@@ -2,10 +2,7 @@ package com.t1membership.item.dto.modifyItem;
 
 import com.t1membership.item.constant.ItemCategory;
 import com.t1membership.item.constant.ItemSellStatus;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 
 import java.math.BigDecimal;
 
@@ -13,6 +10,8 @@ import java.math.BigDecimal;
 @Setter
 @Builder(toBuilder = true)
 @ToString
+@NoArgsConstructor
+@AllArgsConstructor
 public class ModifyItemReq {
 
     private Long itemNo;
