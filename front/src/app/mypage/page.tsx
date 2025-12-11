@@ -1,7 +1,7 @@
 // src/app/mypage/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/layout/Header";
 import { apiClient } from "@/lib/apiClient";
@@ -11,7 +11,7 @@ interface Member {
     memberEmail: string;
     memberName: string;
     memberNickName: string;
-    memberImage?: string | null; // 🔥 DB에서 오는 프로필 이미지 URL
+    memberImage?: string | null; // 🔥 DB에서 오는 프로필 이미지 URL (상대경로 가능)
 }
 
 // 🔥 백엔드 ApiResult 구조에 맞게 수정
@@ -22,10 +22,31 @@ interface ApiResult<T> {
     result: T;
 }
 
+/**
+ * 백엔드에서 오는 memberImage(/files/xxx.jpg 같은 상대경로)를
+ * 화면에서 바로 쓸 수 있는 절대 URL로 변환
+ */
+function resolveProfileUrl(raw?: string | null): string | null {
+    if (!raw) return null;
+
+    // 이미 절대 URL이면 그대로 사용
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        return raw;
+    }
+
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+    const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
+    const normalizedRaw = raw.startsWith("/") ? raw : `/${raw}`;
+
+    return `${normalizedBase}${normalizedRaw}`;
+}
+
 export default function MyPageHome() {
     const router = useRouter();
 
     const [member, setMember] = useState<Member | null>(null);
+    const [profileUrl, setProfileUrl] = useState<string | null>(null); // 🔥 가공된 이미지 URL
     const [loading, setLoading] = useState(true);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -35,7 +56,13 @@ export default function MyPageHome() {
             try {
                 const res = await apiClient.get<ApiResult<Member>>("/member/readOne");
                 console.log("readOne =", res.data);
-                setMember(res.data.result);
+
+                const m = res.data.result;
+                setMember(m);
+
+                // 🔥 여기서 한 번 절대 URL로 바꿔서 상태에 저장
+                const resolved = resolveProfileUrl(m.memberImage);
+                setProfileUrl(resolved);
             } catch (err) {
                 console.error("회원 정보 조회 실패:", err);
                 if (axios.isAxiosError(err) && err.response?.status === 401) {
@@ -106,6 +133,21 @@ export default function MyPageHome() {
         member.memberNickName?.trim() || member.memberName || "T1 회원";
     const displayInitial = displayNick[0] ?? "T";
 
+    // 아바타 내용 (이미지 있으면 이미지, 없으면 이니셜)
+    let avatarContent: ReactNode;
+    if (profileUrl) {
+        // eslint-disable-next-line @next/next/no-img-element
+        avatarContent = (
+            <img
+                src={profileUrl}
+                alt="프로필"
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+        );
+    } else {
+        avatarContent = <span>{displayInitial}</span>;
+    }
+
     return (
         <div
             style={{
@@ -161,16 +203,7 @@ export default function MyPageHome() {
                             fontWeight: "bold",
                         }}
                     >
-                        {member.memberImage ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                                src={member.memberImage}
-                                alt="프로필"
-                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                            />
-                        ) : (
-                            <span>{displayInitial}</span>
-                        )}
+                        {avatarContent}
                     </div>
 
                     {/* 닉네임 */}
@@ -198,7 +231,8 @@ export default function MyPageHome() {
                     {/* 프로필 수정 버튼 */}
                     <button
                         type="button"
-                        onClick={() => router.push("/mypage/profile")} // 🔥 실제 프로필 수정 페이지 경로로 수정
+                        // 형님 프로필 수정 페이지 경로에 맞춰서 수정
+                        onClick={() => router.push("/mypage/account/profile")}
                         style={{
                             width: "100%",
                             maxWidth: 620,

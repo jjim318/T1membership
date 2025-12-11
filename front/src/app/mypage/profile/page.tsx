@@ -14,10 +14,38 @@ import axios from "axios";
 import { apiClient } from "@/lib/apiClient";
 import type { ApiResult, MemberInfo } from "@/types/member";
 
+/**
+ * 백엔드에서 오는 memberImage 값(/files/xxx.jpg 같은 상대경로)을
+ * 프론트에서 바로 쓸 수 있는 절대 URL로 변환해주는 헬퍼.
+ *
+ * - 이미 http/https 로 시작하면 그대로 사용
+ * - 그 외에는 NEXT_PUBLIC_API_BASE_URL 을 앞에 붙여줌
+ */
+function resolveProfileUrl(raw?: string | null): string | null {
+    if (!raw) return null;
+
+    // 이미 절대 URL이면 그대로 사용
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        return raw;
+    }
+
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+    // base 마지막 슬래시, raw 앞 슬래시를 고려해서 중복 슬래시 제거
+    const normalizedBase = base.endsWith("/")
+        ? base.slice(0, -1)
+        : base;
+    const normalizedRaw = raw.startsWith("/")
+        ? raw
+        : `/${raw}`;
+
+    return `${normalizedBase}${normalizedRaw}`;
+}
+
 export default function ProfileEditPage() {
     const [nick, setNick] = useState("");
-    const [profileUrl, setProfileUrl] = useState<string | null>(null);  // 서버 이미지
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);  // 새로 선택한 이미지
+    const [profileUrl, setProfileUrl] = useState<string | null>(null);  // 서버 이미지(가공된 전체 URL)
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);  // 새로 선택한 이미지(로컬 미리보기)
     const [profileFile, setProfileFile] = useState<File | null>(null);
     const [removeProfile, setRemoveProfile] = useState(false);
 
@@ -41,8 +69,13 @@ export default function ProfileEditPage() {
 
                 const member = res.data.result;
 
+                // 🔥 닉네임 세팅 (MemberInfo 에 memberNickName 필드 반드시 정의되어 있어야 함)
                 setNick(member.memberNickName ?? "");
-                setProfileUrl(member.memberImage ?? null);
+
+                // 🔥 백엔드에서 오는 member.memberImage 를 화면에서 바로 쓸 수 있는 URL 로 변환
+                const resolved = resolveProfileUrl(member.memberImage);
+                setProfileUrl(resolved);
+
                 setPreviewUrl(null);
                 setProfileFile(null);
                 setRemoveProfile(false);
@@ -105,6 +138,8 @@ export default function ProfileEditPage() {
 
             // ModifyProfileReq
             form.append("memberNickName", nick.trim());
+            // memberEmail 은 서버에서 인증 정보로 채우는 구조면 안 보내도 됨
+            // 필요하면 form.append("memberEmail", ???) 추가
 
             // @RequestPart("profileFile")
             if (profileFile) {
@@ -152,6 +187,7 @@ export default function ProfileEditPage() {
     // 아바타 내용
     let avatarContent: ReactNode;
     if (previewUrl) {
+        // 새로 선택한 이미지가 있으면 그거부터 보여줌
         // eslint-disable-next-line @next/next/no-img-element
         avatarContent = (
             <img
@@ -161,6 +197,7 @@ export default function ProfileEditPage() {
             />
         );
     } else if (!removeProfile && profileUrl) {
+        // 저장된 프로필 이미지 (백엔드 URL 붙인 것)
         // eslint-disable-next-line @next/next/no-img-element
         avatarContent = (
             <img
@@ -170,6 +207,7 @@ export default function ProfileEditPage() {
             />
         );
     } else {
+        // 이미지 없으면 닉네임 첫 글자
         avatarContent = (
             <span className="text-4xl font-bold">{nick ? nick[0] : "N"}</span>
         );
