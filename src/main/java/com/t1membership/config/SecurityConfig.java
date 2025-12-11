@@ -100,7 +100,7 @@ public class SecurityConfig {
                         "/member/exists",
                         "/v3/api-docs/**",
                         "/webjars/**",
-                        "/main/feed"
+                        "/main"
                 ).permitAll()
 
                 // 🔥 여기 추가

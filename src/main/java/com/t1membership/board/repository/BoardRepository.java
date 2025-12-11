@@ -23,4 +23,6 @@ public interface BoardRepository extends JpaRepository<BoardEntity, Long> {
 
     List<BoardEntity>
     findByBoardTypeAndMainBannerIsTrueOrderByBannerOrderAscBoardNoDesc(BoardType boardType);
+
+    List<BoardEntity> findTop6ByBoardTypeOrderByCreateDateDesc(BoardType boardType);
 }

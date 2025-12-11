@@ -1,5 +1,6 @@
 package com.t1membership.member.dto.readOneMember;
 
+import com.t1membership.item.constant.MembershipPayType;
 import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.dto.joinMember.JoinMemberRes;
@@ -25,6 +26,8 @@ public class ReadOneMemberRes {
 
     private MemberRole memberRole;
 
+    private MembershipPayType membershipPayType;
+
     public static ReadOneMemberRes from(MemberEntity memberEntity) {
         if (memberEntity == null) {
             return null;
@@ -39,6 +42,7 @@ public class ReadOneMemberRes {
                 .memberRole(memberEntity.getMemberRole())
                 .memberGender(memberEntity.getMemberGender())
                 .memberBirthY(memberEntity.getMemberBirthY())
+                .membershipPayType(memberEntity.getMembershipType())
                 .build();
     }
 
