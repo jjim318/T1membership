@@ -3,7 +3,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { DetailImage, ItemDetail } from "./types";
 import PopOptionModal from "./PopOptionModal";
@@ -52,13 +51,17 @@ export default function PopDetail({ item, detailImages, thumbnailUrl }: Props) {
                 {/* 썸네일 */}
                 <section className="mb-6">
                     <div className="relative w-full overflow-hidden">
-                        <Image
-                            src={thumbnailUrl}
-                            alt={item.itemName}
-                            width={1024}
-                            height={1024}
-                            className="h-auto w-full object-cover"
-                        />
+                        {thumbnailUrl ? (
+                            <img
+                                src={thumbnailUrl}
+                                alt={item.itemName}
+                                className="h-auto w-full object-cover"
+                            />
+                        ) : (
+                            <div className="flex h-64 items-center justify-center text-xs text-zinc-500">
+                                이미지 없음
+                            </div>
+                        )}
                     </div>
                 </section>
 
@@ -78,20 +81,20 @@ export default function PopDetail({ item, detailImages, thumbnailUrl }: Props) {
 
                 {/* 상세설명 이미지들 */}
                 <section className="mt-10 space-y-6 pb-4">
-                    {detailImages.map((img) => (
-                        <div
-                            key={`${img.url}-${img.sortOrder}`}
-                            className="relative w-full overflow-hidden"
-                        >
-                            <Image
-                                src={img.url}
-                                alt={item.itemName}
-                                width={1200}
-                                height={1600}
-                                className="h-auto w-full object-cover"
-                            />
-                        </div>
-                    ))}
+                    {detailImages.map((img) =>
+                        img.url ? (
+                            <div
+                                key={`${img.url}-${img.sortOrder}`}
+                                className="relative w-full overflow-hidden"
+                            >
+                                <img
+                                    src={img.url}
+                                    alt={item.itemName}
+                                    className="h-auto w-full object-cover"
+                                />
+                            </div>
+                        ) : null,
+                    )}
                 </section>
 
                 {/* POP 유의사항 */}

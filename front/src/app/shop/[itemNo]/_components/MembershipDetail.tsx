@@ -3,7 +3,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import {
     DetailImage,
     ItemDetail,
@@ -117,15 +116,12 @@ export default function MembershipDetail({ item, detailImages }: Props) {
 
                 {/* 상단 썸네일 + 상품명 */}
                 <div className="mt-4 flex flex-col items-center">
-                    {thumbnailImage && (
+                    {thumbnailImage && thumbnailImage.url && (
                         <div className="mb-4">
-                            <Image
+                            <img
                                 src={thumbnailImage.url}
                                 alt={`${item.itemName} 썸네일`}
-                                width={96}
-                                height={96}
                                 className="h-24 w-24 rounded-2xl object-cover"
-                                priority
                             />
                         </div>
                     )}
@@ -137,20 +133,20 @@ export default function MembershipDetail({ item, detailImages }: Props) {
                 {/* 설명용 큰 이미지들 */}
                 {otherImages.length > 0 && (
                     <div className="mt-8 w-full space-y-4">
-                        {otherImages.map((img, idx) => (
-                            <div
-                                key={`${img.url}-${img.sortOrder ?? idx}`}
-                                className="relative w-full overflow-hidden rounded-xl bg-zinc-900"
-                            >
-                                <Image
-                                    src={img.url}
-                                    alt={`${item.itemName} 상세 이미지 ${idx + 1}`}
-                                    width={1200}
-                                    height={1600}
-                                    className="h-auto w-full object-cover"
-                                />
-                            </div>
-                        ))}
+                        {otherImages.map((img, idx) =>
+                            img.url ? (
+                                <div
+                                    key={`${img.url}-${img.sortOrder ?? idx}`}
+                                    className="relative w-full overflow-hidden rounded-xl bg-zinc-900"
+                                >
+                                    <img
+                                        src={img.url}
+                                        alt={`${item.itemName} 상세 이미지 ${idx + 1}`}
+                                        className="h-auto w-full object-cover"
+                                    />
+                                </div>
+                            ) : null,
+                        )}
                     </div>
                 )}
 
