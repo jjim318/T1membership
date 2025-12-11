@@ -30,6 +30,7 @@ public class ModifyItemRes {
 
     public static ModifyItemRes from(ItemEntity item){
         return ModifyItemRes.builder()
+                .itemNo(item.getItemNo())
                 .itemName(item.getItemName())
                 .itemPrice(item.getItemPrice())
                 .itemStock(item.getItemStock())

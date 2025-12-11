@@ -100,7 +100,7 @@ public class SecurityConfig {
                         "/member/exists",
                         "/v3/api-docs/**",
                         "/webjars/**",
-                        "/main/feed"
+                        "/main"
                 ).permitAll()
 
                 // 🔥 여기 추가
@@ -167,11 +167,11 @@ public class SecurityConfig {
 
                 // 상품 등록/수정/삭제
                 .requestMatchers(HttpMethod.POST, "/item")
-                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/item/**")
-                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/item/**")
-                .hasAnyRole("ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("ADMIN")
 
                 // === (4) 나머지는 인증만 필요 ===
                 .anyRequest().authenticated()
