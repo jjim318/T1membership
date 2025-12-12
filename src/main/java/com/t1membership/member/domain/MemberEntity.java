@@ -52,6 +52,9 @@ public class MemberEntity extends BaseEntity {
     @Column(name = "popType", nullable = false,length = 20)
     private PopPlanType popType;
 
+    @Column(name = "player_key", length = 32)
+    private String playerKey;
+
     @OneToMany(mappedBy = "member",  cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderEntity> order = new ArrayList<>();
 

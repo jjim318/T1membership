@@ -11,6 +11,9 @@ import com.t1membership.board.dto.readAllBoard.ReadAllBoardReq;
 import com.t1membership.board.dto.readAllBoard.ReadAllBoardRes;
 import com.t1membership.board.dto.readOneBoard.ReadOneBoardReq;
 import com.t1membership.board.dto.readOneBoard.ReadOneBoardRes;
+import com.t1membership.board.dto.story.CreateStoryReq;
+import com.t1membership.board.dto.story.StoryDetailRes;
+import com.t1membership.board.dto.story.StoryFeedRes;
 import com.t1membership.board.dto.updateBoard.UpdateBoardReq;
 import com.t1membership.board.dto.updateBoard.UpdateBoardRes;
 import com.t1membership.board.repository.BoardRepository;
@@ -20,12 +23,14 @@ import com.t1membership.image.domain.ImageEntity;
 import com.t1membership.image.dto.ExistingImageDTO;
 import com.t1membership.image.dto.ImageDTO;
 import com.t1membership.image.service.FileService;
+import com.t1membership.member.constant.MemberRole;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.data.domain.*;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -413,6 +418,180 @@ public class BoardServiceImpl implements BoardService {
         return page.stream()
                 .map(ContentSummaryRes::from)
                 .toList();
+    }
+
+    // =========================
+    // 스토리 작성 (board + images 같이 저장)
+    // =========================
+    @Override
+    @Transactional
+    public void createStory(String memberEmail, CreateStoryReq req) {
+
+        MemberEntity member = memberRepository.findByMemberEmail(memberEmail)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "회원 정보가 없습니다."));
+
+        MemberRole role = member.getMemberRole();
+
+        if (!isStoryWriter(role)) {
+            throw new AccessDeniedException("스토리 작성 권한이 없습니다.");
+        }
+
+        // ✅ role 기반 writer 강제
+        String writer = resolveWriterByRole(role);
+
+        // ✅ 선수 role과 playerKey 불일치 차단
+        validatePlayerKeyConsistency(member, role, writer);
+
+        BoardEntity board = BoardEntity.builder()
+                .boardType(BoardType.STORY)
+                .member(member)
+                .boardWriter(writer)
+                .boardTitle(req.getTitle())
+                .boardContent(req.getContent() == null ? "" : req.getContent())
+                .isSecret(req.isLocked())
+                .boardLikeCount(0)
+                .notice(false)
+                .build();
+
+        // ✅ imageUrls -> ImageEntity로 변환해서 board.images에 붙임
+        List<String> imageUrls = req.getImageUrls();
+        if (imageUrls != null && !imageUrls.isEmpty()) {
+            int order = 0;
+            for (String raw : imageUrls) {
+                if (raw == null) continue;
+                String url = raw.trim();
+                if (url.isEmpty()) continue;
+
+                ImageEntity img = ImageEntity.create(url, order++);
+
+                // 관계 세팅 (BoardEntity에 addImage()가 있음)
+                board.addImage(img);
+            }
+        }
+
+        // ✅ cascade = ALL 이라서 board만 save해도 images 같이 저장됨
+        boardRepository.save(board);
+    }
+
+    // =========================
+    // 스토리 피드
+    // =========================
+    @Override
+    public Page<StoryFeedRes> getStoryFeed(String writer, Pageable pageable) {
+
+        Page<BoardEntity> page;
+
+        if (writer == null || writer.isBlank()) {
+            page = boardRepository.findByBoardType(BoardType.STORY, pageable);
+        } else {
+            page = boardRepository.findByBoardTypeAndBoardWriter(BoardType.STORY, writer, pageable);
+        }
+
+        return page.map(board -> {
+            String thumb = null;
+            if (board.getImages() != null && !board.getImages().isEmpty()) {
+                // @OrderBy 때문에 0번이 대표 이미지
+                thumb = readImageUrl(board.getImages().get(0));
+            }
+
+            return StoryFeedRes.builder()
+                    .boardNo(board.getBoardNo())
+                    .writer(board.getBoardWriter())
+                    .title(board.getBoardTitle())
+                    .contentPreview(preview(board.getBoardContent()))
+                    .locked(board.isSecret())
+                    .likeCount(board.getBoardLikeCount())
+                    .thumbnailUrl(thumb)
+                    .build();
+        });
+    }
+
+    // =========================
+    // 스토리 상세
+    // =========================
+    @Override
+    public StoryDetailRes getStoryDetail(Long boardNo) {
+
+        BoardEntity board = boardRepository.findById(boardNo)
+                .orElseThrow(() -> new IllegalArgumentException("스토리 없음"));
+
+        if (board.getBoardType() != BoardType.STORY) {
+            throw new IllegalArgumentException("스토리가 아닙니다.");
+        }
+
+        List<String> urls = new ArrayList<>();
+        if (board.getImages() != null) {
+            for (ImageEntity img : board.getImages()) {
+                String u = readImageUrl(img);
+                if (u != null && !u.isBlank()) urls.add(u);
+            }
+        }
+
+        return StoryDetailRes.builder()
+                .boardNo(board.getBoardNo())
+                .writer(board.getBoardWriter())
+                .title(board.getBoardTitle())
+                .content(board.getBoardContent())
+                .locked(board.isSecret())
+                .likeCount(board.getBoardLikeCount())
+                .imageUrls(urls)
+                .build();
+    }
+
+    // =========================
+    // 내부 유틸
+    // =========================
+    private boolean isStoryWriter(MemberRole role) {
+        return role == MemberRole.ADMIN
+                || role == MemberRole.ADMIN_CONTENT
+                || role == MemberRole.T1
+                || role == MemberRole.PLAYER_DORAN
+                || role == MemberRole.PLAYER_ONER
+                || role == MemberRole.PLAYER_FAKER
+                || role == MemberRole.PLAYER_GUMAYUSI
+                || role == MemberRole.PLAYER_KERIA;
+    }
+
+    private String resolveWriterByRole(MemberRole role) {
+        return switch (role) {
+            case ADMIN, ADMIN_CONTENT, T1 -> "T1";
+            case PLAYER_DORAN -> "doran";
+            case PLAYER_ONER -> "oner";
+            case PLAYER_FAKER -> "faker";
+            case PLAYER_GUMAYUSI -> "gumayusi";
+            case PLAYER_KERIA -> "keria";
+            default -> throw new AccessDeniedException("스토리 작성 권한이 없습니다.");
+        };
+    }
+
+    private void validatePlayerKeyConsistency(MemberEntity member, MemberRole role, String writer) {
+        if (role == MemberRole.ADMIN || role == MemberRole.ADMIN_CONTENT || role == MemberRole.T1) return;
+
+        String pk = member.getPlayerKey();
+        if (pk == null || pk.isBlank()) {
+            throw new IllegalStateException("선수 계정에 playerKey가 설정되어 있지 않습니다.");
+        }
+
+        if (!pk.trim().equalsIgnoreCase(writer)) {
+            throw new AccessDeniedException("선수 계정 정보(playerKey)와 권한(role)이 일치하지 않습니다.");
+        }
+    }
+
+    private String preview(String content) {
+        if (content == null) return "";
+        return content.length() > 120 ? content.substring(0, 120) + "..." : content;
+    }
+
+    // ✅ ImageEntity에서 이미지 URL 꺼내는 유틸 (필드명 맞추면 됨)
+    private String readImageUrl(ImageEntity img) {
+        if (img == null) return null;
+
+        // ================================
+        // 🔥 TODO: 형님 ImageEntity getter에 맞춰 여기만 수정해도 됨
+        // 예) return img.getImageUrl();
+        // 예) return img.getFilePath();
+        // ================================
+        return img.getUrl();
     }
 
 }

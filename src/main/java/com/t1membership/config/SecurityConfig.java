@@ -116,23 +116,28 @@ public class SecurityConfig {
                 // === (2) 로그인한 USER / ADMIN 전용 ===
                 // 회원 단건 조회 (마이페이지에서 사용)
                 .requestMatchers("/member/readOne")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 비밀번호 변경
                 .requestMatchers("/member/password")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 프로필 수정 (닉네임 + 이미지)
                 .requestMatchers("/member/profile")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 회원 기본 정보 수정 (이름/성별/연락처/주소 등)
                 .requestMatchers("/member/modify")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 마이페이지(기타 하위 경로)
                 .requestMatchers("/member/my_page/**")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 회원 주문 관련 (사용자)
                 .requestMatchers("/order/**")
@@ -148,11 +153,14 @@ public class SecurityConfig {
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")
-                .hasAnyRole("USER", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
                 .requestMatchers(HttpMethod.PUT, "/board/**")
-                .hasAnyRole("USER", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
                 .requestMatchers(HttpMethod.DELETE, "/board/**")
-                .hasAnyRole("USER", "ADMIN_CONTENT")
+                .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // Toss 결제 (본인 인증 필수)
                 .requestMatchers("/api/pay/toss/**")

@@ -125,6 +125,12 @@ public class ImageEntity {
         img.attachToItem(item);
         return img;
     }
+    public static ImageEntity create(String imageUrl, int sortOrder) {
+        ImageEntity img = new ImageEntity();
+        img.setUrl(imageUrl);
+        img.sortOrder = sortOrder;
+        return img;
+    }
 
     // DTO -> Entity 변환 (Item용)
     public static ImageEntity fromDtoForItem(ImageDTO dto, ItemEntity item) {
