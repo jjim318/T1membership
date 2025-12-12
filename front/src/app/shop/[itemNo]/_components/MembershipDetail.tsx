@@ -3,11 +3,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-    DetailImage,
-    ItemDetail,
-    MembershipPayType,
-} from "./types";
+import { DetailImage, ItemDetail, MembershipPayType } from "./types";
+import { toImageSrc } from "./image";
 
 interface Props {
     item: ItemDetail;
@@ -20,8 +17,7 @@ export default function MembershipDetail({ item, detailImages }: Props) {
     const [currency, setCurrency] = useState<"KRW" | "USD">("KRW");
     const [openCurrency, setOpenCurrency] = useState(false);
 
-    const currencyLabel =
-        currency === "KRW" ? "KRW - 한국 ₩(원)" : "USD - 미국 $(달러)";
+    const currencyLabel = currency === "KRW" ? "KRW - 한국 ₩(원)" : "USD - 미국 $(달러)";
 
     const thumbnailImage = detailImages[0];
     const otherImages = detailImages.slice(1);
@@ -30,15 +26,9 @@ export default function MembershipDetail({ item, detailImages }: Props) {
     const payType = (item.membershipPayType || "").toUpperCase();
 
     let priceUSD = 6.3; // 기본 RECURRING
+    if (payType === "ONE_TIME") priceUSD = 6.5;
+    if (payType === "YEARLY") priceUSD = 60.0;
 
-    if (payType === "ONE_TIME") {
-        priceUSD = 6.5;
-    }
-    if (payType === "YEARLY") {
-        priceUSD = 60.0;
-    }
-
-    // 멤버십 결제 페이지로 이동
     const handleMembershipCheckout = () => {
         const planCode = "T1-2025-MONTHLY";
 
@@ -69,6 +59,9 @@ export default function MembershipDetail({ item, detailImages }: Props) {
 
         router.push(`/order/membership/checkout?${params.toString()}`);
     };
+
+    // ✅ 썸네일 src 정규화
+    const thumbSrc = toImageSrc(thumbnailImage?.url, "MembershipDetail thumbnail");
 
     return (
         <main className="min-h-screen bg-black text-zinc-100">
@@ -116,60 +109,55 @@ export default function MembershipDetail({ item, detailImages }: Props) {
 
                 {/* 상단 썸네일 + 상품명 */}
                 <div className="mt-4 flex flex-col items-center">
-                    {thumbnailImage && thumbnailImage.url && (
+                    {thumbSrc && (
                         <div className="mb-4">
                             <img
-                                src={thumbnailImage.url}
+                                src={thumbSrc}
                                 alt={`${item.itemName} 썸네일`}
                                 className="h-24 w-24 rounded-2xl object-cover"
                             />
                         </div>
                     )}
-                    <h2 className="text-base font-semibold text-center">
-                        {item.itemName}
-                    </h2>
+                    <h2 className="text-base font-semibold text-center">{item.itemName}</h2>
                 </div>
 
                 {/* 설명용 큰 이미지들 */}
                 {otherImages.length > 0 && (
                     <div className="mt-8 w-full space-y-4">
-                        {otherImages.map((img, idx) =>
-                            img.url ? (
+                        {otherImages.map((img, idx) => {
+                            const src = toImageSrc(img.url, "MembershipDetail detail");
+                            if (!src) return null;
+
+                            return (
                                 <div
-                                    key={`${img.url}-${img.sortOrder ?? idx}`}
+                                    key={`${img.url ?? "no-url"}-${img.sortOrder ?? idx}`}
                                     className="relative w-full overflow-hidden rounded-xl bg-zinc-900"
                                 >
                                     <img
-                                        src={img.url}
+                                        src={src}
                                         alt={`${item.itemName} 상세 이미지 ${idx + 1}`}
                                         className="h-auto w-full object-cover"
                                     />
                                 </div>
-                            ) : null,
-                        )}
+                            );
+                        })}
                     </div>
                 )}
 
                 {/* 옵션 선택 + 정기결제 카드 */}
                 <div className="mt-16 w-full max-w-3xl">
-                    <p className="mb-3 text-xs font-semibold text-zinc-200">
-                        옵션 선택
-                    </p>
+                    <p className="mb-3 text-xs font-semibold text-zinc-200">옵션 선택</p>
 
                     <div className="w-[360px] rounded-2xl border border-zinc-700 bg-zinc-950 px-8 py-7 shadow-[0_0_30px_rgba(0,0,0,0.8)]">
-                        {/* 제목 / 가격 */}
                         <div className="space-y-1">
                             <h2 className="text-sm font-semibold">{item.itemName}</h2>
                             <p className="text-xs text-zinc-300">
                                 {currency === "KRW"
-                                    ? `${priceKRW.toLocaleString(
-                                        "ko-KR",
-                                    )}원/1개월`
+                                    ? `${priceKRW.toLocaleString("ko-KR")}원/1개월`
                                     : `$${priceUSD.toFixed(2)}/1개월`}
                             </p>
                         </div>
 
-                        {/* 혜택 목록 */}
                         <ul className="mt-4 space-y-2 text-xs text-zinc-300">
                             <li className="flex items-center gap-2">
                                 <span className="inline-block h-3 w-3 rounded-sm bg-zinc-600" />
@@ -193,7 +181,6 @@ export default function MembershipDetail({ item, detailImages }: Props) {
                             </li>
                         </ul>
 
-                        {/* 버튼들 */}
                         <div className="mt-6 space-y-2">
                             <button
                                 type="button"
@@ -215,24 +202,17 @@ export default function MembershipDetail({ item, detailImages }: Props) {
                 {/* 유의사항 */}
                 <section className="mt-10 w-full max-w-3xl text-left text-[11px] leading-relaxed text-zinc-400">
                     <p className="mb-2 font-semibold text-zinc-300">유의사항</p>
-                    <p>
-                        · 상품 구매 후 콘텐츠를 열람하였거나, 이용 시작 후 7일이 지나면
-                        구매 확정 처리됩니다.
-                    </p>
+                    <p>· 상품 구매 후 콘텐츠를 열람하였거나, 이용 시작 후 7일이 지나면 구매 확정 처리됩니다.</p>
                     <p>· 구매 확정 이후 청약 철회가 불가합니다.</p>
                     <p>
-                        · 더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할 수
-                        있습니다. 정기 결제를 해지하더라도 이용 기간 마지막 날까지
-                        이용이 가능하며, 이용 기간 종료 후 해지 처리됩니다.
+                        · 더 이상 정기 결제를 원하지 않는 경우, 언제든 해지할 수 있습니다. 정기 결제를 해지하더라도 이용
+                        기간 마지막 날까지 이용이 가능하며, 이용 기간 종료 후 해지 처리됩니다.
                     </p>
                 </section>
 
                 {/* 하단 전체 멤버십 보기 */}
                 <div className="mt-12 flex w-full justify-center border-t border-zinc-800 pt-8">
-                    <button
-                        type="button"
-                        className="text-[13px] font-medium text-sky-400 hover:text-sky-300"
-                    >
+                    <button type="button" className="text-[13px] font-medium text-sky-400 hover:text-sky-300">
                         가입 가능한 전체 멤버십 보기 &rarr;
                     </button>
                 </div>

@@ -6,42 +6,65 @@ import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/apiClient";
 import Link from "next/link";
 
-// ====== 백엔드 URL 기반 헬퍼 ======
+// =========================
+// 🔥 백엔드 API BASE
+// =========================
 const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 /**
- * 상품 썸네일용 이미지 변환
+ * =========================
+ * 🔥 상품 썸네일 URL 정규화
  *
- * ✅ 허용:
- *   - http:// 또는 https:// 로 시작하는 절대 URL
- *   - /files/**  →  http://localhost:8080/files/** (API_BASE 기준)
+ * 허용 & 처리 규칙
+ * 1) http(s):// 로 시작 → 그대로 사용
+ * 2) /files/xxx        → API_BASE + encodeURIComponent
+ * 3) files/xxx         → API_BASE + encodeURIComponent
+ * 4) 파일명만 존재     → /files/{encodeURIComponent(fileName)}
  *
- * ❌ 불허:
- *   - /shop/** 포함, 그 외 모든 상대경로
- *   → 잘못된 데이터로 보고 빈 문자열 반환
+ * 👉 실무에서 섞여 들어오는 데이터 전부 흡수
+ * =========================
  */
 function toImageSrc(raw?: string | null): string {
-    if (!raw) return ""; // 이미지 없음
+    if (!raw) return "";
 
     const url = raw.trim();
+    if (!url) return "";
 
-    // 절대 URL은 그대로 사용 (혹시 외부 이미지 쓸 때 대비)
+    // 1️⃣ 절대 URL
     if (url.startsWith("http://") || url.startsWith("https://")) {
         return url;
     }
 
-    // ✅ 백엔드 /files/** 만 허용
-    if (url.startsWith("/files")) {
-        return `${API_BASE}${url}`;
+    // 2️⃣ /files/xxx
+    if (url.startsWith("/files/")) {
+        const fileName = url.replace("/files/", "");
+        return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
     }
 
-    // ❌ 나머지는 전부 에러로 보고 무시
-    console.warn("[Shop] 썸네일은 /files/** 만 허용합니다. 잘못된 경로 =", url);
-    return "";
+    // 3️⃣ files/xxx
+    if (url.startsWith("files/")) {
+        const fileName = url.replace("files/", "");
+        return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
+    }
+
+    // 4️⃣ 파일명만 오는 경우 (🔥 문제의 핵심)
+    // ex) "T1 POP 단건결제.png"
+    if (!url.includes("/")) {
+        return `${API_BASE}/files/${encodeURIComponent(url)}`;
+    }
+
+    // 5️⃣ 그 외 이상한 경로 → 파일명만 추출해서 /files로 보정
+    console.warn("[Shop] 예상치 못한 썸네일 경로 → 보정 처리:", url);
+    const fileName = url.split("/").pop();
+    if (!fileName) return "";
+
+    return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
 }
 
-// ====== 타입 정의 (백엔드 DTO에 맞춤) ======
+// =========================
+// 타입 정의
+// =========================
 type ItemCategory = "ALL" | "MD" | "MEMBERSHIP" | "POP";
 type ItemSellStatus = "SELL" | "SOLD_OUT" | string;
 type PopPlanType = "GENERAL" | "MEMBERSHIP_ONLY" | string;
@@ -52,7 +75,7 @@ interface MemberReadOneRes {
     memberEmail: string;
     memberPhone: string;
     memberImage: string;
-    memberGender: "MALE" | "FEMALE" | string;
+    memberGender: string;
     memberBirthY: string;
     memberRole: string;
 }
@@ -65,6 +88,7 @@ interface ItemSummary {
     itemCategory: ItemCategory;
     itemSellStatus: ItemSellStatus;
 
+    // 🔥 핵심
     thumbnailUrl?: string | null;
 
     popPlanType?: PopPlanType;
@@ -89,6 +113,9 @@ interface ApiResult<T> {
     result: T;
 }
 
+// =========================
+// 카테고리
+// =========================
 type ShopCategory =
     | "상품"
     | "멤버십&이용권"
@@ -108,7 +135,9 @@ function formatPrice(price: number) {
     return price.toLocaleString("ko-KR") + "원";
 }
 
-function mapShopCategoryToItemCategory(cat: ShopCategory): ItemCategory | "ALL" | null {
+function mapShopCategoryToItemCategory(
+    cat: ShopCategory
+): ItemCategory | "ALL" | null {
     switch (cat) {
         case "상품":
             return "MD";
@@ -124,7 +153,9 @@ function mapShopCategoryToItemCategory(cat: ShopCategory): ItemCategory | "ALL" 
     }
 }
 
-function mapShopCategoryToPopPlanType(cat: ShopCategory): PopPlanType | undefined {
+function mapShopCategoryToPopPlanType(
+    cat: ShopCategory
+): PopPlanType | undefined {
     switch (cat) {
         case "[멤버십] POP":
             return "MEMBERSHIP_ONLY";
@@ -135,47 +166,51 @@ function mapShopCategoryToPopPlanType(cat: ShopCategory): PopPlanType | undefine
     }
 }
 
+// =========================
+// 🔥 Shop Page
+// =========================
 export default function ShopPage() {
-    const [activeCategory, setActiveCategory] = useState<ShopCategory>("상품");
+    const [activeCategory, setActiveCategory] =
+        useState<ShopCategory>("상품");
 
     const [items, setItems] = useState<ItemSummary[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
+    const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-    const [isAdmin, setIsAdmin] = useState<boolean>(false);
+    const [isAdmin, setIsAdmin] = useState(false);
 
     const page = 0;
     const size = 12;
 
-    // 관리자 여부 체크
+    // =========================
+    // 관리자 여부
+    // =========================
     useEffect(() => {
         const fetchMe = async () => {
             try {
-                const res = await apiClient.get<ApiResult<MemberReadOneRes>>(
-                    "/member/readOne"
-                );
+                const res = await apiClient.get<
+                    ApiResult<MemberReadOneRes>
+                >("/member/readOne");
 
-                if (!res.data.isSuccess) return;
-
-                const role = res.data.result.memberRole;
-                if (role && role.includes("ADMIN")) {
+                if (
+                    res.data.isSuccess &&
+                    res.data.result.memberRole?.includes("ADMIN")
+                ) {
                     setIsAdmin(true);
                 }
-            } catch (e) {
-                console.warn("[Shop] /member/readOne 조회 실패:", e);
+            } catch {
+                // 비로그인/권한 없음 → 무시
             }
         };
 
         fetchMe();
     }, []);
 
-    // 카테고리 변경시 상품 다시 로딩
+    // =========================
+    // 상품 목록 로딩
+    // =========================
     useEffect(() => {
         const loadItems = async () => {
             try {
-                const backendCategory = mapShopCategoryToItemCategory(activeCategory);
-                const popPlanType = mapShopCategoryToPopPlanType(activeCategory);
-
                 if (activeCategory === "T1 ZONE") {
                     setItems([]);
                     return;
@@ -189,9 +224,13 @@ export default function ShopPage() {
                     size,
                     sortBy: "itemNo",
                     direction: "DESC",
-                    itemCategory: backendCategory ?? "ALL",
+                    itemCategory:
+                        mapShopCategoryToItemCategory(activeCategory) ??
+                        "ALL",
                 };
 
+                const popPlanType =
+                    mapShopCategoryToPopPlanType(activeCategory);
                 if (popPlanType) params.popPlanType = popPlanType;
 
                 const res = await apiClient.get<
@@ -199,8 +238,8 @@ export default function ShopPage() {
                 >("/item", { params });
 
                 setItems(res.data.result.dtoList);
-            } catch (error) {
-                console.error(error);
+            } catch (e) {
+                console.error(e);
                 setErrorMsg("상품 목록을 불러오지 못했습니다.");
                 setItems([]);
             } finally {
@@ -214,47 +253,45 @@ export default function ShopPage() {
     return (
         <div className="min-h-screen bg-black text-white">
             <main className="mx-auto max-w-6xl px-6 pt-8 pb-20">
-                {/* 상단 배너 (이건 상품이 아니라 사이트 디자인이라 public 사용) */}
+                {/* 상단 배너 */}
                 <section className="mb-10">
                     <div className="relative h-64 w-full overflow-hidden rounded-2xl bg-red-600">
                         <Image
                             src="/shop/banner-2025.png"
                             alt="2025 T1 Membership"
                             fill
-                            unoptimized // 🔥 _next/image 400 방지
+                            unoptimized
                             className="object-cover"
                         />
                     </div>
                 </section>
 
-                {/* 카테고리 탭 */}
+                {/* 카테고리 */}
                 <section className="mb-6 border-b border-zinc-800 pb-2">
                     <div className="flex gap-6 text-sm">
-                        {categories.map((cat) => {
-                            const isActive = cat === activeCategory;
-                            return (
-                                <button
-                                    key={cat}
-                                    onClick={() => setActiveCategory(cat)}
-                                    className={`pb-2 ${
-                                        isActive
-                                            ? "text-white font-semibold border-b-2 border-white"
-                                            : "text-gray-400 hover:text-white"
-                                    }`}
-                                >
-                                    {cat}
-                                </button>
-                            );
-                        })}
+                        {categories.map((cat) => (
+                            <button
+                                key={cat}
+                                onClick={() => setActiveCategory(cat)}
+                                className={`pb-2 ${
+                                    cat === activeCategory
+                                        ? "border-b-2 border-white font-semibold"
+                                        : "text-gray-400 hover:text-white"
+                                }`}
+                            >
+                                {cat}
+                            </button>
+                        ))}
                     </div>
                 </section>
 
-                {/* 로딩/에러 */}
+                {/* 상태 */}
                 {loading && (
                     <div className="py-10 text-center text-sm text-gray-400">
                         상품을 불러오는 중입니다...
                     </div>
                 )}
+
                 {errorMsg && !loading && (
                     <div className="py-10 text-center text-sm text-red-400">
                         {errorMsg}
@@ -272,22 +309,15 @@ export default function ShopPage() {
                             )}
 
                             {items.map((item) => {
-                                const imgSrc = toImageSrc(item.thumbnailUrl);
-
-                                console.log(
-                                    "[Shop] itemNo =",
-                                    item.itemNo,
-                                    "raw thumbnailUrl =",
-                                    item.thumbnailUrl,
-                                    "→ final src =",
-                                    imgSrc
+                                const imgSrc = toImageSrc(
+                                    item.thumbnailUrl
                                 );
 
                                 return (
                                     <Link
                                         key={item.itemNo}
                                         href={`/shop/${item.itemNo}`}
-                                        className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
+                                        className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80 transition hover:border-zinc-500"
                                     >
                                         {/* 썸네일 */}
                                         <div className="relative h-56 w-full bg-zinc-900 flex items-center justify-center overflow-hidden">
@@ -303,13 +333,12 @@ export default function ShopPage() {
                                                 </span>
                                             )}
 
-                                            {/* 카테고리 뱃지 */}
-                                            <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                                            <div className="absolute left-3 top-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-semibold">
                                                 {item.itemCategory}
                                             </div>
                                         </div>
 
-                                        {/* 텍스트 영역 */}
+                                        {/* 텍스트 */}
                                         <div className="flex flex-1 flex-col px-4 py-3">
                                             {item.membershipOnly && (
                                                 <span className="mb-1 text-[11px] text-amber-300">
@@ -325,39 +354,32 @@ export default function ShopPage() {
                                                 {formatPrice(item.itemPrice)}
                                             </div>
 
-                                            <div className="mt-2 text-[11px] text-gray-400">
-                                                {item.itemSellStatus === "SOLD_OUT" && (
+                                            {item.itemSellStatus ===
+                                                "SOLD_OUT" && (
+                                                    <div className="mt-2 text-[11px] text-gray-400">
                                                     <span className="inline-flex rounded-sm border border-gray-500 px-2 py-0.5">
                                                         품절
                                                     </span>
+                                                    </div>
                                                 )}
-                                            </div>
                                         </div>
                                     </Link>
                                 );
                             })}
                         </section>
 
-                        {/* 더보기 버튼 */}
-                        <section className="mt-10 flex justify-center">
-                            <button className="rounded-full border border-zinc-600 px-10 py-3 text-sm font-medium text-white hover:border-white">
-                                더보기
-                            </button>
-                        </section>
-
-                        {/* 관리자 전용 버튼 */}
+                        {/* 관리자 */}
                         {isAdmin && (
-                            <section className="mt-4 flex justify-end gap-3">
+                            <section className="mt-6 flex justify-end gap-3">
                                 <Link
                                     href="/admin/items/new"
-                                    className="inline-flex items-center gap-2 rounded-full border border-emerald-400 px-6 py-2 text-xs font-semibold text-emerald-300 hover:border-emerald-300 hover:text-emerald-200"
+                                    className="rounded-full border border-emerald-400 px-6 py-2 text-xs font-semibold text-emerald-300"
                                 >
                                     상품 등록
                                 </Link>
-
                                 <Link
                                     href="/admin/items"
-                                    className="inline-flex items-center gap-2 rounded-full border border-amber-400 px-6 py-2 text-xs font-semibold text-amber-300 hover:border-amber-300 hover:text-amber-200"
+                                    className="rounded-full border border-amber-400 px-6 py-2 text-xs font-semibold text-amber-300"
                                 >
                                     상품 관리
                                 </Link>
@@ -366,24 +388,6 @@ export default function ShopPage() {
                     </>
                 )}
             </main>
-
-            {/* 푸터 */}
-            <footer className="border-t border-zinc-900 bg-black py-10 text-xs text-zinc-400">
-                <div className="mx-auto max-w-6xl px-6 space-y-1 leading-relaxed">
-                    <p>상호명: T1 Membership</p>
-                    <p>대표자: Yang JiMin</p>
-                    <p>주소: 경기도 화성시 어딘가</p>
-                    <p>이메일: t1membership@mbc.com</p>
-                    <p>© 2025 T1 Membership.</p>
-
-                    <div className="mt-4 flex flex-wrap gap-4 text-[11px] text-zinc-500">
-                        <button>이용약관</button>
-                        <button>개인정보처리방침</button>
-                        <button>청소년보호정책</button>
-                        <button>쿠키 정책</button>
-                    </div>
-                </div>
-            </footer>
         </div>
     );
 }
