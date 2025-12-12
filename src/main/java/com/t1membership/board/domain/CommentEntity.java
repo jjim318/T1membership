@@ -1,5 +1,6 @@
 package com.t1membership.board.domain;
 
+import com.t1membership.coreDomain.BaseEntity;
 import com.t1membership.member.domain.MemberEntity;
 import jakarta.persistence.*;
 import lombok.*;
@@ -14,7 +15,7 @@ import org.hibernate.annotations.OnDeleteAction;
 @NoArgsConstructor
 @ToString
 @Table(name = "t1_comment")
-public class CommentEntity {
+public class CommentEntity extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "board_no")

@@ -52,11 +52,12 @@ public class CommentServiceImpl implements CommentService {
         BoardEntity board = boardRepository.findById(req.getBoardNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
 
+        // 🔥 likeCount는 클라가 보내는 값 신뢰하지 말고 서버에서 0 고정 권장
         CommentEntity comment = CommentEntity.builder()
                 .board(board)
                 .member(member)
                 .commentContent(req.getCommentContent())
-                .commentLikeCount(req.getCommentLikeCount())
+                .commentLikeCount(0)
                 .build();
 
         CommentEntity saved = commentRepository.save(comment);
@@ -67,19 +68,22 @@ public class CommentServiceImpl implements CommentService {
     @Override
     public UpdateCommentRes updateComment(UpdateCommentReq req) {
 
+        // 🔥 본인 체크까지는 실무에서 필수인데,
+        // 형님이 원하면 여기서 auth 검사 + 작성자 이메일 비교까지 넣겠습니다.
         CommentEntity comment = commentRepository.findById(req.getCommentNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "댓글을 찾을 수 없습니다."));
 
-        comment.updateContent(req.getCommentContent());   // 🔥 엔티티 메서드 사용
+        comment.updateContent(req.getCommentContent());
 
         CommentEntity updated = commentRepository.save(comment);
 
-        return UpdateCommentRes.from(updated);            // 🔥 DTO의 from() 사용
+        return UpdateCommentRes.from(updated);
     }
 
     @Override
     public DeleteCommentRes deleteComment(DeleteCommentReq req) {
 
+        // 🔥 본인 체크(실무 필수) 필요하면 넣겠습니다.
         CommentEntity comment = commentRepository.findById(req.getCommentNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "댓글을 찾을 수 없습니다."));
 
@@ -97,6 +101,8 @@ public class CommentServiceImpl implements CommentService {
         int page = req.getPage();
         int size = req.getSize();
 
+        // 🔥 sortBy를 받지만 지금은 무조건 commentNo DESC로 고정되어 있음
+        // 일단 프론트 무한스크롤은 commentNo DESC가 안정적이라 이대로 두는게 좋습니다.
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "commentNo"));
 
         var result = commentRepository.findByBoard_BoardNo(req.getBoardNo(), pageable);
@@ -112,14 +118,15 @@ public class CommentServiceImpl implements CommentService {
                 .build();
     }
 
-    private ReadCommentRes toReadCommentRes(CommentEntity entity) {
+    private ReadCommentRes toReadCommentRes(CommentEntity e) {
         return ReadCommentRes.builder()
-                .commentNo(entity.getCommentNo())
-                .boardNo(entity.getBoard().getBoardNo())
-                .commentWriter(entity.getMember().getMemberNickName())
-                .commentContent(entity.getCommentContent())
-                .commentLikeCount(entity.getCommentLikeCount())
+                .commentNo(e.getCommentNo())
+                .boardNo(e.getBoard().getBoardNo())
+                .commentWriter(e.getMember().getMemberNickName())
+                .memberProfileImageUrl(e.getMember().getMemberImage()) // ✅ MemberEntity 필드명 맞추기
+                .commentContent(e.getCommentContent())
+                .commentLikeCount(e.getCommentLikeCount())
+                .createdAt(e.getCreateDate() != null ? e.getCreateDate().toString() : null) // ✅ BaseEntity 필드명 맞추기
                 .build();
     }
 }
-
