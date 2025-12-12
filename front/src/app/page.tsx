@@ -88,14 +88,18 @@ type MembershipPayType =
 interface MemberReadOneRes {
   memberEmail: string;
   memberName: string;
+
+  // 🔥 형님 JSON에 실제로 있음
+  memberRole?: string | null;
+
   membershipPayType: MembershipPayType;
 }
 
 // JWT 페이로드
 interface JwtPayload {
   sub?: string;
-  roles?: string[]; // ["USER","ADMIN"]
-  memberRole?: string; // "ADMIN", "ADMIN_CONTENT" 등
+  roles?: string[]; // ["USER","ADMIN", ...]
+  memberRole?: string; // "ADMIN", "ADMIN_CONTENT", "T1PROGAMER" 등
   [key: string]: unknown;
 }
 
@@ -117,14 +121,14 @@ function parseJwt(token: string): JwtPayload | null {
 }
 
 // =======================
-// 멤버십 / 관리자 상태 체크
+// 멤버십 / 특권 상태 체크
 // =======================
 
 type MembershipState = "UNKNOWN" | "NONE" | "ACTIVE";
 
 interface MembershipStatusHook {
   isMember: boolean;
-  isAdmin: boolean;
+  isAdmin: boolean; // 여기선 "특권 계정" 의미(ADMIN/ADMIN_CONTENT/T1PROGAMER)
   canViewProtected: boolean;
   loading: boolean;
   membershipName?: string;
@@ -150,50 +154,71 @@ function useMembershipStatus(): MembershipStatusHook {
 
       setLoading(true);
 
-      // 1) 토큰에서 관리자 여부 판별
+      // ✅ 공통: 특권 판별 함수
+      const isPrivilegedRole = (role?: string | null, roles?: string[]) => {
+        const r = (role ?? "").toString();
+        const list = roles ?? [];
+
+        const privilegedByList =
+            list.includes("ADMIN") ||
+            list.includes("ADMIN_CONTENT") ||
+            list.includes("T1PROGAMER") ||
+            list.some((x) => x?.startsWith?.("PLAYER_")); // ✅ JWT roles에 PLAYER_*가 담기는 경우
+
+        const privilegedByRole =
+            r === "ADMIN" ||
+            r === "ADMIN_CONTENT" ||
+            r === "T1PROGAMER" ||
+            r.startsWith("PLAYER_"); // ✅ readOne의 memberRole이 PLAYER_*면 특권
+
+        return privilegedByList || privilegedByRole;
+      };
+
+
+      // 1) 먼저 JWT에서 특권 여부 판별 (있으면 빠르게 true 가능)
       const payload = parseJwt(token);
-      if (payload) {
-        const roles = payload.roles ?? [];
-        const memberRole = (payload.memberRole ?? "") as string;
+      const jwtPrivileged = payload
+          ? isPrivilegedRole(payload.memberRole ?? null, payload.roles ?? [])
+          : false;
 
-        const adminLike =
-            roles.includes("ADMIN") ||
-            roles.includes("ADMIN_CONTENT") ||
-            memberRole === "ADMIN" ||
-            memberRole === "ADMIN_CONTENT";
-
-        if (adminLike) {
-          setIsAdmin(true);
-        }
-      }
+      // 일단 JWT 기준으로 세팅(뒤에서 /readOne 결과로 보강)
+      setIsAdmin(jwtPrivileged);
 
       try {
-        // 2) /member/readOne 으로 멤버십 타입 확인
+        // 2) /member/readOne 으로 멤버십 + memberRole(=T1PROGAMER) 확인
         const res =
-            await apiClient.get<ApiResult<MemberReadOneRes>>(
-                "/member/readOne",
-            );
+            await apiClient.get<ApiResult<MemberReadOneRes>>("/member/readOne");
 
         if (!res.data.isSuccess || !res.data.result) {
           setState("NONE");
+          setMembershipName(undefined);
+          // JWT에서 특권이면 그대로 두고, 아니면 false 유지
           return;
         }
 
         const body = res.data.result;
 
+        // 🔥 핵심: readOne 응답의 memberRole도 특권 판별에 포함
+        const readOnePrivileged = isPrivilegedRole(body.memberRole ?? null, []);
+
+        // JWT에 없더라도 readOne에 T1PROGAMER면 특권 true로 덮어쓰기
+        setIsAdmin(jwtPrivileged || readOnePrivileged);
+
         const active =
-            body.membershipPayType &&
-            body.membershipPayType !== "NO_MEMBERSHIP";
+            body.membershipPayType && body.membershipPayType !== "NO_MEMBERSHIP";
 
         if (active) {
           setState("ACTIVE");
           setMembershipName(body.membershipPayType);
         } else {
           setState("NONE");
+          setMembershipName(undefined);
         }
       } catch (e) {
         console.error("[Membership] status check error", e);
         setState("NONE");
+        setMembershipName(undefined);
+        // 에러나면 isAdmin은 JWT에서 판별된 값은 유지
       } finally {
         setLoading(false);
       }
@@ -203,7 +228,7 @@ function useMembershipStatus(): MembershipStatusHook {
   }, []);
 
   const isMember = state === "ACTIVE";
-  const canViewProtected = isMember || isAdmin; // 🔥 관리자면 멤버십 없어도 통과
+  const canViewProtected = isMember || isAdmin; // 🔥 특권(T1PROGAMER 포함)이면 멤버십 없어도 통과
 
   return {
     isMember,
@@ -231,8 +256,7 @@ function useMainPage(enabled: boolean) {
       setErrorMsg(null);
 
       try {
-        const res =
-            await apiClient.get<ApiResult<MainPageRes>>("/main");
+        const res = await apiClient.get<ApiResult<MainPageRes>>("/main");
 
         if (!res.data.isSuccess || !res.data.result) {
           setErrorMsg(res.data.resMessage || "메인 데이터 로딩 실패");
@@ -292,13 +316,13 @@ function StorySlider({ items }: { items: MainSectionItem[] }) {
   return (
       <div className="relative">
         <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-transparent">
-          {items.map(item => {
+          {items.map((item) => {
             const thumb = resolveThumbnailUrl(item.thumbnailUrl);
 
             return (
                 <Link
                     key={item.boardId}
-                    href={`/story/${item.boardId}`} // 실제 라우트에 맞게 조정
+                    href={`/story/${item.boardId}`}
                     className="min-w-[200px] max-w-[220px] rounded-2xl bg-gradient-to-br from-[#ff5b3b] to-[#ff9745] p-[1px]"
                 >
                   <div className="flex h-40 flex-col justify-between rounded-2xl bg-[#171717] p-3">
@@ -350,7 +374,7 @@ function ContentGrid({ items }: { items: MainSectionItem[] }) {
 
   return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
-        {items.map(item => {
+        {items.map((item) => {
           const thumb = resolveThumbnailUrl(item.thumbnailUrl);
 
           return (
@@ -366,10 +390,7 @@ function ContentGrid({ items }: { items: MainSectionItem[] }) {
                           alt={item.title}
                           className="h-full w-full object-cover"
                       />
-
-                      {/* T1 스타일 그라데이션 */}
-                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t
-                                from-black/85 via-black/10 to-transparent" />
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
                     </div>
                 )}
 
@@ -386,7 +407,6 @@ function ContentGrid({ items }: { items: MainSectionItem[] }) {
   );
 }
 
-
 // =======================
 // 메인 페이지 컴포넌트
 // =======================
@@ -400,10 +420,8 @@ export default function MainPage() {
     membershipName,
   } = useMembershipStatus();
 
-  // STORY/CONTENT 게시글은 관리자 or 멤버십 회원만 불러옴
-  const { data, loading: mainLoading, errorMsg } = useMainPage(
-      canViewProtected,
-  );
+  // STORY/CONTENT 게시글은 특권 계정 or 멤버십 회원만 불러옴
+  const { data, loading: mainLoading, errorMsg } = useMainPage(canViewProtected);
 
   return (
       <main className="min-h-screen bg-black text-white">
@@ -416,6 +434,7 @@ export default function MainPage() {
                 <p className="mt-2 text-sm md:text-base opacity-90">
                   ROOTED IN OUR LEGACY, RAISING TROPHIES TOGETHER.
                 </p>
+
                 {isMember && (
                     <p className="mt-1 text-xs text-white/90">
                       {membershipName
@@ -423,9 +442,10 @@ export default function MainPage() {
                           : "멤버십 가입을 환영합니다."}
                     </p>
                 )}
+
                 {isAdmin && !isMember && (
                     <p className="mt-1 text-xs text-yellow-200/90">
-                      관리자 계정으로 모든 콘텐츠에 접근 가능합니다.
+                      특권 계정(T1PROGAMER 포함)으로 모든 콘텐츠에 접근 가능합니다.
                     </p>
                 )}
               </div>
@@ -496,9 +516,7 @@ export default function MainPage() {
                         스토리 게시글을 불러오는 중입니다…
                       </div>
                   ) : errorMsg ? (
-                      <div className="text-xs text-red-400 px-2 py-4">
-                        {errorMsg}
-                      </div>
+                      <div className="text-xs text-red-400 px-2 py-4">{errorMsg}</div>
                   ) : (
                       <StorySlider items={data?.storyItems ?? []} />
                   )}
@@ -524,9 +542,7 @@ export default function MainPage() {
                       컨텐츠 게시글을 불러오는 중입니다…
                     </div>
                 ) : errorMsg ? (
-                    <div className="text-xs text-red-400 px-2 py-4">
-                      {errorMsg}
-                    </div>
+                    <div className="text-xs text-red-400 px-2 py-4">{errorMsg}</div>
                 ) : (
                     <ContentGrid items={data?.contentItems ?? []} />
                 )
