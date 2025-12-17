@@ -1,5 +1,6 @@
 package com.t1membership.board.dto.readAllBoard;
 
+import com.t1membership.board.constant.BoardType;
 import lombok.*;
 
 @Getter
@@ -13,6 +14,11 @@ public class ReadAllBoardReq {
     private int size = 10;
     private String sortBy = "boardNo";
 
-    private String boardType;
+    // com.t1membership.board.dto.readAllBoard.ReadAllBoardReq
+    private BoardType boardType;
+    private String categoryCode;
+
+    // To.T1 "내 글만"용
+    private Boolean mineOnly;
 
 }

@@ -1,6 +1,7 @@
 package com.t1membership.board.service;
 
 import com.t1membership.board.constant.BoardType;
+import com.t1membership.board.constant.CommunityCategoryCode;
 import com.t1membership.board.domain.BoardEntity;
 import com.t1membership.board.dto.content.ContentSummaryRes;
 import com.t1membership.board.dto.createBoard.CreateBoardReq;
@@ -71,16 +72,26 @@ public class BoardServiceImpl implements BoardService {
     private boolean isAdmin(Authentication auth) {
         return auth.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(r -> r.equals("ROLE_ADMIN") || r.equals("ADMIN"));
+                .anyMatch(r -> r.equals("ROLE_ADMIN") || r.equals("ADMIN") || r.equals("ROLE_MANAGER") || r.equals("MANAGER"));
     }
 
-    private BoardType parseBoardTypeOrNull(String typeStr) {
-        if (!StringUtils.hasText(typeStr)) return null;
-        try {
-            return BoardType.valueOf(typeStr.trim().toUpperCase());
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "유효하지 않은 게시판 타입입니다.");
-        }
+    private boolean isLoggedIn(Authentication auth) {
+        return auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken);
+    }
+
+    private boolean isPlayerRole(MemberRole role) {
+        if (role == null) return false;
+        return role.name().startsWith("PLAYER_");
+    }
+
+    private boolean isMembershipActive(MemberEntity member) {
+        if (member == null) return false;
+        // ⚠️ 형님 DB 컬럼: membership_type (MemberEntity.getMembershipType() or getMembershipPayType() 등)
+        // 여기서는 "NO_MEMBERSHIP" 문자열 기준으로 이미 프론트와 맞춰진 전제가 있으니,
+        // MemberEntity getter에 맞게 아래 한 줄만 형님 프로젝트에 맞춰 쓰시면 됩니다.
+        // 예) return member.getMembershipType() != MembershipType.NO_MEMBERSHIP;
+        String mt = (member.getMembershipType() != null ? member.getMembershipType().name() : "NO_MEMBERSHIP");
+        return !"NO_MEMBERSHIP".equalsIgnoreCase(mt);
     }
 
     private Sort toSort(String sortBy) {
@@ -92,9 +103,25 @@ public class BoardServiceImpl implements BoardService {
         return switch (sortBy) {
             case "latest" -> Sort.by(Sort.Order.desc("notice"), Sort.Order.desc("boardNo"));
             case "oldest" -> Sort.by(Sort.Order.desc("notice"), Sort.Order.asc("boardNo"));
-            case "like"   -> Sort.by(Sort.Order.desc("notice"), Sort.Order.desc("boardLikeCount"), Sort.Order.desc("boardNo"));
-            default       -> Sort.by(Sort.Order.desc("notice"), Sort.Order.desc("boardNo"));
+            case "like" -> Sort.by(Sort.Order.desc("notice"), Sort.Order.desc("boardLikeCount"), Sort.Order.desc("boardNo"));
+            default -> Sort.by(Sort.Order.desc("notice"), Sort.Order.desc("boardNo"));
         };
+    }
+
+    private void validateCommunityCategoryOrThrow(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "커뮤니티 categoryCode 는 필수입니다. (ABOUT/LOUNGE/TO_T1)");
+        }
+        try {
+            CommunityCategoryCode.valueOf(raw.trim().toUpperCase());
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "잘못된 커뮤니티 categoryCode 입니다. (ABOUT/LOUNGE/TO_T1)");
+        }
+    }
+
+    private MemberEntity currentMemberOrThrow(String email) {
+        return memberRepository.findByMemberEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "회원 정보를 찾을 수 없습니다."));
     }
 
     /* =======================
@@ -122,22 +149,51 @@ public class BoardServiceImpl implements BoardService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "공지글은 관리자만 작성할 수 있습니다.");
         }
 
-        // 작성자/연관 회원 매핑
+        // 작성자 회원
         MemberEntity member = memberRepository.findById(email)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "회원 정보를 찾을 수 없습니다."));
 
-        // 🔥 CONTENT 타입 게시글은 컨텐츠 담당자만 작성 가능
+        // 🔥 CONTENT 타입 게시글은 컨텐츠 담당자만
         if (req.getBoardType() == BoardType.CONTENT && !member.isContentManager()) {
-            // isContentManager() 는 MemberEntity 안에 만든 boolean getter
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "컨텐츠 게시판은 담당 관리자만 작성할 수 있습니다."
             );
         }
 
+        // =========================
+        // ✅ COMMUNITY 작성 권한
+        // =========================
+        if (req.getBoardType() == BoardType.COMMUNITY) {
+            validateCommunityCategoryOrThrow(req.getCategoryCode());
+
+            boolean admin = isAdmin(auth);
+            boolean membership = isMembershipActive(member);
+            boolean player = isPlayerRole(member.getMemberRole()); // 🔥 선수 특권
+
+            CommunityCategoryCode cc =
+                    CommunityCategoryCode.valueOf(req.getCategoryCode().trim().toUpperCase());
+
+            // 🔥 핵심: 관리자 OR 멤버십 OR 선수
+            if (!admin && !membership && !player) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "멤버십 회원만 작성할 수 있습니다."
+                );
+            }
+
+            // LOUNGE: 선수 계정은 작성 불가 (형님 정책 유지)
+            if (cc == CommunityCategoryCode.LOUNGE && !admin && player) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "스타에게 노출되지 않는 비공개 보드에요. 선수 계정은 이용할 수 없습니다."
+                );
+            }
+        }
+
         BoardEntity entity = BoardEntity.builder()
-                .member(member)                     // FK: member_email
-                .boardWriter(email)                 // 규칙 2: writer = memberEmail
+                .member(member)                 // FK
+                .boardWriter(email)             // writer = memberEmail
                 .boardTitle(req.getBoardTitle().trim())
                 .boardContent(req.getBoardContent())
                 .boardType(req.getBoardType())
@@ -145,26 +201,20 @@ public class BoardServiceImpl implements BoardService {
                 .notice(Boolean.TRUE.equals(req.getNotice()))
                 .isSecret(Boolean.TRUE.equals(req.getIsSecret()))
                 .categoryCode(req.getCategoryCode())
-                // 🔥 컨텐츠 전용 필드 세팅 (일반 게시글이면 null 그대로 들어감)
                 .videoUrl(req.getVideoUrl())
                 .duration(req.getDuration())
                 .build();
 
         BoardEntity saved = boardRepository.save(entity);
 
-        // 2) 이미지가 있으면 파일 저장 + ImageEntity 연결
+        // 이미지 저장
         if (images != null && !images.isEmpty()) {
             int order = 0;
             for (MultipartFile file : images) {
                 if (file.isEmpty()) continue;
 
-                // (1) 파일 시스템 저장 + 메타 정보 생성
                 ImageDTO dto = fileService.uploadFile(file, order++);
-
-                // (2) DTO -> 엔티티 + 게시글 연결
                 ImageEntity image = ImageEntity.fromDtoForBoard(dto, saved);
-
-                // (3) 양방향 연관관계
                 saved.addImage(image);
             }
         }
@@ -172,10 +222,10 @@ public class BoardServiceImpl implements BoardService {
         return CreateBoardRes.from(saved);
     }
 
-
-
     /* =======================
        단건 조회 (비밀글 규칙 적용)
+       + COMMUNITY TO_T1 규칙: 관리자 OR 작성자만 조회 가능
+       + LOUNGE 규칙: 선수계정은 접근 불가 (관리자 제외)
     ======================= */
     @Override
     @Transactional(readOnly = true)
@@ -187,10 +237,62 @@ public class BoardServiceImpl implements BoardService {
         BoardEntity board = boardRepository.findById(req.getBoardNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
 
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean loggedIn = isLoggedIn(auth);
+        boolean admin = loggedIn && isAdmin(auth);
+        String email = loggedIn ? auth.getName() : null;
+
+        // ✅ 작성자 이메일(엔티티 member로 판정: boardWriter(닉네임) 쓰면 안됨)
+        String writerEmail = null;
+        if (board.getMember() != null) {
+            writerEmail = board.getMember().getMemberEmail();
+        }
+        boolean owner = (email != null && writerEmail != null && email.equalsIgnoreCase(writerEmail));
+
+        // ✅ COMMUNITY 접근 규칙
+        if (board.getBoardType() == BoardType.COMMUNITY) {
+            // 로그인 필수
+            if (!loggedIn) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+            }
+
+            MemberEntity me = currentMemberOrThrow(email);
+
+            // ✅ 멤버십 특권: 관리자 OR 멤버십 OR 선수
+            boolean membershipPrivilege =
+                    admin
+                            || isMembershipActive(me)
+                            || isPlayerRole(me.getMemberRole());
+
+            if (!membershipPrivilege) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "멤버십 회원에게 공개된 페이지예요.");
+            }
+
+            String ccRaw = board.getCategoryCode();
+            validateCommunityCategoryOrThrow(ccRaw);
+            CommunityCategoryCode cc = CommunityCategoryCode.valueOf(ccRaw.trim().toUpperCase());
+
+            // LOUNGE: 선수 접근 불가(관리자 제외)
+            if (cc == CommunityCategoryCode.LOUNGE && !admin && isPlayerRole(me.getMemberRole())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "스타에게 노출되지 않는 비공개 보드에요. 선수 계정은 접근할 수 없습니다.");
+            }
+
+            // TO_T1: 읽기 = 관리자 OR 작성자
+            if (cc == CommunityCategoryCode.TO_T1) {
+                if (!admin && !owner) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                            "매니저 또는 작성자만 열람할 수 있는 비공개 보드에요.");
+                }
+            }
+        }
+
+        // ✅ 기존 비밀글 규칙: 본인/관리자만
         if (board.isSecret()) {
-            Authentication auth = currentAuthOrThrow();
-            String email = auth.getName();
-            if (!(isAdmin(auth) || email.equalsIgnoreCase(board.getBoardWriter()))) {
+            if (!loggedIn) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+            }
+            if (!(admin || owner)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "비밀글은 본인과 관리자만 조회할 수 있습니다.");
             }
         }
@@ -200,11 +302,12 @@ public class BoardServiceImpl implements BoardService {
 
     /* =======================
        목록 조회 (비밀글 필터링)
+       + COMMUNITY 분류/권한/TO_T1 mineOnly 지원
     ======================= */
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<ReadAllBoardRes> readAllBoard(ReadAllBoardReq req) {
-        // 정렬/페이징 조립
+        // 정렬/페이징
         Sort sort = toSort(req.getSortBy());
         Pageable pageable = PageRequest.of(
                 Math.max(0, req.getPage()),
@@ -212,22 +315,92 @@ public class BoardServiceImpl implements BoardService {
                 sort
         );
 
-        BoardType type = parseBoardTypeOrNull(req.getBoardType());
-        Page<BoardEntity> page = boardRepository.searchByType(type, pageable);
-
-        // 비밀글 노출 규칙: 본인/관리자만 → 외부 사용자에게는 숨김
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean loggedIn = (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken));
+        boolean loggedIn = isLoggedIn(auth);
         String email = loggedIn ? auth.getName() : null;
         boolean admin = loggedIn && isAdmin(auth);
 
-        List<ReadAllBoardRes> visible = page
-                .stream()
+        Page<BoardEntity> page;
+
+        // ✅ BoardType: ReadAllBoardReq에서 enum으로 받는다고 가정
+        BoardType type = req.getBoardType();
+
+        // ==========================
+        // ✅ COMMUNITY 목록 정책
+        // ==========================
+        if (type == BoardType.COMMUNITY) {
+            // 로그인 필수
+            if (!loggedIn) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
+            }
+
+            MemberEntity me = currentMemberOrThrow(email);
+
+            // 🔥 기존
+            // boolean membership = admin || isMembershipActive(me);
+
+            // ✅ 수정: 선수 포함
+            boolean membership =
+                    admin
+                            || isMembershipActive(me)
+                            || isPlayerRole(me.getMemberRole());
+
+
+            if (!membership && !admin) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "멤버십 회원에게 공개된 페이지예요.");
+            }
+
+            // categoryCode 필수 + 검증
+            validateCommunityCategoryOrThrow(req.getCategoryCode());
+            CommunityCategoryCode cc = CommunityCategoryCode.valueOf(req.getCategoryCode().trim().toUpperCase());
+
+            // LOUNGE: 선수 접근 불가(관리자 제외)
+            if (cc == CommunityCategoryCode.LOUNGE && !admin && isPlayerRole(me.getMemberRole())) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "스타에게 노출되지 않는 비공개 보드에요. 선수 계정은 접근할 수 없습니다.");
+            }
+
+            boolean mineOnly = Boolean.TRUE.equals(req.getMineOnly());
+
+            // TO_T1: 멤버십 유저는 "내 글만" 조회가 원칙 (형님 정책)
+            // - 프론트에서 mineOnly=true로 보내는 방식
+            // - 관리자는 mineOnly 무시하고 전체 조회 가능
+//            if (cc == CommunityCategoryCode.TO_T1 && !admin) {
+//                mineOnly = true;
+//            }
+
+            if (mineOnly) {
+                // ✅ Repository에 이 메서드가 이미 추가되어 있어야 합니다.
+                page = boardRepository.findByBoardTypeAndCategoryCodeAndMember_MemberEmail(
+                        BoardType.COMMUNITY,
+                        cc.name(),
+                        email,
+                        pageable
+                );
+            } else {
+                // ✅ Repository에 이 메서드가 이미 추가되어 있어야 합니다.
+                page = boardRepository.findByBoardTypeAndCategoryCode(
+                        BoardType.COMMUNITY,
+                        cc.name(),
+                        pageable
+                );
+            }
+
+        } else {
+            // ==========================
+            // 기존 로직 (커뮤니티 외)
+            // ==========================
+            page = boardRepository.searchByType(type, pageable);
+        }
+
+        // ==========================
+        // ✅ 비밀글 필터링: 본인/관리자만
+        // ==========================
+        List<ReadAllBoardRes> visible = page.stream()
                 .filter(b -> !b.isSecret() || admin || (email != null && email.equalsIgnoreCase(b.getBoardWriter())))
                 .map(ReadAllBoardRes::from)
                 .toList();
 
-        // PageResponseDTO 구성 (아이템과 동일 스타일)
+        // PageResponseDTO 구성
         PageRequestDTO pr = PageRequestDTO.builder()
                 .page(req.getPage())
                 .size(req.getSize())
@@ -236,7 +409,7 @@ public class BoardServiceImpl implements BoardService {
         return PageResponseDTO.<ReadAllBoardRes>withAll()
                 .pageRequestDTO(pr)
                 .dtoList(visible)
-                .total((int) page.getTotalElements()) // ※ 비밀글 필터링 후 total을 별도로 조정하려면 여기 로직을 바꿔드릴 수 있습니다.
+                .total((int) page.getTotalElements())
                 .build();
     }
 
@@ -295,20 +468,17 @@ public class BoardServiceImpl implements BoardService {
             }
         }
 
-        // 현재 게시글에 달린 이미지들을 복사해서 순회
         List<ImageEntity> currentImages = new ArrayList<>(board.getImages());
 
         for (ImageEntity img : currentImages) {
             String fileName = img.getFileName();
 
-            // existingImages 목록에 없는 애들은 삭제
             if (!keepMap.containsKey(fileName)) {
                 if (fileName != null) {
-                    fileService.deleteFile(fileName);   // 실제 파일 삭제
+                    fileService.deleteFile(fileName);
                 }
-                board.removeImage(img);                 // 연관관계 제거 (orphanRemoval로 DB row 삭제)
+                board.removeImage(img);
             } else {
-                // 남길 이미지면 sortOrder 갱신
                 Integer newOrder = keepMap.get(fileName);
                 img.setSortOrder(newOrder != null ? newOrder : 0);
             }
@@ -329,19 +499,14 @@ public class BoardServiceImpl implements BoardService {
             for (MultipartFile file : newImages) {
                 if (file == null || file.isEmpty()) continue;
 
-                // 파일 시스템에 저장 + 메타정보 생성
                 ImageDTO dto = fileService.uploadFile(file, order++);
-
-                // DTO -> 엔티티 변환 + 게시글 연결
                 ImageEntity image = ImageEntity.fromDtoForBoard(dto, board);
                 board.addImage(image);
             }
         }
 
-        // 영속 엔티티라 더티체킹으로 텍스트 + 이미지 변경 모두 반영됨
         return UpdateBoardRes.from(board);
     }
-
 
     /* =======================
        삭제 (작성자 or 관리자 or 컨텐츠매니저)
@@ -376,12 +541,10 @@ public class BoardServiceImpl implements BoardService {
                         )
                 );
 
-        // 🔥 작성자인지
         boolean isWriter = email.equalsIgnoreCase(
                 board.getMember().getMemberEmail()
         );
 
-        // 🔥 관리자 / 컨텐츠 매니저인지 (ADMIN, ADMIN_CONTENT, content_manager=true 포함)
         boolean isManager = member.isContentManager();
 
         log.info("🔥 [DELETE-SERVICE] isWriter={}, isManager={}, role={}",
@@ -399,20 +562,16 @@ public class BoardServiceImpl implements BoardService {
         return DeleteBoardRes.success(req.getBoardNo());
     }
 
-
-
     @Override
     @Transactional(readOnly = true)
     public List<ContentSummaryRes> readContentBoards() {
 
-        // 최신순으로 최대 100개 정도만
         Pageable pageable = PageRequest.of(
                 0,
                 100,
                 Sort.by(Sort.Order.desc("boardNo"))
         );
 
-        // 기존에 쓰던 searchByType 재사용 (BoardType.CONTENT)
         var page = boardRepository.searchByType(BoardType.CONTENT, pageable);
 
         return page.stream()
@@ -436,10 +595,8 @@ public class BoardServiceImpl implements BoardService {
             throw new AccessDeniedException("스토리 작성 권한이 없습니다.");
         }
 
-        // ✅ role 기반 writer 강제
         String writer = resolveWriterByRole(role);
 
-        // ✅ 선수 role과 playerKey 불일치 차단
         validatePlayerKeyConsistency(member, role, writer);
 
         BoardEntity board = BoardEntity.builder()
@@ -453,7 +610,6 @@ public class BoardServiceImpl implements BoardService {
                 .notice(false)
                 .build();
 
-        // ✅ imageUrls -> ImageEntity로 변환해서 board.images에 붙임
         List<String> imageUrls = req.getImageUrls();
         if (imageUrls != null && !imageUrls.isEmpty()) {
             int order = 0;
@@ -463,13 +619,10 @@ public class BoardServiceImpl implements BoardService {
                 if (url.isEmpty()) continue;
 
                 ImageEntity img = ImageEntity.create(url, order++);
-
-                // 관계 세팅 (BoardEntity에 addImage()가 있음)
                 board.addImage(img);
             }
         }
 
-        // ✅ cascade = ALL 이라서 board만 save해도 images 같이 저장됨
         boardRepository.save(board);
     }
 
@@ -490,7 +643,6 @@ public class BoardServiceImpl implements BoardService {
         return page.map(board -> {
             String thumb = null;
             if (board.getImages() != null && !board.getImages().isEmpty()) {
-                // @OrderBy 때문에 0번이 대표 이미지
                 thumb = readImageUrl(board.getImages().get(0));
             }
 
@@ -582,16 +734,8 @@ public class BoardServiceImpl implements BoardService {
         return content.length() > 120 ? content.substring(0, 120) + "..." : content;
     }
 
-    // ✅ ImageEntity에서 이미지 URL 꺼내는 유틸 (필드명 맞추면 됨)
     private String readImageUrl(ImageEntity img) {
         if (img == null) return null;
-
-        // ================================
-        // 🔥 TODO: 형님 ImageEntity getter에 맞춰 여기만 수정해도 됨
-        // 예) return img.getImageUrl();
-        // 예) return img.getFilePath();
-        // ================================
         return img.getUrl();
     }
-
 }

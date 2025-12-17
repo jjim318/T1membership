@@ -35,4 +35,19 @@ public interface BoardRepository extends JpaRepository<BoardEntity, Long> {
             Pageable pageable
     );
 
+    // 1) COMMUNITY + categoryCode(ABOUT/LOUNGE/TO_T1)로 목록
+    Page<BoardEntity> findByBoardTypeAndCategoryCode(
+            BoardType boardType,
+            String categoryCode,
+            Pageable pageable
+    );
+
+    // 2) COMMUNITY + categoryCode + 작성자(내 글만)
+    Page<BoardEntity> findByBoardTypeAndCategoryCodeAndMember_MemberEmail(
+            BoardType boardType,
+            String categoryCode,
+            String memberEmail,
+            Pageable pageable
+    );
+
 }

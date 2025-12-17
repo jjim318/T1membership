@@ -148,19 +148,18 @@ public class SecurityConfig {
                 .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 댓글 작성/수정/삭제
-                .requestMatchers("/comment/**")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .requestMatchers("/comment/**").authenticated()
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
                 .requestMatchers(HttpMethod.DELETE, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
 
                 // Toss 결제 (본인 인증 필수)
                 .requestMatchers("/api/pay/toss/**")
