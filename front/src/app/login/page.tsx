@@ -140,7 +140,7 @@ export default function LoginPage() {
             }
 
             alert("로그인 성공!");
-            router.push("/public");
+            router.push("/");
         } catch (err) {
             console.error("로그인 실패:", err);
             if (axios.isAxiosError(err)) {

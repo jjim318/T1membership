@@ -1,4 +1,3 @@
-// src/app/mypage/account/profile/page.tsx
 "use client";
 
 import {
@@ -28,7 +27,9 @@ export default function ProfileEditPage() {
     const router = useRouter();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    // ===== 내 프로필 읽기 =====
+    // =========================
+    // 내 프로필 조회
+    // =========================
     useEffect(() => {
         const load = async () => {
             try {
@@ -37,7 +38,6 @@ export default function ProfileEditPage() {
                 const res = await apiClient.get<ApiResult<MemberInfo>>(
                     "/member/readOne"
                 );
-                console.log("readOne =", res.data);
 
                 const member = res.data.result;
 
@@ -46,17 +46,17 @@ export default function ProfileEditPage() {
                 setPreviewUrl(null);
                 setProfileFile(null);
                 setRemoveProfile(false);
+
             } catch (e: unknown) {
                 console.error(e);
 
                 if (axios.isAxiosError(e) && e.response?.status === 401) {
-                    if (typeof window !== "undefined") {
-                        localStorage.removeItem("accessToken");
-                        localStorage.removeItem("refreshToken");
-                    }
+                    localStorage.removeItem("accessToken");
+                    localStorage.removeItem("refreshToken");
                     router.push("/login");
                     return;
                 }
+
                 setErrorMsg("회원 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
             } finally {
                 setLoading(false);
@@ -66,7 +66,9 @@ export default function ProfileEditPage() {
         load();
     }, [router]);
 
-    // ===== 이미지 선택 =====
+    // =========================
+    // 이미지 선택
+    // =========================
     const handleClickCamera = () => {
         setRemoveProfile(false);
         fileInputRef.current?.click();
@@ -83,14 +85,18 @@ export default function ProfileEditPage() {
         setPreviewUrl(url);
     };
 
-    // ===== 기본 프로필로 변경 =====
+    // =========================
+    // 기본 프로필로 변경
+    // =========================
     const handleResetProfile = () => {
         setProfileFile(null);
         setPreviewUrl(null);
         setRemoveProfile(true);
     };
 
-    // ===== 저장 (/member/profile) =====
+    // =========================
+    // 저장 (/member/profile)
+    // =========================
     const handleSave = async () => {
         if (!nick.trim()) {
             alert("닉네임은 필수입니다.");
@@ -106,31 +112,30 @@ export default function ProfileEditPage() {
             // ModifyProfileReq
             form.append("memberNickName", nick.trim());
 
-            // @RequestPart("profileFile")
+            // 파일이 있을 때만 추가
             if (profileFile) {
                 form.append("profileFile", profileFile);
             }
 
-            // @RequestParam("removeProfile")
+            // 기본 프로필로 변경
             if (removeProfile) {
                 form.append("removeProfile", "true");
             }
 
-            await apiClient.post("/member/profile", form, {
-                headers: { "Content-Type": "multipart/form-data" },
-            });
+            // 🔥🔥🔥 핵심 수정 포인트
+            // Content-Type 지정 ❌ (axios가 boundary 포함해서 자동 처리)
+            await apiClient.post("/member/profile", form);
 
             alert("프로필이 저장되었습니다.");
             router.push("/mypage");
+
         } catch (e: unknown) {
             console.error(e);
 
             if (axios.isAxiosError(e) && e.response?.status === 401) {
                 alert("로그인이 필요합니다. 다시 로그인해 주세요.");
-                if (typeof window !== "undefined") {
-                    localStorage.removeItem("accessToken");
-                    localStorage.removeItem("refreshToken");
-                }
+                localStorage.removeItem("accessToken");
+                localStorage.removeItem("refreshToken");
                 router.push("/login");
                 return;
             }
@@ -149,10 +154,12 @@ export default function ProfileEditPage() {
         );
     }
 
-    // 아바타 내용
+    // =========================
+    // 아바타 렌더링
+    // =========================
     let avatarContent: ReactNode;
+
     if (previewUrl) {
-        // eslint-disable-next-line @next/next/no-img-element
         avatarContent = (
             <img
                 src={previewUrl}
@@ -161,7 +168,6 @@ export default function ProfileEditPage() {
             />
         );
     } else if (!removeProfile && profileUrl) {
-        // eslint-disable-next-line @next/next/no-img-element
         avatarContent = (
             <img
                 src={profileUrl}
@@ -171,14 +177,16 @@ export default function ProfileEditPage() {
         );
     } else {
         avatarContent = (
-            <span className="text-4xl font-bold">{nick ? nick[0] : "N"}</span>
+            <span className="text-4xl font-bold">
+                {nick ? nick[0] : "N"}
+            </span>
         );
     }
 
     return (
         <div className="min-h-screen bg-black text-white pt-20 pb-16">
             <div className="max-w-xl mx-auto px-6">
-                {/* 프로필 + 카메라 + 기본 프로필 변경 */}
+                {/* 프로필 영역 */}
                 <div className="flex flex-col items-center mb-8">
                     <div className="relative">
                         <div className="w-28 h-28 rounded-full bg-red-400 flex items-center justify-center overflow-hidden">
@@ -188,7 +196,8 @@ export default function ProfileEditPage() {
                         <button
                             type="button"
                             onClick={handleClickCamera}
-                            className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-black flex items-center justify-center border border-zinc-700 text-xs"
+                            className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-black
+                                       flex items-center justify-center border border-zinc-700 text-xs"
                         >
                             📷
                         </button>
@@ -221,7 +230,8 @@ export default function ProfileEditPage() {
                 <input
                     value={nick}
                     onChange={(e) => setNick(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-500"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg
+                               px-4 py-3 text-sm outline-none focus:border-red-500"
                     placeholder="닉네임을 입력하세요"
                 />
 
@@ -233,8 +243,8 @@ export default function ProfileEditPage() {
                     onClick={handleSave}
                     disabled={saving || !nick.trim()}
                     className="w-full mt-10 py-3 rounded-lg text-sm font-semibold
-                     bg-red-600 disabled:bg-red-900 disabled:text-zinc-500
-                     hover:bg-red-500 transition"
+                               bg-red-600 disabled:bg-red-900 disabled:text-zinc-500
+                               hover:bg-red-500 transition"
                 >
                     {saving ? "저장중..." : "저장하기"}
                 </button>
