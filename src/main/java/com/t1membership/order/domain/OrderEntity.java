@@ -33,7 +33,7 @@ public class OrderEntity extends BaseEntity {
     private MemberEntity member;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "order_status", nullable = false, length = 32)
+    @Column(name = "order_status", nullable = false, length = 50)
     private OrderStatus orderStatus;
 
     // 배송/수령
@@ -73,13 +73,11 @@ public class OrderEntity extends BaseEntity {
     private Boolean autoRenew;
 
     //취소 --------------------
-    @ManyToOne(fetch = FetchType.LAZY,cascade = CascadeType.ALL)
-    @JoinColumn(name = "toss_pay")
+    @OneToOne(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     private TossPaymentEntity tossPayment;
 
     @Column(name = "canceledAt")
     private LocalDateTime canceledAt;
-
 
     // 주문 항목들
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)

@@ -1,6 +1,8 @@
 package com.t1membership.order.service;
 
+import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.domain.OrderItemEntity;
 import com.t1membership.order.dto.req.admin.AdminSearchOrderReq;
 import com.t1membership.order.dto.res.admin.AdminDetailOrderRes;
 import com.t1membership.order.dto.res.common.SummaryOrderRes;
@@ -14,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -24,8 +28,27 @@ public class OrderQueryService {
     //내 주문 목록 조회 (회원
     //loginEmail 은 반드시 SecurityContext / @AuthenticationPrincipal 에서 받은 값만 사용
     public Page<SummaryOrderRes> getMyOrders(String memberEmail, Pageable pageable) {
-        Page<OrderEntity> page = orderRepository.findByMember_MemberEmailOrderByCreateDateDesc(memberEmail, pageable);
-        return page.map(SummaryOrderRes::from);
+        Page<OrderEntity> page = orderRepository.findByMember_MemberEmail(memberEmail, pageable);
+
+        return page.map(order -> {
+            List<OrderItemEntity> items = order.getOrderItems(); // 빈 리스트일 수도 있음
+
+            int itemCount = (items == null) ? 0 : items.size();
+            String itemName = null;
+
+            if (itemCount > 0 && items.get(0).getItem() != null) {
+                itemName = items.get(0).getItem().getItemName();
+            }
+
+            return SummaryOrderRes.builder()
+                    .orderNo(order.getOrderNo())
+                    .orderDate(order.getCreateDate())
+                    .orderStatus(order.getOrderStatus())
+                    .itemCount(itemCount)
+                    .itemName(itemName) // ✅ 없으면 null 허용
+                    .orderTotalPrice(order.getOrderTotalPrice())
+                    .build();
+        });
     }
 
     //관리자용 주문 목록 조회 (전체 페이징

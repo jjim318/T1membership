@@ -64,7 +64,7 @@ public class TossPaymentController {
     }
 
     private void assertPayable(OrderEntity order) {
-        if (order.getOrderStatus() != OrderStatus.ORDERED) {
+        if (order.getOrderStatus() != OrderStatus.PAYMENT_PENDING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "결제 불가 상태");
         }
     }
@@ -88,7 +88,7 @@ public class TossPaymentController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "본인 주문만 결제 가능");
         }
 
-        if (order.getOrderStatus() != OrderStatus.ORDERED) {
+        if (order.getOrderStatus() != OrderStatus.PAYMENT_PENDING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "결제 불가 상태");
         }
 

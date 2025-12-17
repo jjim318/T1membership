@@ -125,7 +125,7 @@ public class SecurityConfig {
                         "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // 프로필 수정 (닉네임 + 이미지)
-                .requestMatchers("/member/profile")
+                .requestMatchers("/member/profile/**")
                 .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
                         "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
@@ -148,18 +148,19 @@ public class SecurityConfig {
                 .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 댓글 작성/수정/삭제
-                .requestMatchers("/comment/**").authenticated()
+                .requestMatchers("/comment/**")
+                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
                 .requestMatchers(HttpMethod.PUT, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
                 .requestMatchers(HttpMethod.DELETE, "/board/**")
                 .hasAnyRole("USER", "ADMIN_CONTENT","T1","PLAYER_DORAN","PLAYER_ONER",
-                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA", "ADMIN")
+                        "PLAYER_FAKER","PLAYER_GUMAYUSI","PLAYER_KERIA")
 
                 // Toss 결제 (본인 인증 필수)
                 .requestMatchers("/api/pay/toss/**")
@@ -211,7 +212,8 @@ public class SecurityConfig {
 
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
-                "http://localhost:3001"
+                "http://localhost:3001",
+                "http://192.168.0.180:3000"
         ));
         cfg.setAllowedMethods(List.of(
                 "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"

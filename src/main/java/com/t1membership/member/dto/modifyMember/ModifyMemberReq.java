@@ -9,7 +9,6 @@ import lombok.*;
 @AllArgsConstructor
 public class ModifyMemberReq {
     private String memberName;
-    private String memberEmail;
     private String memberPhone;
     private String memberBirthY;
     private String memberGender;

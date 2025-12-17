@@ -112,8 +112,12 @@ public class MembershipOrderCreator implements OrderCreator<CreateMembershipOrde
         // ============================
 
         // 멤버 프로필 기반으로 채우거나, 없으면 더미 값
-        String receiverName = req.getMemberName();  // 멤버십 이름 그대로 사용
-        String receiverPhone = req.getMemberPhone(); // 멤버십 폰 그대로
+        String receiverName = (req.getMemberName() != null && !req.getMemberName().isBlank())
+                ? req.getMemberName()
+                : member.getMemberName();  // 멤버십 이름 그대로 사용
+        String receiverPhone = (req.getMemberPhone() != null && !req.getMemberPhone().isBlank())
+                ? req.getMemberPhone()
+                : member.getMemberPhone(); // 멤버십 폰 그대로
 
         // DB에서 NOT NULL 제약 걸려있으니까 절대 null 안 나가게 처리
         String receiverAddress = "멤버십 상품 (배송 주소 없음)";
@@ -126,7 +130,7 @@ public class MembershipOrderCreator implements OrderCreator<CreateMembershipOrde
         // ============================
         OrderEntity order = OrderEntity.builder()
                 .member(member)
-                .orderStatus(OrderStatus.ORDERED)
+                .orderStatus(OrderStatus.PAYMENT_PENDING)
                 .orderTotalPrice(totalPrice)
 
                 // 멤버십 스냅샷
@@ -164,7 +168,7 @@ public class MembershipOrderCreator implements OrderCreator<CreateMembershipOrde
                 .build();
 
         if (order.getOrderItems() != null) {
-            order.getOrderItems().add(orderItem);
+            order.addItem(orderItem);
         }
 
         return order;

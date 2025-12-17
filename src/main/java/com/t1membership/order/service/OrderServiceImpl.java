@@ -8,6 +8,10 @@ import com.t1membership.order.dto.req.user.CreateMembershipOrderReq;
 import com.t1membership.order.dto.req.user.CreatePopOrderReq;
 import com.t1membership.order.dto.res.user.CreateOrderRes;
 import com.t1membership.order.repository.OrderRepository;
+import com.t1membership.pay.constant.TossPaymentMethod;
+import com.t1membership.pay.constant.TossPaymentStatus;
+import com.t1membership.pay.domain.TossPaymentEntity;
+import com.t1membership.pay.repository.TossPaymentRepository;
 import com.t1membership.pay.service.TossPaymentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +36,7 @@ public class OrderServiceImpl implements OrderService {
     private final MembershipOrderCreator membershipOrderCreator;
     private final PopOrderCreator popOrderCreator;
     private final CartRepository cartRepository;
+    private final TossPaymentRepository tossPaymentRepository;
 
     // ===========================
     // BigDecimal → int 변환 (토스 amount용)
@@ -76,18 +81,37 @@ public class OrderServiceImpl implements OrderService {
      */
     private CreateOrderRes processOrder(OrderEntity order) {
 
-        // 1) DB 저장 (PK 생성 + orderItems cascade)
+        // 1) 주문 저장 (PK 생성 + orderItems cascade)
         orderRepository.save(order);
 
         // 2) 토스에 보낼 값 준비
         int amount = toKrwInt(order.getOrderTotalPrice());
-        String orderId = order.getOrderNo().toString();
         String orderName = buildOrderName(order);
 
+        // ✅ [핵심] 토스 orderId는 "DB에 저장되는 결제 준비 레코드"의 키여야 한다
+        //    - 추천: 주문종류 Prefix + orderNo (절대 안 꼬임)
+        String orderTossId = "ORD_" + order.getOrderNo();
+
+        // ✅ [핵심] toss_payment(READY) 생성/저장 (nullable=false 필드 절대 null 금지)
+        //    이미 있으면(재시도/중복 클릭) 멱등으로 처리
+        tossPaymentRepository.findByOrderTossId(orderTossId).orElseGet(() -> {
+            TossPaymentEntity pay = TossPaymentEntity.builder()
+                    .order(order)
+                    .orderTossId(orderTossId)
+                    .orderName(orderName)
+                    .totalAmount(order.getOrderTotalPrice())
+                    .tossPaymentMethod(TossPaymentMethod.CARD)          // nullable=false
+                    .tossPaymentStatus(TossPaymentStatus.PENDING)         // nullable=false
+                    .build();
+            return tossPaymentRepository.save(pay);
+        });
+
+        log.info("[PAY READY] orderNo={}, orderTossId={}, amount={}", order.getOrderNo(), orderTossId, amount);
+
         try {
-            // 3) 토스 결제창 URL 생성
+            // 3) 토스 결제창 URL 생성 (orderId = orderTossId로!)
             String checkoutUrl = tossPaymentService.createPaymentUrl(
-                    orderId,
+                    orderTossId,
                     amount,
                     orderName
             );
@@ -96,18 +120,15 @@ public class OrderServiceImpl implements OrderService {
             return CreateOrderRes.from(order, checkoutUrl);
 
         } catch (HttpClientErrorException | HttpServerErrorException e) {
-            // 🔥 토스에서 4xx / 5xx 에러 응답이 온 경우
             log.error("[Order] Toss createPaymentUrl 실패: status={}, body={}",
                     e.getStatusCode(), e.getResponseBodyAsString(), e);
 
-            // 형님이 프론트에서 보는 메시지 깔끔하게 정리
             throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,   // 우리 서버는 400으로 응답
+                    HttpStatus.BAD_REQUEST,
                     "결제정보 생성 오류 : http=" + e.getStatusCode()
             );
 
         } catch (RestClientException e) {
-            // 🔥 네트워크 오류 등
             log.error("[Order] Toss 통신 오류", e);
             throw new ResponseStatusException(
                     HttpStatus.SERVICE_UNAVAILABLE,
@@ -115,7 +136,6 @@ public class OrderServiceImpl implements OrderService {
             );
 
         } catch (Exception e) {
-            // 🔥 그 외 예기치 못한 오류
             log.error("[Order] 알 수 없는 결제 오류", e);
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR,

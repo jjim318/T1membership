@@ -1,6 +1,14 @@
 // TossPaymentService.java
 package com.t1membership.pay.service;
 
+import com.t1membership.member.domain.MemberEntity;
+import com.t1membership.member.repository.MemberRepository;
+import com.t1membership.order.constant.OrderStatus;
+import com.t1membership.order.domain.OrderEntity;
+import com.t1membership.order.repository.OrderRepository;
+import com.t1membership.pay.constant.TossPaymentStatus;
+import com.t1membership.pay.domain.TossPaymentEntity;
+import com.t1membership.pay.repository.TossPaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +28,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TossPaymentService {
 
+    private final OrderRepository orderRepository;
+    private final MemberRepository memberRepository;
+    private final TossPaymentRepository tossPaymentRepository;
     @Value("${toss.payments.secret-key:}")
     private String tossSecretKey; // test_sk_... (테스트용 시크릿키)
 
@@ -113,47 +124,66 @@ public class TossPaymentService {
     public Map<String, Object> confirmPayment(String paymentKey, String orderId, int amount) {
         final String url = "https://api.tosspayments.com/v1/payments/confirm";
 
+        // 1) orderId로 결제 레코드(READY)부터 찾는다
+        TossPaymentEntity pay = tossPaymentRepository.findByOrderTossId(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "주문을 찾을 수 없습니다. orderId=" + orderId));
+
+        OrderEntity order = pay.getOrder();
+
+        // 2) 멱등: 이미 DONE이면 그냥 성공 처리
+        if (pay.getTossPaymentStatus() == TossPaymentStatus.DONE || order.getOrderStatus() == OrderStatus.PAID) {
+            return Map.of("status", "ALREADY_PAID");
+        }
+
+        // 3) 금액 검증(서버 기준)
+        int expected = order.getOrderTotalPrice().intValueExact();
+        if (expected != amount) {
+            order.setOrderStatus(OrderStatus.PAYMENT_FAILED);
+            pay.setTossPaymentStatus(TossPaymentStatus.FAILED);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "결제 금액 불일치 expected=" + expected + ", amount=" + amount);
+        }
+
+        // 4) Toss confirm 호출
         HttpHeaders headers = createAuthHeaders();
-
-        Map<String, Object> body = Map.of(
-                "paymentKey", paymentKey,
-                "orderId", orderId,
-                "amount", amount
-        );
-
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-
-        log.info("[Toss] 결제 승인 요청: url={}, body={}", url, body);
+        HttpEntity<Map<String, Object>> entity =
+                new HttpEntity<>(Map.of("paymentKey", paymentKey, "orderId", orderId, "amount", amount), headers);
 
         try {
-            ResponseEntity<Map> res =
-                    tossrestTemplate.postForEntity(url, entity, Map.class);
-
-            log.info("[Toss] 결제 승인 응답: status={}, body={}",
-                    res.getStatusCode(), res.getBody());
+            ResponseEntity<Map> res = tossrestTemplate.postForEntity(url, entity, Map.class);
 
             if (!res.getStatusCode().is2xxSuccessful()) {
-                throw new IllegalStateException(
-                        "결제 승인 실패: http=" + res.getStatusCode() +
-                                ", body=" + res.getBody()
-                );
+                order.setOrderStatus(OrderStatus.PAYMENT_FAILED);
+                pay.setTossPaymentStatus(TossPaymentStatus.FAILED);
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "토스 승인 실패: http=" + res.getStatusCode());
             }
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> resBody = (Map<String, Object>) res.getBody();
-            log.debug("[Toss] confirm OK: {}", resBody);
-            return resBody;
+            Map<String, Object> body = (Map<String, Object>) res.getBody();
+
+            // 5) DB 업데이트(성공)
+            pay.setTossPaymentKey(paymentKey);
+            pay.setTossPaymentStatus(TossPaymentStatus.DONE);
+            order.setOrderStatus(OrderStatus.PAID);
+
+            // 6) 멤버십 반영
+            if (order.getMembershipPayType() != null) {
+                MemberEntity member = order.getMember();
+                member.setMembershipType(order.getMembershipPayType());
+                memberRepository.save(member);
+            }
+
+            return body;
 
         } catch (HttpStatusCodeException e) {
-            String err = e.getResponseBodyAsString();
-            log.error("[Toss] confirm error: status={}, body={}",
-                    e.getStatusCode(), err, e);
-            throw new IllegalStateException(
-                    "Toss confirm error: http=" + e.getStatusCode() + ", body=" + err,
-                    e
-            );
+            order.setOrderStatus(OrderStatus.PAYMENT_FAILED);
+            pay.setTossPaymentStatus(TossPaymentStatus.FAILED);
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "토스 승인 오류: http=" + e.getStatusCode() + ", body=" + e.getResponseBodyAsString());
         }
     }
+
 
     // =========================================
     // 3) 결제 취소 / 환불

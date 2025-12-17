@@ -20,6 +20,7 @@ import com.t1membership.member.dto.readOneMember.ReadOneMemberReq;
 import com.t1membership.member.dto.readOneMember.ReadOneMemberRes;
 import com.t1membership.member.repository.MemberRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,6 +41,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Transactional
+@Slf4j
 public class MemberServiceImpl implements MemberService {
 
     private final FileService fileService;
@@ -152,11 +154,11 @@ public class MemberServiceImpl implements MemberService {
     // ==========================================
     @Override
     @Transactional
-    public ModifyMemberRes modifyMember(ModifyMemberReq req) {
+    public ModifyMemberRes modifyMember(String loginEmail,ModifyMemberReq req) {
 
         // 1) 수정 대상 회원 조회 + 권한 검증
-        MemberEntity memberEntity = getUpdatableMember(req.getMemberEmail());
-        req.setMemberEmail(memberEntity.getMemberEmail());
+        MemberEntity memberEntity = memberRepository.findByMemberEmail(loginEmail)
+                .orElseThrow(() ->new UsernameNotFoundException(loginEmail));
 
         // 2) 일반 정보 변경 (이미지/비밀번호는 절대 건드리지 않음)
         memberEntity.setMemberName(req.getMemberName());
@@ -176,25 +178,19 @@ public class MemberServiceImpl implements MemberService {
     // ==========================================
     @Override
     @Transactional
-    public ModifyMemberRes modifyProfile(ModifyProfileReq req,
-                                         MultipartFile profileFile,
-                                         Boolean removeProfile) {
+    public ModifyMemberRes modifyProfile(
+            String loginEmail,
+            ModifyProfileReq req,
+            MultipartFile profileFile,
+            Boolean removeProfile
+    ) {
+        MemberEntity member = memberRepository.findByMemberEmail(loginEmail)
+                .orElseThrow(() -> new UsernameNotFoundException(loginEmail));
 
-        // 1) 수정 대상 회원 조회 + 권한 검증
-        MemberEntity memberEntity = getUpdatableMember(req.getMemberEmail());
+        member.setMemberNickName(req.getMemberNickName());
+        applyProfileImageUpdate(member, profileFile, removeProfile);
 
-        // 비관리자인 경우 실제 이메일을 DTO에도 세팅 (로그 남길 때 편함)
-        req.setMemberEmail(memberEntity.getMemberEmail());
-
-        // 2) 닉네임만 수정
-        memberEntity.setMemberNickName(req.getMemberNickName());
-
-        // 3) 프로필 이미지 처리 (삭제/업로드)
-        applyProfileImageUpdate(memberEntity, profileFile, removeProfile);
-
-        memberRepository.save(memberEntity);
-
-        return ModifyMemberRes.from(memberEntity);
+        return ModifyMemberRes.from(member);
     }
 
 
@@ -269,16 +265,38 @@ public class MemberServiceImpl implements MemberService {
 
     // 기존 이미지 전부 제거 + 파일 삭제
     private void clearProfileImages(MemberEntity memberEntity) {
+
+        // 안전장치
+        if (memberEntity.getImages() == null || memberEntity.getImages().isEmpty()) {
+            memberEntity.setMemberImage(null);
+            return;
+        }
+
         List<ImageEntity> currentImages = new ArrayList<>(memberEntity.getImages());
+
         for (ImageEntity img : currentImages) {
             String fileName = img.getFileName();
-            if (StringUtils.hasText(fileName)) {
-                fileService.deleteFile(fileName);   // 스토리지에서 실제 파일 삭제
+
+            if (org.springframework.util.StringUtils.hasText(fileName)) {
+                try {
+                    fileService.deleteFile(fileName); // ✅ 실패해도 전체 실패시키지 말 것
+                } catch (Exception ex) {
+                    // 실무: 로그만 남기고 계속 진행
+                    log.warn("[Profile] deleteFile fail. fileName={}, msg={}", fileName, ex.getMessage());
+                }
             }
-            memberEntity.removeImage(img);          // 연관관계 제거 (orphanRemoval)
+
+            // DB 관계 정리는 무조건 진행
+            try {
+                memberEntity.removeImage(img);
+            } catch (Exception ex) {
+                log.warn("[Profile] removeImage fail. msg={}", ex.getMessage());
+            }
         }
-        memberEntity.setMemberImage(null);          // 캐시 필드도 초기화
+
+        memberEntity.setMemberImage(null);
     }
+
 
     // 이미지 유효성 검증 (형님 기존 로직 그대로)
     private void validateImage(MultipartFile file) {

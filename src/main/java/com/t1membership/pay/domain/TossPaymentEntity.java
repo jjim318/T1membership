@@ -45,8 +45,8 @@ public class TossPaymentEntity extends BaseEntity {
     private String orderTossId;  // ← 혼동 방지용으로 필드명 변경 권장
 
     /** 주문 FK (N:1). */
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "order_id", nullable = false)  // ✔️ FK 컬럼
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "order_id", nullable = false, unique = true)
     private OrderEntity order;
 
     // ❌ 아래 read-only 매핑은 실제 컬럼이 없으면 제거하세요.

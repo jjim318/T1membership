@@ -53,7 +53,7 @@ public class GoodsOrderCreator implements OrderCreator<CreateGoodsOrderReq> {
         order.setReceiverDetailAddress(req.getReceiverDetailAddress());
         order.setReceiverZipCode(req.getReceiverZipCode());
         order.setMemo(req.getMemo());
-        order.setOrderStatus(OrderStatus.ORDERED);
+        order.setOrderStatus(OrderStatus.PAYMENT_PENDING);
 
         // 🔥 NPE 방지: 리스트가 null이면 새 리스트 세팅
         if (order.getOrderItems() == null) {

@@ -133,8 +133,8 @@ public class MemberController {
     //   이름/성별/생년/전화번호/주소 등
     // ==============================
     @PutMapping(value = "/modify", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<ModifyMemberRes> modifyMemberInfo(@RequestBody @Valid ModifyMemberReq req) {
-        ModifyMemberRes res = memberService.modifyMember(req);
+    public ApiResult<ModifyMemberRes> modifyMemberInfo(@AuthenticationPrincipal String loginEmail,@RequestBody @Valid ModifyMemberReq req) {
+        ModifyMemberRes res = memberService.modifyMember(loginEmail,req);
         return new ApiResult<>(res);
     }
 
@@ -142,10 +142,20 @@ public class MemberController {
     // ==============================
     //   프로필 수정 (닉네임 + 이미지)
     // ==============================
-    @PostMapping(value = "/profile", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public ApiResult<ModifyMemberRes> modifyProfile(@ModelAttribute @Valid ModifyProfileReq req, @RequestPart(value = "profileFile", required = false) MultipartFile profileFile, @RequestParam(value = "removeProfile", required = false) Boolean removeProfile) {
+    @PostMapping(
+            value = "/profile",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
+    public ApiResult<ModifyMemberRes> modifyProfile(
+            @AuthenticationPrincipal String loginEmail,   // 🔥 여기
+            @ModelAttribute @Valid ModifyProfileReq req,
+            @RequestPart(value = "profileFile", required = false) MultipartFile profileFile,
+            @RequestParam(value = "removeProfile", defaultValue = "false") Boolean removeProfile
+    ) {
+        ModifyMemberRes res =
+                memberService.modifyProfile(loginEmail, req, profileFile, removeProfile);
 
-        ModifyMemberRes res = memberService.modifyProfile(req, profileFile, removeProfile);
         return new ApiResult<>(res);
     }
 

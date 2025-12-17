@@ -53,7 +53,7 @@ public class PopOrderCreator implements OrderCreator<CreatePopOrderReq> {
         // 6) 주문 헤더 생성
         OrderEntity order = new OrderEntity();
         order.setMember(memberEntity);
-        order.setOrderStatus(OrderStatus.ORDERED);      // 주문 생성 상태 (결제 전)
+        order.setOrderStatus(OrderStatus.PAYMENT_PENDING);      // 주문 생성 상태 (결제 전)
         order.setOrderTotalPrice(price);                // 총 결제 금액(POP은 1개 고정)
         // order.setOrderType(OrderType.POP);  // 주문 타입이 있을 경우
 

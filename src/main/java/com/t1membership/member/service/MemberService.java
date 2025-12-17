@@ -19,8 +19,8 @@ public interface MemberService {
     JoinMemberRes joinMember(JoinMemberReq joinMemberReq);
     List<ReadAllMemberRes> readAllMember();
     ReadOneMemberRes readOneMember(ReadOneMemberReq readOneMemberReq);
-    ModifyMemberRes modifyMember(ModifyMemberReq modifyMemberReq);
-    ModifyMemberRes modifyProfile(ModifyProfileReq req, MultipartFile profileFile, Boolean removeProfile);
+    ModifyMemberRes modifyMember(String loginEmail,ModifyMemberReq modifyMemberReq);
+    ModifyMemberRes modifyProfile(String loginEmail, ModifyProfileReq req, MultipartFile profileFile, Boolean removeProfile);
     void changePassword(ChangePasswordReq req);
     DeleteMemberRes deleteMember(DeleteMemberReq deleteMemberReq);
     boolean existsByEmail(String email);

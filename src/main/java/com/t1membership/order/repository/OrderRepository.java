@@ -1,5 +1,6 @@
 package com.t1membership.order.repository;
 
+import com.t1membership.order.constant.OrderStatus;
 import com.t1membership.order.domain.OrderEntity;
 import com.t1membership.order.dto.req.admin.AdminSearchOrderReq;
 import org.springframework.data.domain.Page;
@@ -9,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
@@ -16,11 +18,12 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
     @EntityGraph(attributePaths = {"orderItems"})
     Optional<OrderEntity> findByOrderNoAndMember_MemberEmail(Long orderNo, String memberEmail);
 
-    // 목록(요약)용: 상태/기간 필터 등 필요 시 조건 메서드 추가
-    Page<OrderEntity> findByMember_MemberEmailOrderByCreateDateDesc(String memberEmail, Pageable pageable);
-
-    @Query("select o from OrderEntity o join fetch o.member where o.orderNo = :orderNo")
-    Optional<OrderEntity> findDetailById(@Param("orderNo") Long orderNo);
+//    // 목록(요약)용: 상태/기간 필터 등 필요 시 조건 메서드 추가
+//    Page<OrderEntity> findByMember_MemberEmailOrderByCreateDateDesc(String memberEmail,
+//                      Collection<OrderStatus> statuses, Pageable pageable);
+//
+//    @Query("select o from OrderEntity o join fetch o.member where o.orderNo = :orderNo")
+//    Optional<OrderEntity> findDetailById(@Param("orderNo") Long orderNo);
 
     @Query("select o from OrderEntity o left join fetch o.orderItems where o.orderNo = :orderNo")
     Optional<OrderEntity> findByIdFetchItems(@Param("orderNo") Long orderNo);
@@ -38,4 +41,6 @@ public interface OrderRepository extends JpaRepository<OrderEntity, Long> {
 
     Optional<OrderEntity> findByTossPayment_OrderTossId(String orderTossId);
 
+    // ✅ my_orders 용: 회원 이메일로 주문 페이징 조회
+    Page<OrderEntity> findByMember_MemberEmail(String memberEmail, Pageable pageable);
 }
