@@ -2,11 +2,13 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation"; // ✅ 추가
 import Image from "next/image";
 
 type Currency = "KRW" | "USD";
 
 export default function MembershipAllPage() {
+    const router = useRouter(); // ✅ 추가
     // 🔥 통화 상태 (전체 페이지 공통)
     const [currency, setCurrency] = useState<Currency>("KRW");
     const [openCurrency, setOpenCurrency] = useState(false);
@@ -229,10 +231,12 @@ export default function MembershipAllPage() {
                                     </button>
                                     <button
                                         type="button"
+                                        onClick={() => router.push("/order/membership/checkout?payType=RECURRING")}
                                         className="flex h-10 w-full items-center justify-center rounded-md bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
                                     >
                                         가입하기
                                     </button>
+
                                 </div>
                             </div>
                         </div>
@@ -364,10 +368,12 @@ export default function MembershipAllPage() {
                                     </button>
                                     <button
                                         type="button"
+                                        onClick={() => router.push("/order/membership/checkout?payType=ONE_TIME")}
                                         className="flex h-10 w-full items-center justify-center rounded-md bg-red-600 text-xs font-semibold text-white hover:bg-red-500"
                                     >
                                         가입하기
                                     </button>
+
                                 </div>
                             </div>
                         </div>
