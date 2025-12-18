@@ -77,8 +77,23 @@ public class CommentServiceImpl implements CommentService {
      * 나중에 '멤버십 주문/만료' 로직이 정해지면 여기만 교체하면 됩니다.
      */
     private boolean isMembershipActive(MemberEntity me) {
-        return true; // TODO: 진짜 멤버십 판정으로 교체
+        // ✅ 형님 MemberEntity에 membershipPayType(또는 비슷한 필드) 있다고 하셨죠.
+        // - 정확한 타입 몰라도 안전하게 toString 비교로 처리
+        // - NO_MEMBERSHIP 이 아니면 멤버십 활성로 간주
+        try {
+            Object payType = me.getMembershipType(); // ✅ 형님 엔티티 getter 이름이 이거 맞으면 그대로
+            if (payType == null) return false;
+            return !"NO_MEMBERSHIP".equalsIgnoreCase(payType.toString());
+        } catch (Exception e) {
+            // getter 이름이 다르면 여기서 false로 떨어짐 → 바로 알 수 있게
+            return false;
+        }
     }
+
+    private boolean isStoryPrivilege(MemberEntity me, boolean admin) {
+        return admin || isPlayerRole(me.getMemberRole()) || isMembershipActive(me);
+    }
+
 
     private void validateCommunityCategoryOrThrow(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -101,19 +116,43 @@ public class CommentServiceImpl implements CommentService {
         boolean admin = loggedIn && isAdmin(auth);
         String email = loggedIn ? auth.getName() : null;
 
-        // 커뮤니티 외 댓글 정책은 필요 시 추가
-        if (board.getBoardType() != BoardType.COMMUNITY) {
-            return;
-        }
-
-        // 로그인 필수
+        // ✅ 댓글은 전부 로그인 필수로 잡는게 운영 난이도 제일 낮습니다.
         if (!loggedIn) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
+        // 로그인 멤버
         MemberEntity me = currentMemberOrThrow(email);
 
-        // ✅ 특권: 관리자 OR 선수 OR (임시)멤버십(true)
+        // =========================
+        // ✅ STORY 정책 추가
+        // =========================
+        if (board.getBoardType() == BoardType.STORY) {
+
+            // 잠금(멤버십 전용)일 때만 제한
+            // - 형님 StoryDetailRes에서 locked = board.isSecret() 쓰고 있죠.
+            if (board.isSecret()) {
+                if (!isStoryPrivilege(me, admin)) {
+                    throw new ResponseStatusException(
+                            HttpStatus.FORBIDDEN,
+                            "멤버십 회원 전용 콘텐츠라 댓글을 작성/조회할 수 없습니다."
+                    );
+                }
+            }
+
+            // 잠금 아니면 로그인만으로 OK
+            return;
+        }
+
+        // =========================
+        // COMMUNITY 정책(기존)
+        // =========================
+        if (board.getBoardType() != BoardType.COMMUNITY) {
+            // 다른 타입이면 일단 로그인만으로 통과(필요시 확장)
+            return;
+        }
+
+        // ✅ 특권: 관리자 OR 선수 OR 멤버십
         boolean membershipPrivilege =
                 admin
                         || isPlayerRole(me.getMemberRole())
@@ -136,7 +175,7 @@ public class CommentServiceImpl implements CommentService {
             );
         }
 
-        // ✅ 작성자 판정은 "닉네임(boardWriter)" 절대 쓰면 안됨 → memberEmail로 판정
+        // 작성자 판정은 memberEmail
         String writerEmail = (board.getMember() != null) ? board.getMember().getMemberEmail() : null;
         boolean owner = (email != null && writerEmail != null && email.equalsIgnoreCase(writerEmail));
 
@@ -308,4 +347,8 @@ public class CommentServiceImpl implements CommentService {
                 .createdAt(e.getCreateDate() != null ? e.getCreateDate().toString() : null)
                 .build();
     }
+
+
+
+
 }

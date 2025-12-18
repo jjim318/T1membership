@@ -148,8 +148,7 @@ public class SecurityConfig {
                 .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
 
                 // 댓글 작성/수정/삭제
-                .requestMatchers("/comment/**")
-                .hasAnyRole("USER", "ADMIN", "ADMIN_CONTENT")
+                .requestMatchers("/comment/**").authenticated()
 
                 // 게시글 작성/수정/삭제 (GET은 위에서 permitAll)
                 .requestMatchers(HttpMethod.POST, "/board/**")

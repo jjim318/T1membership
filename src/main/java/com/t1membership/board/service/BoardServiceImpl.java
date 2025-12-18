@@ -17,6 +17,7 @@ import com.t1membership.board.dto.story.StoryDetailRes;
 import com.t1membership.board.dto.story.StoryFeedRes;
 import com.t1membership.board.dto.updateBoard.UpdateBoardReq;
 import com.t1membership.board.dto.updateBoard.UpdateBoardRes;
+import com.t1membership.board.repository.BoardLikeRepository;
 import com.t1membership.board.repository.BoardRepository;
 import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
@@ -53,6 +54,8 @@ public class BoardServiceImpl implements BoardService {
     private final FileService fileService;
     private final BoardRepository boardRepository;
     private final MemberRepository memberRepository;
+    private final StoryLikeService storyLikeService;
+    private final BoardLikeRepository boardLikeRepository;
 
     /* =======================
        공통 유틸
@@ -662,6 +665,7 @@ public class BoardServiceImpl implements BoardService {
     // 스토리 상세
     // =========================
     @Override
+    @Transactional(readOnly = true)
     public StoryDetailRes getStoryDetail(Long boardNo) {
 
         BoardEntity board = boardRepository.findById(boardNo)
@@ -679,6 +683,18 @@ public class BoardServiceImpl implements BoardService {
             }
         }
 
+        // ✅ 로그인한 경우에만 likedByMe 계산
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean loggedIn = isLoggedIn(auth);
+        String email = loggedIn ? auth.getName() : null;
+
+        boolean likedByMe = false;
+        if (loggedIn && email != null) {
+            likedByMe = boardLikeRepository
+                    .findByBoard_BoardNoAndMember_MemberEmail(boardNo, email)
+                    .isPresent();
+        }
+
         return StoryDetailRes.builder()
                 .boardNo(board.getBoardNo())
                 .writer(board.getBoardWriter())
@@ -686,9 +702,12 @@ public class BoardServiceImpl implements BoardService {
                 .content(board.getBoardContent())
                 .locked(board.isSecret())
                 .likeCount(board.getBoardLikeCount())
+                .likedByMe(likedByMe)     // ✅ 추가
                 .imageUrls(urls)
+                .createdDate(board.getCreateDate())
                 .build();
     }
+
 
     // =========================
     // 내부 유틸

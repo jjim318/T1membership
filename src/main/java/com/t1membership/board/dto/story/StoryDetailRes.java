@@ -4,13 +4,11 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Getter
-@Service
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
@@ -23,6 +21,9 @@ public class StoryDetailRes {
     private boolean locked;
 
     private int likeCount;
+
+    // ✅ 내가 좋아요 눌렀는지 (초기 버튼 상태용)
+    private boolean likedByMe;
 
     // ✅ 상세용 전체 이미지
     private List<String> imageUrls;
