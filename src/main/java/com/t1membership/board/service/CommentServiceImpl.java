@@ -50,14 +50,31 @@ public class CommentServiceImpl implements CommentService {
         return auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken);
     }
 
-    private boolean isAdmin(Authentication auth) {
-        if (auth == null) return false;
-        return auth.getAuthorities().stream().anyMatch(a ->
-                "ROLE_ADMIN".equals(a.getAuthority())
-                        || "ROLE_MANAGER".equals(a.getAuthority())
-                        || "ADMIN".equals(a.getAuthority())
-                        || "MANAGER".equals(a.getAuthority())
-        );
+    /**
+     * ✅ 중요: 형님 프로젝트는 "권한"이 authorities로도 올 수 있고,
+     * MemberEntity.memberRole(enum/string) 로도 판단하는 흐름이 섞여있습니다.
+     *
+     * - 수정/삭제 권한은 "관리자" 판정을 정확히 해야 하니
+     *   authorities + memberRole 둘 다 커버합니다.
+     */
+    private boolean isAdmin(Authentication auth, MemberEntity me) {
+        boolean byAuthorities = false;
+        if (auth != null) {
+            byAuthorities = auth.getAuthorities().stream().anyMatch(a ->
+                    "ROLE_ADMIN".equals(a.getAuthority())
+                            || "ROLE_MANAGER".equals(a.getAuthority())
+                            || "ADMIN".equals(a.getAuthority())
+                            || "MANAGER".equals(a.getAuthority())
+            );
+        }
+
+        boolean byMemberRole = false;
+        if (me != null && me.getMemberRole() != null) {
+            String role = me.getMemberRole().toString();
+            byMemberRole = "ADMIN".equals(role) || "ADMIN_CONTENT".equals(role) || "T1".equals(role);
+        }
+
+        return byAuthorities || byMemberRole;
     }
 
     private MemberEntity currentMemberOrThrow(String email) {
@@ -66,26 +83,15 @@ public class CommentServiceImpl implements CommentService {
     }
 
     private boolean isPlayerRole(Object role) {
-        // role 타입이 enum이든 String이든 상관없이 안전 처리
         return role != null && role.toString().startsWith("PLAYER");
     }
 
-    /**
-     * ✅ 형님이 "편하게" 가자고 했으니
-     * 멤버십 활성 판정은 일단 우회(항상 true)로 두겠습니다.
-     *
-     * 나중에 '멤버십 주문/만료' 로직이 정해지면 여기만 교체하면 됩니다.
-     */
     private boolean isMembershipActive(MemberEntity me) {
-        // ✅ 형님 MemberEntity에 membershipPayType(또는 비슷한 필드) 있다고 하셨죠.
-        // - 정확한 타입 몰라도 안전하게 toString 비교로 처리
-        // - NO_MEMBERSHIP 이 아니면 멤버십 활성로 간주
         try {
-            Object payType = me.getMembershipType(); // ✅ 형님 엔티티 getter 이름이 이거 맞으면 그대로
+            Object payType = me.getMembershipType(); // 형님 엔티티 getter 이름 그대로 사용
             if (payType == null) return false;
             return !"NO_MEMBERSHIP".equalsIgnoreCase(payType.toString());
         } catch (Exception e) {
-            // getter 이름이 다르면 여기서 false로 떨어짐 → 바로 알 수 있게
             return false;
         }
     }
@@ -93,7 +99,6 @@ public class CommentServiceImpl implements CommentService {
     private boolean isStoryPrivilege(MemberEntity me, boolean admin) {
         return admin || isPlayerRole(me.getMemberRole()) || isMembershipActive(me);
     }
-
 
     private void validateCommunityCategoryOrThrow(String raw) {
         if (raw == null || raw.isBlank()) {
@@ -113,24 +118,17 @@ public class CommentServiceImpl implements CommentService {
     private void assertCanAccessBoard(BoardEntity board) {
         Authentication auth = currentAuth();
         boolean loggedIn = isLoggedIn(auth);
-        boolean admin = loggedIn && isAdmin(auth);
         String email = loggedIn ? auth.getName() : null;
 
-        // ✅ 댓글은 전부 로그인 필수로 잡는게 운영 난이도 제일 낮습니다.
         if (!loggedIn) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        // 로그인 멤버
         MemberEntity me = currentMemberOrThrow(email);
+        boolean admin = isAdmin(auth, me);
 
-        // =========================
-        // ✅ STORY 정책 추가
-        // =========================
+        // STORY
         if (board.getBoardType() == BoardType.STORY) {
-
-            // 잠금(멤버십 전용)일 때만 제한
-            // - 형님 StoryDetailRes에서 locked = board.isSecret() 쓰고 있죠.
             if (board.isSecret()) {
                 if (!isStoryPrivilege(me, admin)) {
                     throw new ResponseStatusException(
@@ -139,20 +137,14 @@ public class CommentServiceImpl implements CommentService {
                     );
                 }
             }
-
-            // 잠금 아니면 로그인만으로 OK
             return;
         }
 
-        // =========================
-        // COMMUNITY 정책(기존)
-        // =========================
+        // COMMUNITY 외 타입은 로그인만
         if (board.getBoardType() != BoardType.COMMUNITY) {
-            // 다른 타입이면 일단 로그인만으로 통과(필요시 확장)
             return;
         }
 
-        // ✅ 특권: 관리자 OR 선수 OR 멤버십
         boolean membershipPrivilege =
                 admin
                         || isPlayerRole(me.getMemberRole())
@@ -162,12 +154,10 @@ public class CommentServiceImpl implements CommentService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "멤버십 회원에게 공개된 페이지예요.");
         }
 
-        // categoryCode 검증
         String ccRaw = board.getCategoryCode();
         validateCommunityCategoryOrThrow(ccRaw);
         CommunityCategoryCode cc = CommunityCategoryCode.valueOf(ccRaw.trim().toUpperCase());
 
-        // LOUNGE: 선수 접근 불가(관리자 제외)
         if (cc == CommunityCategoryCode.LOUNGE && !admin && isPlayerRole(me.getMemberRole())) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
@@ -175,11 +165,9 @@ public class CommentServiceImpl implements CommentService {
             );
         }
 
-        // 작성자 판정은 memberEmail
         String writerEmail = (board.getMember() != null) ? board.getMember().getMemberEmail() : null;
         boolean owner = (email != null && writerEmail != null && email.equalsIgnoreCase(writerEmail));
 
-        // TO_T1: 관리자 OR 작성자만 조회 가능
         if (cc == CommunityCategoryCode.TO_T1) {
             if (!admin && !owner) {
                 throw new ResponseStatusException(
@@ -189,7 +177,6 @@ public class CommentServiceImpl implements CommentService {
             }
         }
 
-        // secret: 관리자 OR 작성자만
         if (board.isSecret()) {
             if (!admin && !owner) {
                 throw new ResponseStatusException(
@@ -210,10 +197,10 @@ public class CommentServiceImpl implements CommentService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다.");
         }
 
-        boolean admin = isAdmin(auth);
         String email = auth.getName();
+        MemberEntity me = currentMemberOrThrow(email);
+        boolean admin = isAdmin(auth, me);
 
-        // ✅ 작성자 이메일 판정
         String writerEmail = (comment.getMember() != null) ? comment.getMember().getMemberEmail() : null;
         boolean mine = (email != null && writerEmail != null && email.equalsIgnoreCase(writerEmail));
 
@@ -234,13 +221,11 @@ public class CommentServiceImpl implements CommentService {
         }
 
         String loginEmail = auth.getName();
-
         MemberEntity member = currentMemberOrThrow(loginEmail);
 
         BoardEntity board = boardRepository.findById(req.getBoardNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
 
-        // ✅ 게시글 접근 가능해야 댓글 작성 가능
         assertCanAccessBoard(board);
 
         CommentEntity comment = CommentEntity.builder()
@@ -263,12 +248,10 @@ public class CommentServiceImpl implements CommentService {
         CommentEntity comment = commentRepository.findById(req.getCommentNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "댓글을 찾을 수 없습니다."));
 
-        // ✅ 댓글이 달린 게시글 접근권한 확인(TO_T1/secret/LOUNGE 등)
         if (comment.getBoard() != null) {
             assertCanAccessBoard(comment.getBoard());
         }
 
-        // ✅ 작성자 or 관리자만
         assertCanModifyComment(comment);
 
         comment.updateContent(req.getCommentContent());
@@ -290,7 +273,6 @@ public class CommentServiceImpl implements CommentService {
             assertCanAccessBoard(comment.getBoard());
         }
 
-        // ✅ 작성자 or 관리자만
         assertCanModifyComment(comment);
 
         commentRepository.delete(comment);
@@ -320,13 +302,16 @@ public class CommentServiceImpl implements CommentService {
         BoardEntity board = boardRepository.findById(req.getBoardNo())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "게시글을 찾을 수 없습니다."));
 
-        // ✅ 댓글 목록도 게시글 접근 정책 적용
         assertCanAccessBoard(board);
+
+        // ✅ 로그인 정보 (isMine 계산용)
+        Authentication auth = currentAuth();
+        String loginEmail = (isLoggedIn(auth) ? auth.getName() : null);
 
         Page<CommentEntity> result = commentRepository.findByBoard_BoardNo(req.getBoardNo(), pageable);
 
         List<ReadCommentRes> dtoList = result.getContent().stream()
-                .map(this::toReadCommentRes)
+                .map(e -> toReadCommentRes(e, loginEmail))
                 .toList();
 
         return PageResponseDTO.<ReadCommentRes>withAll()
@@ -336,7 +321,11 @@ public class CommentServiceImpl implements CommentService {
                 .build();
     }
 
-    private ReadCommentRes toReadCommentRes(CommentEntity e) {
+    // ✅ 변경: loginEmail을 받아 isMine 계산
+    private ReadCommentRes toReadCommentRes(CommentEntity e, String loginEmail) {
+        String writerEmail = (e.getMember() != null) ? e.getMember().getMemberEmail() : null;
+        boolean mine = (loginEmail != null && writerEmail != null && loginEmail.equalsIgnoreCase(writerEmail));
+
         return ReadCommentRes.builder()
                 .commentNo(e.getCommentNo())
                 .boardNo(e.getBoard().getBoardNo())
@@ -345,10 +334,7 @@ public class CommentServiceImpl implements CommentService {
                 .commentContent(e.getCommentContent())
                 .commentLikeCount(e.getCommentLikeCount())
                 .createdAt(e.getCreateDate() != null ? e.getCreateDate().toString() : null)
+                .mine(mine) // ✅ 여기
                 .build();
     }
-
-
-
-
 }
