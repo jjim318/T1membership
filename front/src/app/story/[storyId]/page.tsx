@@ -21,6 +21,7 @@ interface ApiResult<T> {
 }
 
 interface MemberReadOneRes {
+    memberEmail: string;
     memberRole?: string | null;
     membershipPayType: MembershipPayType;
 }
@@ -42,7 +43,6 @@ interface ToggleStoryLikeRes {
     likeCount: number;
 }
 
-// ===== 댓글 DTO (형님 DTO에 맞춤) =====
 interface ReadCommentRes {
     commentNo: number;
     boardNo: number;
@@ -51,6 +51,7 @@ interface ReadCommentRes {
     commentContent: string;
     commentLikeCount: number;
     createdAt?: string | null;
+    isMine: boolean; // ✅ 백엔드에서 내려줌
 }
 
 interface PageResponseDTO<T> {
@@ -64,62 +65,118 @@ function isPrivilegedRole(role?: string | null) {
     return role.startsWith("PLAYER_");
 }
 
-function useAccessGate() {
+function cx(...arr: Array<string | false | null | undefined>) {
+    return arr.filter(Boolean).join(" ");
+}
+
+// ✅ "2025-12-19T14:22:30.396359" → "2025.12.19 14:22"
+function formatKoreanDateTime(raw?: string | null): string {
+    if (!raw) return "";
+    const s = raw.trim();
+    if (!s) return "";
+
+    const normalized = s.replace(" ", "T");
+
+    // 1) Date 파싱 시도
+    const d = new Date(normalized);
+    if (!Number.isNaN(d.getTime())) {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mi = String(d.getMinutes()).padStart(2, "0");
+        return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
+    }
+
+    // 2) Date가 못 먹는 형태면 문자열로 잘라 처리
+    const m = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (m) {
+        const [, yyyy, mm, dd, hh, mi] = m;
+        return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
+    }
+
+    return s;
+}
+
+// ✅ token 인자로 받아 안전하게
+function useAccessGate(token: string | null) {
     const [loading, setLoading] = useState(true);
     const [canViewProtected, setCanViewProtected] = useState(false);
+    const [me, setMe] = useState<MemberReadOneRes | null>(null);
 
     useEffect(() => {
-        const run = async () => {
-            const token =
-                typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+        let alive = true;
 
+        const run = async () => {
             if (!token) {
+                if (!alive) return;
                 setLoading(false);
                 setCanViewProtected(false);
+                setMe(null);
                 return;
             }
 
             try {
                 const res = await apiClient.get<ApiResult<MemberReadOneRes>>("/member/readOne");
 
+                if (!alive) return;
+
                 if (!res.data.isSuccess || !res.data.result) {
                     setCanViewProtected(false);
+                    setMe(null);
                     return;
                 }
 
-                const me = res.data.result;
-                const role = (me.memberRole ?? "").toString();
+                const my = res.data.result;
+                setMe(my);
+
+                const role = (my.memberRole ?? "").toString();
                 const privileged = isPrivilegedRole(role);
 
-                const payType = (me.membershipPayType ?? "NO_MEMBERSHIP").toString();
+                const payType = (my.membershipPayType ?? "NO_MEMBERSHIP").toString();
                 const memberActive = payType !== "NO_MEMBERSHIP";
 
                 setCanViewProtected(privileged || memberActive);
             } catch {
+                if (!alive) return;
                 setCanViewProtected(false);
+                setMe(null);
             } finally {
+                if (!alive) return;
                 setLoading(false);
             }
         };
 
+        setLoading(true);
         run();
-    }, []);
 
-    return { loading, canViewProtected };
-}
+        return () => {
+            alive = false;
+        };
+    }, [token]);
 
-function cx(...arr: Array<string | false | null | undefined>) {
-    return arr.filter(Boolean).join(" ");
+    return { loading, canViewProtected, me };
 }
 
 export default function StoryDetailPage() {
     const { storyId } = useParams<{ storyId: string }>();
     const router = useRouter();
 
-    const token =
-        typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+    // ✅ hydration 방지: mounted 이후에만 localStorage 읽기
+    const [mounted, setMounted] = useState(false);
+    const [token, setToken] = useState<string | null>(null);
 
-    const { loading: gateLoading, canViewProtected } = useAccessGate();
+    useEffect(() => {
+        setMounted(true);
+        setToken(localStorage.getItem("accessToken"));
+    }, []);
+
+    const { loading: gateLoading, canViewProtected, me } = useAccessGate(token);
+
+    const isAdminLike = useMemo(() => {
+        const role = (me?.memberRole ?? "").toString();
+        return isPrivilegedRole(role);
+    }, [me?.memberRole]);
 
     const [data, setData] = useState<StoryDetailRes | null>(null);
     const [loading, setLoading] = useState(true);
@@ -137,7 +194,6 @@ export default function StoryDetailPage() {
     const [commentText, setCommentText] = useState("");
     const [commentBusy, setCommentBusy] = useState(false);
 
-    // 페이징(일단 1페이지만. 필요하면 더보기 붙이면 됨)
     const [commentPage] = useState(0);
     const [commentSize] = useState(20);
 
@@ -146,25 +202,28 @@ export default function StoryDetailPage() {
         return data.locked && !canViewProtected;
     }, [data, canViewProtected]);
 
-    // 상세 로드
+    // ✅ 상세 로드 (훅은 항상 호출! 내부에서 조건으로 막기)
     useEffect(() => {
-        if (!token) {
-            setLoading(false);
-            setErr(null);
-            setData(null);
-            return;
-        }
-
-        if (!storyId || storyId === "undefined") {
-            setLoading(false);
-            setErr("잘못된 스토리 주소입니다.");
-            setData(null);
-            return;
-        }
-
         let alive = true;
 
-        (async () => {
+        const run = async () => {
+            // mounted 전이거나 토큰 없으면 호출 안 함
+            if (!mounted || !token) {
+                if (!alive) return;
+                setLoading(false);
+                setErr(null);
+                setData(null);
+                return;
+            }
+
+            if (!storyId || storyId === "undefined") {
+                if (!alive) return;
+                setLoading(false);
+                setErr("잘못된 스토리 주소입니다.");
+                setData(null);
+                return;
+            }
+
             setLoading(true);
             setErr(null);
 
@@ -193,16 +252,19 @@ export default function StoryDetailPage() {
                 if (!alive) return;
                 setLoading(false);
             }
-        })();
+        };
+
+        run();
 
         return () => {
             alive = false;
         };
-    }, [storyId, token]);
+    }, [storyId, token, mounted]);
 
-    // 댓글 로드 (잠금이면 호출 안 함)
+    // 댓글 로드
     const loadComments = async (boardNo: number) => {
         if (!token) return;
+
         setCommentLoading(true);
         setCommentErr(null);
 
@@ -218,7 +280,9 @@ export default function StoryDetailPage() {
             );
 
             if (res.data?.isSuccess && res.data.result) {
-                setComments(Array.isArray(res.data.result.dtoList) ? res.data.result.dtoList : []);
+                setComments(
+                    Array.isArray(res.data.result.dtoList) ? res.data.result.dtoList : []
+                );
             } else {
                 setComments([]);
                 setCommentErr(res.data?.resMessage ?? "댓글을 불러오지 못했습니다.");
@@ -233,14 +297,18 @@ export default function StoryDetailPage() {
 
     // data 바뀌면 댓글 로드
     useEffect(() => {
+        if (!mounted) return;
+        if (!token) return;
         if (!data) return;
+
         if (locked) {
             setComments([]);
             return;
         }
+
         loadComments(data.boardNo);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [data?.boardNo, locked]);
+    }, [data?.boardNo, locked, token, mounted]);
 
     // 좋아요 토글
     const onToggleLike = async () => {
@@ -286,11 +354,7 @@ export default function StoryDetailPage() {
         setCommentBusy(true);
 
         try {
-            const body = {
-                boardNo: data.boardNo,
-                commentContent: text,
-            };
-
+            const body = { boardNo: data.boardNo, commentContent: text };
             const res = await apiClient.post<ApiResult<any>>("/comment", body);
 
             if (res.data?.isSuccess) {
@@ -309,6 +373,14 @@ export default function StoryDetailPage() {
     // 댓글 삭제
     const onDeleteComment = async (commentNo: number) => {
         if (!data) return;
+
+        const target = comments.find((x) => x.commentNo === commentNo);
+        const can = !!target && (target.isMine || isAdminLike);
+        if (!can) {
+            alert("댓글 삭제 권한이 없습니다.");
+            return;
+        }
+
         if (!confirm("댓글을 삭제하시겠습니까?")) return;
 
         try {
@@ -318,14 +390,25 @@ export default function StoryDetailPage() {
             } else {
                 alert(res.data?.resMessage ?? "댓글 삭제 실패");
             }
-        } catch {
-            alert("댓글 삭제 통신 오류");
+        } catch (e: any) {
+            const msg =
+                e?.response?.status === 403
+                    ? "댓글 삭제 권한이 없습니다."
+                    : "댓글 삭제 통신 오류";
+            alert(msg);
         }
     };
 
-    // 댓글 수정 (간단히 prompt)
+    // 댓글 수정
     const onUpdateComment = async (commentNo: number, prev: string) => {
         if (!data) return;
+
+        const target = comments.find((x) => x.commentNo === commentNo);
+        const can = !!target && (target.isMine || isAdminLike);
+        if (!can) {
+            alert("댓글 수정 권한이 없습니다.");
+            return;
+        }
 
         const next = prompt("댓글 수정", prev);
         if (next === null) return;
@@ -343,10 +426,29 @@ export default function StoryDetailPage() {
             } else {
                 alert(res.data?.resMessage ?? "댓글 수정 실패");
             }
-        } catch {
-            alert("댓글 수정 통신 오류");
+        } catch (e: any) {
+            const msg =
+                e?.response?.status === 403
+                    ? "댓글 수정 권한이 없습니다."
+                    : "댓글 수정 통신 오류";
+            alert(msg);
         }
     };
+
+    // =========================
+    // ✅ 여기부터 렌더 분기 (훅 다 호출한 뒤!)
+    // =========================
+
+    // mounted 전에는 무조건 동일 UI로 (hydration 안전)
+    if (!mounted) {
+        return (
+            <main className="min-h-screen bg-black text-white">
+                <div className="mx-auto max-w-3xl px-4 py-8 text-white/60 text-sm">
+                    불러오는 중…
+                </div>
+            </main>
+        );
+    }
 
     // 비로그인 유도
     if (!token) {
@@ -540,7 +642,10 @@ export default function StoryDetailPage() {
                                         </div>
                                     ) : (
                                         comments.map((c) => (
-                                            <div key={c.commentNo} className="rounded-2xl bg-white/5 border border-white/10 p-4">
+                                            <div
+                                                key={c.commentNo}
+                                                className="rounded-2xl bg-white/5 border border-white/10 p-4"
+                                            >
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div className="min-w-0">
                                                         <div className="text-xs text-white/70 font-semibold">
@@ -550,27 +655,29 @@ export default function StoryDetailPage() {
                                                             {c.commentContent}
                                                         </div>
                                                         <div className="mt-2 text-[11px] text-white/40">
-                                                            {c.createdAt ?? ""}
+                                                            {formatKoreanDateTime(c.createdAt)}
                                                         </div>
                                                     </div>
 
-                                                    {/* 권한 체크는 서버가 함: 실패하면 메시지 뜸 */}
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
-                                                            onClick={() => onUpdateComment(c.commentNo, c.commentContent)}
-                                                        >
-                                                            수정
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
-                                                            onClick={() => onDeleteComment(c.commentNo)}
-                                                        >
-                                                            삭제
-                                                        </button>
-                                                    </div>
+                                                    {/* ✅ 본인/관리자만 */}
+                                                    {c.isMine || isAdminLike ? (
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
+                                                                onClick={() => onUpdateComment(c.commentNo, c.commentContent)}
+                                                            >
+                                                                수정
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
+                                                                onClick={() => onDeleteComment(c.commentNo)}
+                                                            >
+                                                                삭제
+                                                            </button>
+                                                        </div>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                         ))
