@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -48,7 +49,7 @@ public class OrderController {
                                              @RequestParam(defaultValue = "10") int size) {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
 
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createDate"));
         Page<SummaryOrderRes> res = orderQueryService.getMyOrders(email, pageable);
 
         return ResponseEntity.ok(res);

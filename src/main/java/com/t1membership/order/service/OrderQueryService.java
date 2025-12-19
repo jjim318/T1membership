@@ -28,27 +28,12 @@ public class OrderQueryService {
     //내 주문 목록 조회 (회원
     //loginEmail 은 반드시 SecurityContext / @AuthenticationPrincipal 에서 받은 값만 사용
     public Page<SummaryOrderRes> getMyOrders(String memberEmail, Pageable pageable) {
+        // ✅ 최신순 정렬까지 같이 하고 싶으면 Repository 메서드를 바꾸는 게 정석
+        // 지금은 pageable sort로 처리 가능하게 해두고, 컨트롤러에서 sort=createdDate,desc 넣으면 됩니다.
         Page<OrderEntity> page = orderRepository.findByMember_MemberEmail(memberEmail, pageable);
 
-        return page.map(order -> {
-            List<OrderItemEntity> items = order.getOrderItems(); // 빈 리스트일 수도 있음
-
-            int itemCount = (items == null) ? 0 : items.size();
-            String itemName = null;
-
-            if (itemCount > 0 && items.get(0).getItem() != null) {
-                itemName = items.get(0).getItem().getItemName();
-            }
-
-            return SummaryOrderRes.builder()
-                    .orderNo(order.getOrderNo())
-                    .orderDate(order.getCreateDate())
-                    .orderStatus(order.getOrderStatus())
-                    .itemCount(itemCount)
-                    .itemName(itemName) // ✅ 없으면 null 허용
-                    .orderTotalPrice(order.getOrderTotalPrice())
-                    .build();
-        });
+        // 🔥 핵심: 내 주문도 SummaryOrderRes.from()을 타게 만든다
+        return page.map(SummaryOrderRes::from);
     }
 
     //관리자용 주문 목록 조회 (전체 페이징
@@ -80,7 +65,4 @@ public class OrderQueryService {
         Page<OrderEntity> page = orderRepository.searchOrders(req, pageable);
         return page.map(SummaryOrderRes::from);
     }
-
-
-
 }
