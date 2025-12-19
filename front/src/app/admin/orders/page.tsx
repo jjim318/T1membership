@@ -6,13 +6,7 @@ import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 import axios, { AxiosError } from "axios";
 
-type OrderStatus =
-    | "PENDING"
-    | "PAID"
-    | "SHIPPED"
-    | "DELIVERED"
-    | "CANCELED"
-    | "REFUNDED";
+type OrderStatus = string;
 
 interface PageResult<T> {
     content: T[];
@@ -37,29 +31,125 @@ interface ErrorBody {
     message?: string;
 }
 
-const statusLabel = (s: OrderStatus) => {
+/**
+ * ✅ 주문 상태 → 한글 라벨
+ */
+function statusLabel(raw: string | null | undefined): string {
+    const s = (raw ?? "").trim().toUpperCase();
+
+    // 부분취소 방어
+    if (
+        s === "PARTIALLY_CANCELED" ||
+        s === "PARTIALLY_CANCELLED" ||
+        s === "PARTIAL_CANCEL" ||
+        (s.includes("PART") && s.includes("CANCEL"))
+    ) {
+        return "부분취소";
+    }
+
     switch (s) {
-        case "PENDING":
+        case "PAYMENT_PENDING":
             return "결제대기";
         case "PAID":
             return "결제완료";
+
+        case "PROCESSING":
+            return "상품준비중";
+        case "SHIPMENT_READY":
+            return "배송준비";
         case "SHIPPED":
             return "배송중";
         case "DELIVERED":
             return "배송완료";
+
+        case "PAYMENT_FAILED":
+            return "결제실패";
+        case "PAYMENT_EXPIRED":
+            return "결제만료";
+
         case "CANCELED":
+        case "CANCELLED":
             return "취소";
         case "REFUNDED":
             return "환불완료";
-        default:
-            return s;
-    }
-};
+        case "RETURNED":
+            return "반품";
 
-const formatDateTime = (t: string) =>
-    new Date(t).toLocaleString("ko-KR");
-const formatPrice = (n: number) =>
-    `${n.toLocaleString("ko-KR")}원`;
+        default:
+            if (s === "ORDERED") return "결제대기";
+            return raw ?? "-";
+    }
+}
+
+/**
+ * ✅ 상태 배지 스타일 (실무형)
+ * - Tailwind class string을 반환
+ * - 상태별로 배경/테두리/텍스트 톤을 분리
+ */
+function statusBadgeClass(raw: string | null | undefined): string {
+    const s = (raw ?? "").trim().toUpperCase();
+
+    const base =
+        "inline-flex items-center justify-center px-2 py-1 rounded-full text-[11px] font-semibold border whitespace-nowrap";
+
+    // 부분취소
+    if (
+        s === "PARTIALLY_CANCELED" ||
+        s === "PARTIALLY_CANCELLED" ||
+        s === "PARTIAL_CANCEL" ||
+        (s.includes("PART") && s.includes("CANCEL"))
+    ) {
+        // 주황 계열
+        return `${base} bg-orange-500/10 border-orange-500/30 text-orange-200`;
+    }
+
+    switch (s) {
+        // ---- 결제 대기: 노랑 ----
+        case "PAYMENT_PENDING":
+        case "ORDERED":
+            return `${base} bg-amber-500/10 border-amber-500/30 text-amber-200`;
+
+        // ---- 결제 완료: 초록 ----
+        case "PAID":
+            return `${base} bg-emerald-500/10 border-emerald-500/30 text-emerald-200`;
+
+        // ---- 상품 준비/배송 준비: 보라/남색 ----
+        case "PROCESSING":
+            return `${base} bg-violet-500/10 border-violet-500/30 text-violet-200`;
+        case "SHIPMENT_READY":
+            return `${base} bg-indigo-500/10 border-indigo-500/30 text-indigo-200`;
+
+        // ---- 배송중: 파랑 ----
+        case "SHIPPED":
+            return `${base} bg-sky-500/10 border-sky-500/30 text-sky-200`;
+
+        // ---- 배송완료: 청록(확정 느낌) ----
+        case "DELIVERED":
+            return `${base} bg-teal-500/10 border-teal-500/30 text-teal-200`;
+
+        // ---- 취소/환불/실패: 회색/빨강 ----
+        case "CANCELED":
+        case "CANCELLED":
+            return `${base} bg-zinc-500/10 border-zinc-500/30 text-zinc-200`;
+
+        case "REFUNDED":
+            return `${base} bg-rose-500/10 border-rose-500/30 text-rose-200`;
+
+        case "RETURNED":
+            return `${base} bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-200`;
+
+        case "PAYMENT_FAILED":
+        case "PAYMENT_EXPIRED":
+            return `${base} bg-red-500/10 border-red-500/30 text-red-200`;
+
+        default:
+            // 모르는 상태: 뉴트럴
+            return `${base} bg-neutral-900 border-neutral-700 text-neutral-200`;
+    }
+}
+
+const formatDateTime = (t: string) => new Date(t).toLocaleString("ko-KR");
+const formatPrice = (n: number) => `${n.toLocaleString("ko-KR")}원`;
 
 export default function AdminOrderListPage() {
     const router = useRouter();
@@ -74,20 +164,16 @@ export default function AdminOrderListPage() {
 
     // 검색/필터 (프론트 전용)
     const [searchText, setSearchText] = useState("");
-    const [statusFilter, setStatusFilter] =
-        useState<OrderStatus | "ALL">("ALL");
+    const [statusFilter, setStatusFilter] = useState<OrderStatus | "ALL">("ALL");
 
     const fetchOrders = async () => {
         try {
             setLoading(true);
             setErrorMsg(null);
 
-            const res = await apiClient.get<PageResult<SummaryOrderRes>>(
-                "/admin/order",
-                {
-                    params: { page, size },
-                }
-            );
+            const res = await apiClient.get<PageResult<SummaryOrderRes>>("/admin/order", {
+                params: { page, size },
+            });
 
             const data = res.data;
             setOrders(data.content);
@@ -99,10 +185,7 @@ export default function AdminOrderListPage() {
             let msg = "주문 목록을 불러오지 못했습니다.";
             if (axios.isAxiosError<ErrorBody>(err)) {
                 const ax = err as AxiosError<ErrorBody>;
-                msg =
-                    ax.response?.data?.resMessage ||
-                    ax.response?.data?.message ||
-                    msg;
+                msg = ax.response?.data?.resMessage || ax.response?.data?.message || msg;
             }
             setErrorMsg(msg);
         } finally {
@@ -117,10 +200,7 @@ export default function AdminOrderListPage() {
 
     const filteredOrders = useMemo(() => {
         return orders.filter((o) => {
-            if (
-                statusFilter !== "ALL" &&
-                o.orderStatus !== statusFilter
-            ) {
+            if (statusFilter !== "ALL" && (o.orderStatus ?? "").toUpperCase() !== statusFilter) {
                 return false;
             }
 
@@ -130,9 +210,7 @@ export default function AdminOrderListPage() {
             return (
                 String(o.orderNo).includes(keyword) ||
                 o.memberEmail.toLowerCase().includes(keyword) ||
-                (o.itemName ?? "")
-                    .toLowerCase()
-                    .includes(keyword)
+                (o.itemName ?? "").toLowerCase().includes(keyword)
             );
         });
     }, [orders, statusFilter, searchText]);
@@ -147,9 +225,7 @@ export default function AdminOrderListPage() {
             {/* 헤더 */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold">
-                        주문 관리
-                    </h1>
+                    <h1 className="text-2xl font-semibold">주문 관리</h1>
                     <p className="text-xs text-gray-400 mt-1">
                         전체 주문{" "}
                         <span className="text-red-500 font-semibold">
@@ -169,9 +245,7 @@ export default function AdminOrderListPage() {
                             className="w-full bg-black border border-neutral-700 rounded-xl px-4 py-2 text-sm placeholder:text-neutral-500"
                             placeholder="이메일 / 주문번호 / 상품명으로 검색"
                             value={searchText}
-                            onChange={(e) =>
-                                setSearchText(e.target.value)
-                            }
+                            onChange={(e) => setSearchText(e.target.value)}
                         />
                     </div>
 
@@ -180,25 +254,25 @@ export default function AdminOrderListPage() {
                         <select
                             className="bg-black border border-neutral-700 rounded-xl px-3 py-2 text-xs"
                             value={statusFilter}
-                            onChange={(e) =>
-                                setStatusFilter(
-                                    e.target.value as
-                                        | OrderStatus
-                                        | "ALL"
-                                )
-                            }
+                            onChange={(e) => setStatusFilter(e.target.value as OrderStatus | "ALL")}
                         >
                             <option value="ALL">전체 상태</option>
-                            <option value="PENDING">결제대기</option>
+
+                            <option value="PAYMENT_PENDING">결제대기</option>
                             <option value="PAID">결제완료</option>
+
+                            <option value="PROCESSING">상품준비중</option>
+                            <option value="SHIPMENT_READY">배송준비</option>
                             <option value="SHIPPED">배송중</option>
-                            <option value="DELIVERED">
-                                배송완료
-                            </option>
+                            <option value="DELIVERED">배송완료</option>
+
                             <option value="CANCELED">취소</option>
-                            <option value="REFUNDED">
-                                환불완료
-                            </option>
+                            <option value="PARTIALLY_CANCELED">부분취소</option>
+                            <option value="REFUNDED">환불완료</option>
+                            <option value="RETURNED">반품</option>
+
+                            <option value="PAYMENT_FAILED">결제실패</option>
+                            <option value="PAYMENT_EXPIRED">결제만료</option>
                         </select>
 
                         <button
@@ -215,8 +289,7 @@ export default function AdminOrderListPage() {
             <section className="bg-[#111] border border-neutral-800 rounded-2xl overflow-hidden flex-1 flex flex-col">
                 <div className="px-4 py-2 border-b border-neutral-800 flex justify-between items-center text-xs text-neutral-400 whitespace-nowrap">
                     <span>
-                        주문 목록 (현재 페이지{" "}
-                        {page + 1} / {Math.max(totalPages, 1)})
+                        주문 목록 (현재 페이지 {page + 1} / {Math.max(totalPages, 1)})
                     </span>
                     {loading && <span>불러오는 중…</span>}
                 </div>
@@ -231,91 +304,63 @@ export default function AdminOrderListPage() {
                     <table className="min-w-full text-xs table-fixed">
                         <thead className="bg-black border-b border-neutral-800">
                         <tr className="text-neutral-400">
-                            <th className="px-4 py-2 text-left whitespace-nowrap w-[90px]">
-                                주문번호
-                            </th>
-                            <th className="px-4 py-2 text-left whitespace-nowrap w-[150px]">
-                                주문시각
-                            </th>
-                            <th className="px-4 py-2 text-left whitespace-nowrap w-[200px]">
-                                이메일
-                            </th>
-                            <th className="px-4 py-2 text-left whitespace-nowrap">
-                                대표 상품
-                            </th>
-                            <th className="px-4 py-2 text-right whitespace-nowrap w-[110px]">
-                                결제 금액
-                            </th>
-                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">
-                                상태
-                            </th>
-                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">
-                                관리
-                            </th>
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[90px]">주문번호</th>
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[150px]">주문시각</th>
+                            <th className="px-4 py-2 text-left whitespace-nowrap w-[200px]">이메일</th>
+                            <th className="px-4 py-2 text-left whitespace-nowrap">대표 상품</th>
+                            <th className="px-4 py-2 text-right whitespace-nowrap w-[110px]">결제 금액</th>
+                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">상태</th>
+                            <th className="px-4 py-2 text-center whitespace-nowrap w-[90px]">관리</th>
                         </tr>
                         </thead>
+
                         <tbody>
-                        {filteredOrders.length === 0 &&
-                            !loading && (
-                                <tr>
-                                    <td
-                                        colSpan={7}
-                                        className="px-4 py-6 text-center text-neutral-500 whitespace-nowrap"
-                                    >
-                                        주문이 없습니다.
-                                    </td>
-                                </tr>
-                            )}
+                        {filteredOrders.length === 0 && !loading && (
+                            <tr>
+                                <td colSpan={7} className="px-4 py-6 text-center text-neutral-500 whitespace-nowrap">
+                                    주문이 없습니다.
+                                </td>
+                            </tr>
+                        )}
 
                         {filteredOrders.map((o) => (
                             <tr
                                 key={o.orderNo}
                                 className="border-b border-neutral-900 hover:bg-neutral-900/60"
                             >
-                                <td className="px-4 py-2 whitespace-nowrap">
-                                    {o.orderNo}
-                                </td>
+                                <td className="px-4 py-2 whitespace-nowrap">{o.orderNo}</td>
                                 <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
                                     {formatDateTime(o.orderDate)}
                                 </td>
                                 <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
-                                    <span className="block max-w-[220px] truncate">
-                                        {o.memberEmail}
-                                    </span>
+                                    <span className="block max-w-[220px] truncate">{o.memberEmail}</span>
                                 </td>
                                 <td className="px-4 py-2 text-neutral-300 whitespace-nowrap">
                                     <div className="flex items-center gap-1 max-w-[260px]">
-                                        <span className="truncate">
-                                            {o.itemName ?? "-"}
-                                        </span>
+                                        <span className="truncate">{o.itemName ?? "-"}</span>
                                         {o.itemCount > 1 && (
                                             <span className="text-neutral-500 flex-shrink-0 whitespace-nowrap">
-                                                {" "}
+                                                    {" "}
                                                 외 {o.itemCount - 1}개
-                                            </span>
+                                                </span>
                                         )}
                                     </div>
                                 </td>
                                 <td className="px-4 py-2 text-right text-neutral-100 whitespace-nowrap">
-                                    {formatPrice(
-                                        o.orderTotalPrice
-                                    )}
+                                    {formatPrice(o.orderTotalPrice)}
                                 </td>
+
+                                {/* ✅ 상태 배지: 한글 + 색상 */}
                                 <td className="px-4 py-2 text-center whitespace-nowrap">
-                                    <span className="px-2 py-1 rounded-full text-[11px] bg-neutral-900 text-white">
-                                        {statusLabel(
-                                            o.orderStatus
-                                        )}
-                                    </span>
+                                        <span className={statusBadgeClass(o.orderStatus)}>
+                                            {statusLabel(o.orderStatus)}
+                                        </span>
                                 </td>
+
                                 <td className="px-4 py-2 text-center whitespace-nowrap">
                                     <button
                                         className="px-3 py-1 text-[11px] border border-neutral-600 rounded-2xl hover:bg-neutral-800 whitespace-nowrap"
-                                        onClick={() =>
-                                            router.push(
-                                                `/admin/orders/${o.orderNo}`
-                                            )
-                                        }
+                                        onClick={() => router.push(`/admin/orders/${o.orderNo}`)}
                                     >
                                         상세 보기
                                     </button>
@@ -332,29 +377,17 @@ export default function AdminOrderListPage() {
                         <button
                             className="px-2 py-1 border border-neutral-700 rounded disabled:opacity-40"
                             disabled={page <= 0}
-                            onClick={() =>
-                                setPage((prev) =>
-                                    Math.max(prev - 1, 0)
-                                )
-                            }
+                            onClick={() => setPage((prev) => Math.max(prev - 1, 0))}
                         >
                             이전
                         </button>
                         <span>
-                            {page + 1} /{" "}
-                            {Math.max(totalPages, 1)}
+                            {page + 1} / {Math.max(totalPages, 1)}
                         </span>
                         <button
                             className="px-2 py-1 border border-neutral-700 rounded disabled:opacity-40"
                             disabled={page + 1 >= totalPages}
-                            onClick={() =>
-                                setPage((prev) =>
-                                    Math.min(
-                                        prev + 1,
-                                        totalPages - 1
-                                    )
-                                )
-                            }
+                            onClick={() => setPage((prev) => Math.min(prev + 1, totalPages - 1))}
                         >
                             다음
                         </button>
@@ -366,9 +399,7 @@ export default function AdminOrderListPage() {
                             className="bg-black border border-neutral-700 rounded px-2 py-1"
                             value={size}
                             onChange={(e) => {
-                                setSize(
-                                    Number(e.target.value)
-                                );
+                                setSize(Number(e.target.value));
                                 setPage(0);
                             }}
                         >

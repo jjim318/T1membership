@@ -6,21 +6,17 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 import { apiClient } from "@/lib/apiClient";
 
-// 🔥 서버 SummaryOrderRes 그대로 맞춘 타입
 interface SummaryOrderRes {
-    orderNo: number;          // 주문번호
-    memberEmail: string;      // 주문 회원 이메일
-    orderDate: string;        // 주문시각 (LocalDateTime → ISO 문자열)
-    orderTotalPrice: number;  // 총 결제 금액
-    orderStatus: string;      // 주문 상태 (enum 문자열)
-    itemCount: number;        // 상품 개수(또는 총 수량)
-    itemName: string | null;  // 대표 상품 이름
-
-    // 🔥 백엔드 SummaryOrderRes.itemCategory ("MD" | "POP" | "MEMBERSHIP" ...)
-    itemCategory?: string | null;
+    orderNo: number;
+    memberEmail?: string;
+    orderDate: string;
+    orderTotalPrice: number;
+    orderStatus: string;
+    itemCount?: number | null;
+    itemName?: string | null;
+    itemCategory?: string | null; // "MD" | "POP" | "MEMBERSHIP" | null
 }
 
-// Spring Data Page
 interface PageResult<T> {
     content: T[];
     totalElements: number;
@@ -31,21 +27,8 @@ interface PageResult<T> {
     last: boolean;
 }
 
-// 상단 카테고리 탭 (전체 / 상품 / 이용권 / 후원 / 멤버십 / 티켓)
-type CategoryTab =
-    | "ALL"
-    | "PRODUCT"
-    | "PASS"
-    | "DONATION"
-    | "MEMBERSHIP"
-    | "TICKET";
-
-// 두 번째 줄 탭 (전체 / 취소·교환·반품)
+type CategoryTab = "ALL" | "PRODUCT" | "PASS" | "DONATION" | "MEMBERSHIP" | "TICKET";
 type StatusFilter = "ALL" | "CANCEL";
-
-// =====================
-//   헬퍼 함수
-// =====================
 
 function formatDate(dateStr: string): string {
     const d = new Date(dateStr);
@@ -57,61 +40,85 @@ function formatDate(dateStr: string): string {
 }
 
 function formatMoney(value: number): string {
-    return value.toLocaleString("ko-KR");
+    return Number(value ?? 0).toLocaleString("ko-KR");
 }
 
-// 상태 한글 라벨
+// 결제대기 숨김
+function isHiddenStatus(status: string): boolean {
+    return (status ?? "").toUpperCase() === "PAYMENT_PENDING";
+}
+
+function isCancelReturnRefund(status: string): boolean {
+    const upper = (status ?? "").toUpperCase();
+    return upper.includes("CANCEL") || upper.includes("REFUND") || upper.includes("RETURN");
+}
+
 function getStatusLabel(status: string): string {
-    const upper = status.toUpperCase();
+    const upper = (status ?? "").toUpperCase();
 
-    // 🔥 먼저 부분 취소 상태부터 처리
     if (
-        upper === "PARTIALLY_CANCELED" ||          // 백엔드 enum
-        upper === "PARTIAL_CANCEL" ||              // 혹시 다른 이름 대비
+        upper === "PARTIALLY_CANCELED" ||
+        upper === "PARTIAL_CANCEL" ||
         (upper.includes("PART") && upper.includes("CANCEL"))
-    ) {
+    )
         return "부분 취소";
-    }
 
-    if (upper.includes("PENDING") || upper.includes("WAIT"))
-        return "결제 대기";
-    if (upper.includes("PAID") || upper.includes("PAY_COMPLETE"))
-        return "구매확정";
-    if (upper.includes("SHIP") || upper.includes("DELIVERY"))
-        return "배송 중";
-    if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE"))
-        return "배송 완료";
-    if (upper.includes("CANCEL")) return "취소 완료"; // 👉 전체 취소
-    if (upper.includes("REFUND")) return "환불 완료";
+    if (upper === "PAID") return "결제 완료";
+    if (upper === "PROCESSING") return "상품 준비 중";
+    if (upper === "SHIPMENT_READY") return "배송 준비";
+    if (upper === "SHIPPED") return "배송 중";
+    if (upper === "DELIVERED") return "배송 완료";
+    if (upper === "CANCELED") return "취소 완료";
+    if (upper === "REFUNDED") return "환불 완료";
+    if (upper === "RETURNED") return "반품됨";
+    if (upper === "PAYMENT_PENDING") return "결제 대기";
+
     return status;
 }
 
-// 취소/환불 계열인지
-function isCanceledStatus(status: string): boolean {
-    const upper = status.toUpperCase();
-    return upper.includes("CANCEL") || upper.includes("REFUND");
+// itemCategory("MD"|"POP"|"MEMBERSHIP") → 탭으로 매핑
+function mapCategoryToTab(cat?: string | null): CategoryTab | "UNKNOWN" {
+    const c = (cat ?? "").trim().toUpperCase();
+    if (c === "MD") return "PRODUCT";
+    if (c === "POP") return "PASS";
+    if (c === "MEMBERSHIP") return "MEMBERSHIP";
+    if (c === "DONATION") return "DONATION";
+    if (c === "TICKET") return "TICKET";
+    return "UNKNOWN"; // ✅ 모르면 UNKNOWN
 }
 
-// 🔥 itemCategory("MD" | "POP" | "MEMBERSHIP" ...) → 상단 탭(CategoryTab)으로 매핑
-function mapCategoryToTab(cat?: string | null): CategoryTab {
-    // 공백 제거 + 대문자
-    const c = (cat ?? "").trim().toUpperCase();
+// ✅ itemCategory가 비어있을 때만 "보수적"으로 카테고리 추정
+// - 'T1 Membership Ticket Holder' 같은 MD인데 Membership 단어가 들어간 케이스를 MD로 고정
+function inferCategoryFallback(order: SummaryOrderRes): CategoryTab | "UNKNOWN" {
+    const name = (order.itemName ?? "").trim().toUpperCase();
+    if (!name) return "UNKNOWN";
 
-    // ✅ 상품 = MD
-    if (c === "MD") return "PRODUCT";
+    // 🔥 예외 우선: Ticket Holder는 MD(상품)로 고정
+    if (name.includes("TICKET HOLDER") || name.includes("HOLDER")) return "PRODUCT";
 
-    // ✅ 이용권 = POP
-    if (c === "POP") return "PASS";
+    // POP 관련 키워드 (원하면 확장 가능)
+    if (name.includes("POP")) return "PASS";
 
-    // ✅ 멤버십 = MEMBERSHIP
-    if (c === "MEMBERSHIP") return "MEMBERSHIP";
+    // 멤버십 키워드
+    if (name.includes("멤버십") || name.includes("MEMBERSHIP")) return "MEMBERSHIP";
 
-    // DONATION, TICKET 생기면 여기 추가
-    // if (c === "DONATION") return "DONATION";
-    // if (c === "TICKET") return "TICKET";
+    // 나머지는 기본 상품
+    return "PRODUCT";
+}
 
-    // 그 외/값 없음 → 전체
-    return "ALL";
+// ✅ “상품명 정보 없음” 대신 자연스러운 기본명
+function resolveDisplayBaseName(order: SummaryOrderRes): string {
+    const name = (order.itemName ?? "").trim();
+    if (name) return name;
+
+    const cat = (order.itemCategory ?? "").trim().toUpperCase();
+
+    if (cat === "MEMBERSHIP") return "멤버십 상품";
+    if (cat === "POP") return "POP 이용권";
+    if (cat === "MD") return "상품";
+
+    // ✅ 둘 다 없으면: 최소한 주문번호라도 붙여서 UX 개선
+    return `상품 (주문 #${order.orderNo})`;
 }
 
 export default function MyOrdersPage() {
@@ -119,13 +126,13 @@ export default function MyOrdersPage() {
 
     const [categoryTab, setCategoryTab] = useState<CategoryTab>("ALL");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-    const [pageData, setPageData] =
-        useState<PageResult<SummaryOrderRes> | null>(null);
+
+    const [allOrders, setAllOrders] = useState<SummaryOrderRes[]>([]);
     const [loading, setLoading] = useState(false);
 
     const [page, setPage] = useState(0);
-    const size = 10; // 기본 페이지당 개수
-    const bigSize = 1000; // 필터 있을 때 한 번에 가져올 최대 개수 (적당히 크게)
+    const size = 10;
+    const bigSize = 1000;
 
     // 로그인 체크
     useEffect(() => {
@@ -137,29 +144,17 @@ export default function MyOrdersPage() {
         }
     }, [router]);
 
-    // 주문 목록 불러오기
+    // 주문 불러오기 (항상 bigSize로 한번에)
     useEffect(() => {
         const load = async () => {
             try {
                 setLoading(true);
 
-                const isAllAll =
-                    categoryTab === "ALL" && statusFilter === "ALL";
+                const res = await apiClient.get<PageResult<SummaryOrderRes>>("/order/my_orders", {
+                    params: { page: 0, size: bigSize },
+                });
 
-                // 🔥 전체/전체일 때만 서버 페이징 사용
-                //   그 외 탭(상품/멤버십/이용권...)은 page=0 + size=bigSize 로 전체 가져옴
-                const pageParam = isAllAll ? page : 0;
-                const sizeParam = isAllAll ? size : bigSize;
-
-                const res =
-                    await apiClient.get<PageResult<SummaryOrderRes>>(
-                        "/order/my_orders",
-                        {
-                            params: { page: pageParam, size: sizeParam },
-                        },
-                    );
-
-                setPageData(res.data);
+                setAllOrders(res.data.content ?? []);
             } catch (e) {
                 console.error("[MyOrders] load error", e);
                 if (axios.isAxiosError(e) && e.response?.status === 401) {
@@ -174,47 +169,61 @@ export default function MyOrdersPage() {
         };
 
         void load();
-    }, [page, categoryTab, statusFilter, router]);
+    }, [router]);
 
-    // 🔥 필터 적용된 주문 목록
-    const filteredOrders = useMemo(() => {
-        if (!pageData) return [];
-
-        return pageData.content.filter((o) => {
-            // 상태 필터 (전체 / 취소·교환·반품)
-            const byStatus =
-                statusFilter === "ALL" ? true : isCanceledStatus(o.orderStatus);
-
-            // 카테고리 필터 (ALL / PRODUCT / PASS / MEMBERSHIP ...)
-            const orderTab = mapCategoryToTab(o.itemCategory);
-            const byCategory =
-                categoryTab === "ALL" ? true : orderTab === categoryTab;
-
-            return byCategory && byStatus;
+    // ✅ 최신순 정렬 + 필터
+    // (중요) itemCategory 없을 때는 inferCategoryFallback으로만 제한적 보정
+    const visibleOrders = useMemo(() => {
+        const sorted = [...(allOrders ?? [])].sort((a, b) => {
+            const ta = new Date(a.orderDate).getTime();
+            const tb = new Date(b.orderDate).getTime();
+            if (Number.isNaN(ta) || Number.isNaN(tb)) return (b.orderNo ?? 0) - (a.orderNo ?? 0);
+            return tb - ta;
         });
-    }, [pageData, categoryTab, statusFilter]);
 
-    const totalPages = pageData?.totalPages ?? 0;
+        return sorted.filter((o) => {
+            // 1) 결제대기 숨김
+            if (isHiddenStatus(o.orderStatus)) return false;
 
-    // 🔥 페이지네이션은 "전체 / 전체" 에서만 보여주기
-    const showPagination =
-        totalPages > 1 &&
-        categoryTab === "ALL" &&
-        statusFilter === "ALL";
+            // 2) 상태 필터
+            const byStatus = statusFilter === "ALL" ? true : isCancelReturnRefund(o.orderStatus);
+            if (!byStatus) return false;
 
-    // =====================
-    //   렌더링
-    // =====================
+            // 3) 카테고리 필터
+            if (categoryTab === "ALL") {
+                // ✅ 전체 탭은 itemCategory 없어도 그냥 보여준다
+                return true;
+            }
+
+            const tabByCat = mapCategoryToTab(o.itemCategory);
+
+            // ✅ itemCategory가 UNKNOWN이면 이름으로만 "보수적으로" 추정
+            const resolvedTab = tabByCat === "UNKNOWN" ? inferCategoryFallback(o) : tabByCat;
+
+            if (resolvedTab === "UNKNOWN") return false;
+            return resolvedTab === categoryTab;
+        });
+    }, [allOrders, categoryTab, statusFilter]);
+
+    const totalPages = Math.max(1, Math.ceil(visibleOrders.length / size));
+
+    const pagedOrders = useMemo(() => {
+        const start = page * size;
+        return visibleOrders.slice(start, start + size);
+    }, [visibleOrders, page]);
+
+    useEffect(() => {
+        setPage(0);
+    }, [categoryTab, statusFilter]);
+
+    const showPagination = visibleOrders.length > size;
 
     return (
         <main className="min-h-screen bg-black text-white pt-16">
             <div className="max-w-5xl mx-auto px-4 md:px-6 py-8">
-                {/* 제목 */}
-                <h1 className="text-2xl md:text-3xl font-bold mb-6">
-                    주문 내역
-                </h1>
+                <h1 className="text-2xl md:text-3xl font-bold mb-6">주문 내역</h1>
 
-                {/* 상단 탭 (전체 / 상품 / 이용권 / 후원 / 멤버십 / 티켓) */}
+                {/* 상단 탭 */}
                 <div className="flex gap-4 text-sm md:text-base mb-3 border-b border-zinc-800 pb-2">
                     {(
                         [
@@ -229,10 +238,7 @@ export default function MyOrdersPage() {
                         <button
                             key={value}
                             type="button"
-                            onClick={() => {
-                                setCategoryTab(value);
-                                setPage(0); // 탭 바뀔 때 페이지 0으로
-                            }}
+                            onClick={() => setCategoryTab(value)}
                             className={`pb-1 ${
                                 categoryTab === value
                                     ? "border-b-2 border-white text-white font-semibold"
@@ -244,14 +250,11 @@ export default function MyOrdersPage() {
                     ))}
                 </div>
 
-                {/* 두 번째 줄 탭 (전체 / 취소·교환·반품) */}
+                {/* 두 번째 줄 탭 */}
                 <div className="flex gap-2 mb-6">
                     <button
                         type="button"
-                        onClick={() => {
-                            setStatusFilter("ALL");
-                            setPage(0);
-                        }}
+                        onClick={() => setStatusFilter("ALL")}
                         className={`px-4 py-1.5 rounded-full text-xs md:text-sm ${
                             statusFilter === "ALL"
                                 ? "bg-white text-black font-semibold"
@@ -262,10 +265,7 @@ export default function MyOrdersPage() {
                     </button>
                     <button
                         type="button"
-                        onClick={() => {
-                            setStatusFilter("CANCEL");
-                            setPage(0);
-                        }}
+                        onClick={() => setStatusFilter("CANCEL")}
                         className={`px-4 py-1.5 rounded-full text-xs md:text-sm ${
                             statusFilter === "CANCEL"
                                 ? "bg-white text-black font-semibold"
@@ -276,47 +276,46 @@ export default function MyOrdersPage() {
                     </button>
                 </div>
 
-                {/* 본문: 주문 리스트 */}
                 {loading ? (
                     <div className="py-16 text-center text-sm text-zinc-400">
                         주문 내역을 불러오는 중입니다…
                     </div>
-                ) : !pageData || filteredOrders.length === 0 ? (
+                ) : pagedOrders.length === 0 ? (
                     <div className="py-16 text-center text-sm text-zinc-400">
-                        주문 내역이 없습니다.
+                        표시할 주문 내역이 없습니다.
                     </div>
                 ) : (
                     <>
                         <div className="space-y-8">
-                            {filteredOrders.map((order) => {
-                                const displayName =
-                                    order.itemName == null
-                                        ? "상품명 정보 없음"
-                                        : order.itemCount > 1
-                                            ? `${order.itemName} 외 ${
-                                                order.itemCount - 1
-                                            }건`
-                                            : order.itemName;
+                            {pagedOrders.map((order) => {
+                                const baseName = resolveDisplayBaseName(order);
 
-                                const quantityText = `총 수량 ${order.itemCount}개`;
+                                const count = Number(order.itemCount ?? 0);
+                                const safeCount = count > 0 ? count : 1;
+
+                                const displayName =
+                                    safeCount > 1 ? `${baseName} 외 ${safeCount - 1}건` : baseName;
+
+                                const quantityText = `총 수량 ${safeCount}개`;
+
+                                // ✅ 카테고리 배지(전체에서 특히 도움 됨)
+                                const cat = (order.itemCategory ?? "").trim().toUpperCase();
+                                const badge =
+                                    cat === "MD"
+                                        ? "상품"
+                                        : cat === "POP"
+                                            ? "이용권"
+                                            : cat === "MEMBERSHIP"
+                                                ? "멤버십"
+                                                : null;
 
                                 return (
-                                    <section
-                                        key={order.orderNo}
-                                        className="space-y-2"
-                                    >
-                                        {/* 날짜 + 상세 보기 */}
+                                    <section key={order.orderNo} className="space-y-2">
                                         <div className="flex items-center justify-between text-xs md:text-sm text-zinc-400">
-                                            <span>
-                                                {formatDate(order.orderDate)}
-                                            </span>
+                                            <span>{formatDate(order.orderDate)}</span>
                                             <button
                                                 type="button"
-                                                onClick={() =>
-                                                    router.push(
-                                                        `/mypage/orders/${order.orderNo}`,
-                                                    )
-                                                }
+                                                onClick={() => router.push(`/mypage/orders/${order.orderNo}`)}
                                                 className="flex items-center gap-1 hover:text-zinc-200"
                                             >
                                                 <span>상세 보기</span>
@@ -324,34 +323,32 @@ export default function MyOrdersPage() {
                                             </button>
                                         </div>
 
-                                        {/* 주문 카드 */}
                                         <div className="bg-zinc-900 rounded-2xl p-4 md:p-5">
                                             <div className="text-[11px] md:text-xs text-zinc-400 mb-2">
-                                                {getStatusLabel(
-                                                    order.orderStatus,
-                                                )}
+                                                {getStatusLabel(order.orderStatus)}
                                             </div>
 
                                             <div className="flex gap-3">
-                                                {/* 썸네일 – 임시 T1 로고 */}
                                                 <div className="w-16 h-16 md:w-20 md:h-20 rounded-lg bg-zinc-800 overflow-hidden flex items-center justify-center flex-shrink-0">
                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                    <img
-                                                        src="/icons/t1.png"
-                                                        alt="T1"
-                                                        className="w-10 h-10 opacity-80"
-                                                    />
+                                                    <img src="/icons/t1.png" alt="T1" className="w-10 h-10 opacity-80" />
                                                 </div>
 
                                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                                    <div className="text-sm md:text-base font-medium truncate">
-                                                        {displayName}
-                                                    </div>
-                                                    <div className="mt-1 text-xs md:text-sm text-zinc-400">
-                                                        {formatMoney(
-                                                            order.orderTotalPrice,
+                                                    {/* ✅ 배지 + 상품명 */}
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        {badge && (
+                                                            <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-200">
+                                {badge}
+                              </span>
                                                         )}
-                                                        원 · {quantityText}
+                                                        <div className="text-sm md:text-base font-medium truncate">
+                                                            {displayName}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="mt-1 text-xs md:text-sm text-zinc-400">
+                                                        {formatMoney(order.orderTotalPrice)}원 · {quantityText}
                                                     </div>
                                                 </div>
                                             </div>
@@ -361,15 +358,12 @@ export default function MyOrdersPage() {
                             })}
                         </div>
 
-                        {/* 페이지네이션 – 전체/전체에서만 표시 */}
                         {showPagination && (
                             <div className="mt-8 flex justify-center gap-3 text-xs md:text-sm">
                                 <button
                                     type="button"
                                     disabled={page === 0}
-                                    onClick={() =>
-                                        setPage((p) => Math.max(p - 1, 0))
-                                    }
+                                    onClick={() => setPage((p) => Math.max(p - 1, 0))}
                                     className={`px-3 py-1.5 rounded-full border ${
                                         page === 0
                                             ? "border-zinc-700 text-zinc-600 cursor-default"
@@ -379,21 +373,12 @@ export default function MyOrdersPage() {
                                     이전
                                 </button>
                                 <span className="text-zinc-400">
-                                    {page + 1} / {totalPages}
-                                </span>
+                  {page + 1} / {totalPages}
+                </span>
                                 <button
                                     type="button"
                                     disabled={page >= totalPages - 1}
-                                    onClick={() =>
-                                        setPage((p) =>
-                                            totalPages === 0
-                                                ? p
-                                                : Math.min(
-                                                    p + 1,
-                                                    totalPages - 1,
-                                                ),
-                                        )
-                                    }
+                                    onClick={() => setPage((p) => Math.min(p + 1, totalPages - 1))}
                                     className={`px-3 py-1.5 rounded-full border ${
                                         page >= totalPages - 1
                                             ? "border-zinc-700 text-zinc-600 cursor-default"

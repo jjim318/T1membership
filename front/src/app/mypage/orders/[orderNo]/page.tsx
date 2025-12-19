@@ -1,7 +1,7 @@
 // src/app/mypage/orders/[orderNo]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import axios from "axios";
 import { apiClient } from "@/lib/apiClient";
@@ -10,7 +10,7 @@ type OrderStatus = string;
 
 // 🔥 라인 정보 (백엔드 UserDetailOrderRes에 맞춰야 함)
 interface OrderItemRes {
-    orderItemNo: number;               // 부분 취소용 PK
+    orderItemNo: number; // 부분 취소용 PK
     itemNo: number | null;
     itemNameSnapshot: string;
     itemOptionSnapshot?: string | null;
@@ -62,6 +62,15 @@ interface CancelOrderRes {
     orderStatus: string;
 }
 
+// ✅ (권장) orderNo로 결제 재시도 prepare 응답(백엔드가 만들어줘야 함)
+interface PrepareByOrderRes {
+    // ApiResult 래핑이든 그냥 data든, 아래 2가지 케이스 모두 처리하도록 코드에 방어 넣음
+    orderNo?: number;
+    orderId: string;
+    amount: number;
+    orderName: string;
+}
+
 // ========= 헬퍼 =========
 function formatDate(dateStr: string | null | undefined): string {
     if (!dateStr) return "-";
@@ -96,8 +105,8 @@ function getStatusLabel(status: OrderStatus): string {
 
     // 🔥 부분 취소 우선 처리
     if (
-        upper === "PARTIALLY_CANCELED" ||           // enum 이름
-        upper === "PARTIAL_CANCEL" ||               // 혹시 이름 바뀔 대비
+        upper === "PARTIALLY_CANCELED" ||
+        upper === "PARTIAL_CANCEL" ||
         (upper.includes("PART") && upper.includes("CANCEL"))
     ) {
         return "부분 취소";
@@ -113,7 +122,7 @@ function getStatusLabel(status: OrderStatus): string {
     if (upper.includes("CONFIRM") || upper.includes("COMPLETE")) return "구매확정";
     if (upper.includes("SHIP") || upper.includes("DELIVERY")) return "배송 중";
     if (upper.includes("DELIVERED") || upper.includes("DELIVERY_COMPLETE")) return "배송 완료";
-    if (upper.includes("CANCEL")) return "취소 완료";    // 🔥 나머지(전체 취소)는 여기로
+    if (upper.includes("CANCEL")) return "취소 완료";
     if (upper.includes("REFUND")) return "환불 완료";
 
     return status;
@@ -142,6 +151,11 @@ function isMdItem(item: OrderItemRes): boolean {
     return cat === "MD";
 }
 
+// ✅ 결제 대기(ORDERED)인지
+function isOrdered(status: OrderStatus): boolean {
+    return (status ?? "").toUpperCase() === "ORDERED";
+}
+
 // 멤버십 planCode → 화면용 이름
 function getMembershipDisplayName(planCode?: string | null): string {
     if (!planCode) return "멤버십 상품";
@@ -156,7 +170,6 @@ function getMembershipDisplayName(planCode?: string | null): string {
     }
 }
 
-// ========= 페이지 컴포넌트 =========
 export default function OrderDetailPage() {
     const router = useRouter();
     const params = useParams();
@@ -168,6 +181,15 @@ export default function OrderDetailPage() {
     // 🔥 취소 진행 중 상태
     const [cancelAllLoading, setCancelAllLoading] = useState(false);
     const [cancelItemLoading, setCancelItemLoading] = useState<number | null>(null);
+
+    // ✅ 결제 진행(재시도) 로딩
+    const [payNowLoading, setPayNowLoading] = useState(false);
+
+    // ✅ 상세 재로딩 함수 (취소 후/결제 후 새로고침용)
+    const reloadDetail = async (orderNo: string | string[]) => {
+        const res = await apiClient.get<UserDetailOrderRes>(`/order/${orderNo}`);
+        setData(res.data);
+    };
 
     useEffect(() => {
         if (!orderNoParam) return;
@@ -183,10 +205,7 @@ export default function OrderDetailPage() {
                     }
                 }
 
-                const res = await apiClient.get<UserDetailOrderRes>(
-                    `/order/${orderNoParam}`,
-                );
-                setData(res.data);
+                await reloadDetail(orderNoParam);
             } catch (e) {
                 console.error("[OrderDetail] load error", e);
                 if (axios.isAxiosError(e) && e.response?.status === 401) {
@@ -206,45 +225,118 @@ export default function OrderDetailPage() {
         void load();
     }, [orderNoParam, router]);
 
-    if (loading) {
-        return (
-            <main className="min-h-screen bg-black text-white pt-16 flex items-center justify-center">
-                <span className="text-sm text-zinc-400">
-                    주문 상세를 불러오는 중입니다…
-                </span>
-            </main>
-        );
-    }
+    const items = data?.items ?? [];
 
-    if (!data) {
-        return (
-            <main className="min-h-screen bg-black text-white pt-16 flex items-center justify-center">
-                <span className="text-sm text-zinc-400">
-                    주문 정보를 찾을 수 없습니다.
-                </span>
-            </main>
-        );
-    }
+    const isMembershipOrder = useMemo(() => {
+        if (!data) return false;
+        return !!data.membershipPlanCode && items.length === 0;
+    }, [data, items.length]);
 
-    const items = data.items ?? [];
-    const isMembershipOrder =
-        !!data.membershipPlanCode && items.length === 0;
-
-    const partiallyCanceled = isPartiallyCanceled(data.orderStatus);
+    const partiallyCanceled = useMemo(() => {
+        if (!data) return false;
+        return isPartiallyCanceled(data.orderStatus);
+    }, [data]);
 
     // 🔥 전체 취소 가능 여부 (ORDERED/PAID + 전부 MD + 부분취소 상태 아님)
-    const canCancelAll =
-        !isMembershipOrder &&
-        !partiallyCanceled &&
-        items.length > 0 &&
-        isUserCancelableStatus(data.orderStatus) &&
-        items.every((it) => isMdItem(it));
+    const canCancelAll = useMemo(() => {
+        if (!data) return false;
+        return (
+            !isMembershipOrder &&
+            !partiallyCanceled &&
+            items.length > 0 &&
+            isUserCancelableStatus(data.orderStatus) &&
+            items.every((it) => isMdItem(it))
+        );
+    }, [data, isMembershipOrder, partiallyCanceled, items]);
 
     // 🔥 개별 라인 취소 가능 여부
     const canCancelItem = (item: OrderItemRes): boolean => {
+        if (!data) return false;
         if (isMembershipOrder) return false;
         if (!isUserCancelableStatus(data.orderStatus)) return false;
         return isMdItem(item);
+    };
+
+    // ✅ 결제 재시도 버튼 노출 조건
+    // - 결제대기(ORDERED)
+    // - 멤버십 주문 아니고
+    // - 라인이 있고
+    // - 전부 MD
+    // - 부분취소 상태면 결제 재시도 막는 게 안전(정책상)
+    const canPayNow = useMemo(() => {
+        if (!data) return false;
+        return (
+            !isMembershipOrder &&
+            !partiallyCanceled &&
+            items.length > 0 &&
+            isOrdered(data.orderStatus) &&
+            items.every((it) => isMdItem(it))
+        );
+    }, [data, isMembershipOrder, partiallyCanceled, items]);
+
+    // ✅ 결제 재시도 (ORDERED + MD only)
+    const handlePayNow = async () => {
+        if (!data) return;
+        if (!canPayNow) {
+            alert("결제 대기 상태의 MD 주문만 결제를 진행할 수 있습니다.");
+            return;
+        }
+
+        const ok = window.confirm(
+            "결제 대기 중인 주문입니다.\n지금 결제를 진행하시겠습니까?",
+        );
+        if (!ok) return;
+
+        setPayNowLoading(true);
+        try {
+            // =========================
+            // A모드(권장): 서버가 orderNo로 다시 prepare 만들어주는 API
+            // =========================
+            // 🔥 형님 서버 실제 엔드포인트명으로 여기만 바꾸면 됩니다.
+            const prepareRes = await apiClient.post<any>("/pay/toss/prepare-by-order", {
+                orderNo: data.orderNo,
+            });
+
+            // ApiResult 래핑/비래핑 모두 커버
+            const payload: PrepareByOrderRes =
+                prepareRes.data?.result ??
+                prepareRes.data?.data ??
+                prepareRes.data;
+
+            const orderId = payload?.orderId;
+            const amount = payload?.amount;
+            const orderName = payload?.orderName;
+
+            if (!orderId || !amount || !orderName) {
+                // =========================
+                // B모드(우회): prepare-by-order가 없거나 형식이 다르면
+                // checkout에서 orderNo로 다시 prepare 하게 넘김
+                // (checkout 페이지가 orderNo 처리 가능해야 함)
+                // =========================
+                router.push(`/order/goods/checkout?orderNo=${data.orderNo}`);
+                return;
+            }
+
+            // ✅ 결제 페이지로 이동 (형님 결제 플로우 라우트에 맞게)
+            router.push(
+                `/order/goods/checkout?orderNo=${data.orderNo}&orderId=${encodeURIComponent(
+                    orderId,
+                )}&amount=${amount}&orderName=${encodeURIComponent(orderName)}`,
+            );
+        } catch (e) {
+            console.error("[OrderDetail] pay now error", e);
+            if (axios.isAxiosError(e)) {
+                const msg =
+                    (e.response?.data as any)?.resMessage ||
+                    (e.response?.data as any)?.message ||
+                    "결제 진행에 실패했습니다.";
+                alert(msg);
+            } else {
+                alert("결제 진행에 실패했습니다.");
+            }
+        } finally {
+            setPayNowLoading(false);
+        }
     };
 
     // 🔥 주문 전체 취소
@@ -321,17 +413,11 @@ export default function OrderDetailPage() {
                 orderItemNos: [item.orderItemNo],
             };
 
-            await apiClient.patch<CancelOrderRes>(
-                `/order/${data.orderNo}/cancel-items`,
-                body,
-            );
+            await apiClient.patch<CancelOrderRes>(`/order/${data.orderNo}/cancel-items`, body);
 
             alert("해당 상품 취소가 접수되었습니다.");
 
-            const refreshed = await apiClient.get<UserDetailOrderRes>(
-                `/order/${data.orderNo}`,
-            );
-            setData(refreshed.data);
+            await reloadDetail(String(data.orderNo));
         } catch (e) {
             console.error("[OrderDetail] cancel item error", e);
             if (axios.isAxiosError(e)) {
@@ -348,17 +434,33 @@ export default function OrderDetailPage() {
         }
     };
 
+    // =====================
+    //   렌더링
+    // =====================
+
+    if (loading) {
+        return (
+            <main className="min-h-screen bg-black text-white pt-16 flex items-center justify-center">
+                <span className="text-sm text-zinc-400">주문 상세를 불러오는 중입니다…</span>
+            </main>
+        );
+    }
+
+    if (!data) {
+        return (
+            <main className="min-h-screen bg-black text-white pt-16 flex items-center justify-center">
+                <span className="text-sm text-zinc-400">주문 정보를 찾을 수 없습니다.</span>
+            </main>
+        );
+    }
+
     return (
         <main className="min-h-screen bg-black text-white pt-16">
             <div className="max-w-5xl mx-auto px-4 md:px-6 py-8">
                 {/* 상단: 날짜 + 주문 번호 + 상태 */}
                 <section className="mb-4">
-                    <h1 className="text-xl md:text-2xl font-bold">
-                        {formatDate(data.createdAt)} 주문
-                    </h1>
-                    <p className="mt-1 text-xs md:text-sm text-zinc-400">
-                        주문 번호 {data.orderNo}
-                    </p>
+                    <h1 className="text-xl md:text-2xl font-bold">{formatDate(data.createdAt)} 주문</h1>
+                    <p className="mt-1 text-xs md:text-sm text-zinc-400">주문 번호 {data.orderNo}</p>
                     <p className="mt-1 text-xs md:text-sm text-zinc-300">
                         현재 상태: {getStatusLabel(data.orderStatus)}
                     </p>
@@ -367,37 +469,38 @@ export default function OrderDetailPage() {
                 {/* 안내 바 */}
                 <section className="space-y-2 mb-4 text-[11px] md:text-xs text-zinc-300">
                     {partiallyCanceled && (
+                        <div className="rounded-md bg-zinc-800 px-3 py-2">일부 상품이 취소된 주문입니다.</div>
+                    )}
+
+                    {/* ✅ 결제 대기 + MD only면 결제 안내를 추가 */}
+                    {canPayNow && (
                         <div className="rounded-md bg-zinc-800 px-3 py-2">
-                            일부 상품이 취소된 주문입니다.
+                            결제 대기 중인 MD 주문입니다. 아래 <b className="text-white">결제하기</b> 버튼으로 결제를
+                            완료할 수 있습니다.
                         </div>
                     )}
 
                     {isMembershipOrder ? (
                         <>
                             <div className="rounded-md bg-zinc-800 px-3 py-2">
-                                온라인 멤버십 이용권이에요. 배송 없이 계정에 바로
-                                적용되는 상품입니다.
+                                온라인 멤버십 이용권이에요. 배송 없이 계정에 바로 적용되는 상품입니다.
                             </div>
                             <div className="rounded-md bg-zinc-800 px-3 py-2">
                                 멤버십 해지 및 환불 규정은 안내 페이지를 꼭 확인해 주세요.
                             </div>
                         </>
                     ) : (
-                        <>
-                            <div className="rounded-md bg-zinc-800 px-3 py-2">
-                                MD 상품은 결제 대기/결제 완료 상태에서 취소/환불 신청이 가능합니다.
-                                POP 및 멤버십 상품은 고객센터를 통해 문의해 주세요.
-                            </div>
-                        </>
+                        <div className="rounded-md bg-zinc-800 px-3 py-2">
+                            MD 상품은 결제 대기/결제 완료 상태에서 취소/환불 신청이 가능합니다. POP 및 멤버십 상품은
+                            고객센터를 통해 문의해 주세요.
+                        </div>
                     )}
                 </section>
 
                 {/* 주문 상품 리스트 */}
                 {!isMembershipOrder && items.length > 0 && (
                     <section className="mb-8">
-                        <h2 className="text-sm md:text-base font-semibold mb-3">
-                            주문 상품
-                        </h2>
+                        <h2 className="text-sm md:text-base font-semibold mb-3">주문 상품</h2>
                         <ul className="space-y-3">
                             {items.map((item, idx) => {
                                 const md = isMdItem(item);
@@ -405,7 +508,7 @@ export default function OrderDetailPage() {
 
                                 return (
                                     <li
-                                        key={`${item.itemNo ?? "item"}-${idx}`}
+                                        key={`${item.orderItemNo}-${idx}`}
                                         className="flex gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-3 text-xs md:text-sm"
                                     >
                                         {/* 썸네일 */}
@@ -420,9 +523,8 @@ export default function OrderDetailPage() {
 
                                         {/* 정보 */}
                                         <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                            <div className="font-semibold truncate">
-                                                {item.itemNameSnapshot}
-                                            </div>
+                                            <div className="font-semibold truncate">{item.itemNameSnapshot}</div>
+
                                             {item.itemOptionSnapshot && (
                                                 <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
                                                     {item.itemOptionSnapshot}
@@ -430,8 +532,7 @@ export default function OrderDetailPage() {
                                             )}
 
                                             <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
-                                                개당 {formatMoney(item.priceAtOrder)}원 ·{" "}
-                                                수량 {item.quantity}개
+                                                개당 {formatMoney(item.priceAtOrder)}원 · 수량 {item.quantity}개
                                             </div>
 
                                             {/* 🔥 MD 뱃지만 표시 */}
@@ -455,14 +556,12 @@ export default function OrderDetailPage() {
                                                     disabled={cancelItemLoading === item.orderItemNo}
                                                     onClick={() => handleCancelItem(item)}
                                                 >
-                                                    {cancelItemLoading === item.orderItemNo
-                                                        ? "취소 처리 중…"
-                                                        : "이 상품 취소"}
+                                                    {cancelItemLoading === item.orderItemNo ? "취소 처리 중…" : "이 상품 취소"}
                                                 </button>
                                             ) : (
                                                 <span className="text-[11px] md:text-xs text-zinc-500">
-                                                    취소/환불 불가
-                                                </span>
+                          취소/환불 불가
+                        </span>
                                             )}
                                         </div>
                                     </li>
@@ -475,41 +574,26 @@ export default function OrderDetailPage() {
                 {/* 멤버십 주문일 때 멤버십 정보 */}
                 {isMembershipOrder && (
                     <section className="mb-8">
-                        <h2 className="text-sm md:text-base font-semibold mb-4">
-                            멤버십 정보
-                        </h2>
+                        <h2 className="text-sm md:text-base font-semibold mb-4">멤버십 정보</h2>
                         <dl className="space-y-2 text-xs md:text-sm">
                             <div className="flex justify-between">
                                 <dt className="text-zinc-500">이용권</dt>
                                 <dd className="text-zinc-100">
-                                    {getMembershipDisplayName(
-                                        data.membershipPlanCode,
-                                    )}
+                                    {getMembershipDisplayName(data.membershipPlanCode)}
                                 </dd>
                             </div>
                             <div className="flex justify-between">
                                 <dt className="text-zinc-500">결제 방식</dt>
-                                <dd className="text-zinc-100">
-                                    {data.membershipPayType ?? "-"}
-                                </dd>
+                                <dd className="text-zinc-100">{data.membershipPayType ?? "-"}</dd>
                             </div>
-                            {data.membershipStartDate &&
-                                data.membershipEndDate && (
-                                    <div className="flex justify-between">
-                                        <dt className="text-zinc-500">
-                                            이용 기간
-                                        </dt>
-                                        <dd className="text-zinc-100">
-                                            {formatDate(
-                                                data.membershipStartDate,
-                                            )}{" "}
-                                            ~{" "}
-                                            {formatDate(
-                                                data.membershipEndDate,
-                                            )}
-                                        </dd>
-                                    </div>
-                                )}
+                            {data.membershipStartDate && data.membershipEndDate && (
+                                <div className="flex justify-between">
+                                    <dt className="text-zinc-500">이용 기간</dt>
+                                    <dd className="text-zinc-100">
+                                        {formatDate(data.membershipStartDate)} ~ {formatDate(data.membershipEndDate)}
+                                    </dd>
+                                </div>
+                            )}
                         </dl>
                     </section>
                 )}
@@ -519,9 +603,7 @@ export default function OrderDetailPage() {
 
                 {/* 결제 정보 */}
                 <section className="mb-8">
-                    <h2 className="text-sm md:text-base font-semibold mb-4">
-                        결제 정보
-                    </h2>
+                    <h2 className="text-sm md:text-base font-semibold mb-4">결제 정보</h2>
 
                     <dl className="space-y-3 text-xs md:text-sm">
                         <div className="flex justify-between">
@@ -538,18 +620,14 @@ export default function OrderDetailPage() {
                         </div>
                         <div className="flex justify-between text-xs text-zinc-400">
                             <dt className="pl-2">ㄴ 결제 수단</dt>
-                            <dd>
-                                {data.paymentMethod ?? "결제 수단 정보 없음"}
-                            </dd>
+                            <dd>{data.paymentMethod ?? "결제 수단 정보 없음"}</dd>
                         </div>
                     </dl>
                 </section>
 
                 {/* 주문자 / 배송 정보 */}
                 <section className="mb-10">
-                    <h2 className="text-sm md:text-base font-semibold mb-3">
-                        주문자
-                    </h2>
+                    <h2 className="text-sm md:text-base font-semibold mb-3">주문자</h2>
                     <div className="space-y-2 text-xs md:text-sm">
                         <div className="flex justify-between">
                             <span className="text-zinc-500">이름</span>
@@ -562,38 +640,37 @@ export default function OrderDetailPage() {
                     </div>
 
                     <div className="mt-6">
-                        <h3 className="text-xs md:text-sm font-semibold mb-2">
-                            배송지 정보
-                        </h3>
+                        <h3 className="text-xs md:text-sm font-semibold mb-2">배송지 정보</h3>
                         <div className="space-y-1 text-xs md:text-sm text-zinc-300">
-                            {data.receiverZipCode ||
-                            data.receiverAddress ||
-                            data.receiverDetailAddress ? (
+                            {data.receiverZipCode || data.receiverAddress || data.receiverDetailAddress ? (
                                 <>
                                     <div>
-                                        {data.receiverZipCode
-                                            ? `[${data.receiverZipCode}] `
-                                            : ""}{" "}
-                                        {data.receiverAddress ?? ""}{" "}
-                                        {data.receiverDetailAddress ?? ""}
+                                        {data.receiverZipCode ? `[${data.receiverZipCode}] ` : ""}
+                                        {data.receiverAddress ?? ""} {data.receiverDetailAddress ?? ""}
                                     </div>
-                                    {data.memo && (
-                                        <div className="text-zinc-400">
-                                            요청사항: {data.memo}
-                                        </div>
-                                    )}
+                                    {data.memo && <div className="text-zinc-400">요청사항: {data.memo}</div>}
                                 </>
                             ) : (
-                                <div className="text-zinc-500">
-                                    배송지 정보 없음
-                                </div>
+                                <div className="text-zinc-500">배송지 정보 없음</div>
                             )}
                         </div>
                     </div>
                 </section>
 
-                {/* 하단 버튼: 전체 취소 + 고객센터 */}
+                {/* 하단 버튼: 결제하기 + 전체 취소 + 고객센터 */}
                 <section className="mb-4 space-y-2">
+                    {/* ✅ 결제하기(ORDERED + MD only) */}
+                    {canPayNow && (
+                        <button
+                            type="button"
+                            className="w-full py-3 rounded-xl bg-white text-black text-sm md:text-base font-semibold hover:bg-zinc-200 disabled:opacity-60"
+                            disabled={payNowLoading}
+                            onClick={handlePayNow}
+                        >
+                            {payNowLoading ? "결제 창 여는 중…" : "결제하기"}
+                        </button>
+                    )}
+
                     {canCancelAll && (
                         <button
                             type="button"
@@ -608,9 +685,7 @@ export default function OrderDetailPage() {
                     <button
                         type="button"
                         className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm md:text-base hover:bg-zinc-800"
-                        onClick={() =>
-                            alert("고객센터 페이지는 추후 구현 예정입니다.")
-                        }
+                        onClick={() => alert("고객센터 페이지는 추후 구현 예정입니다.")}
                     >
                         고객센터
                     </button>

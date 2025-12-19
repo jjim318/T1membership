@@ -7,7 +7,7 @@ import Image from "next/image";
 import axios from "axios";
 import Header from "@/components/layout/Header";
 import { apiClient } from "@/lib/apiClient";
-import {logout} from "@/lib/authClient";
+import { logout } from "@/lib/authClient";
 
 interface MemberSummary {
     memberNickName: string;
@@ -27,9 +27,7 @@ export default function MyPageHome() {
         const run = async () => {
             try {
                 const token =
-                    typeof window !== "undefined"
-                        ? localStorage.getItem("accessToken")
-                        : null;
+                    typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
 
                 if (!token) {
                     alert("로그인이 필요합니다.");
@@ -74,6 +72,7 @@ export default function MyPageHome() {
     const menuItem = (label: string, onClick?: () => void) => (
         <button
             key={label}
+            type="button"
             onClick={onClick}
             className="w-full flex items-center justify-between py-3 border-b border-zinc-800 text-sm hover:bg-zinc-900/60"
         >
@@ -130,19 +129,13 @@ export default function MyPageHome() {
                                 className="w-16 h-16 object-cover"
                             />
                         ) : (
-                            <span className="text-xl font-bold">
-                                {member.memberNickName?.[0] ?? "T"}
-                            </span>
+                            <span className="text-xl font-bold">{member.memberNickName?.[0] ?? "T"}</span>
                         )}
                     </div>
 
                     <div className="flex-1">
-                        <div className="text-base font-semibold">
-                            {member.memberNickName}
-                        </div>
-                        <div className="text-xs text-zinc-400 mt-1">
-                            {member.memberEmail}
-                        </div>
+                        <div className="text-base font-semibold">{member.memberNickName}</div>
+                        <div className="text-xs text-zinc-400 mt-1">{member.memberEmail}</div>
                     </div>
                 </section>
 
@@ -160,7 +153,7 @@ export default function MyPageHome() {
 
                 {/* 아래 메뉴 리스트 */}
                 <section className="mt-8 bg-zinc-900 rounded-2xl p-2 text-sm">
-                    {menuItem("멤버십 가입하기")}
+                    {menuItem("멤버십 가입하기", go("/membership/all"))}
                     {menuItem("주문 내역", go("/mypage/orders"))}
                     {menuItem("내가 쓴 글", go("/community/my-posts"))}
                     {menuItem("내 정보 관리", go("/mypage"))}
@@ -168,7 +161,7 @@ export default function MyPageHome() {
                     {menuItem("언어")}
                     {menuItem("통화")}
                     {menuItem("알림 설정")}
-                    {menuItem("이용약관")}
+                    {menuItem("이용약관",go("/terms"))}
                     {menuItem("고객센터")}
                     {menuItem("이벤트")}
                     {menuItem("공지사항")}
@@ -180,9 +173,7 @@ export default function MyPageHome() {
             {showLogoutModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
                     <div className="w-full max-w-sm rounded-2xl bg-zinc-900 px-6 py-5 shadow-xl">
-                        <p className="text-center text-sm font-semibold mb-6">
-                            로그아웃 할까요?
-                        </p>
+                        <p className="text-center text-sm font-semibold mb-6">로그아웃 할까요?</p>
                         <div className="flex gap-3">
                             <button
                                 type="button"
@@ -194,7 +185,7 @@ export default function MyPageHome() {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    logout();       // ← 반드시 이 함수를 호출해야 서버 로그아웃 처리됨
+                                    logout(); // ← 서버 로그아웃 처리
                                     setShowLogoutModal(false);
                                 }}
                                 className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-semibold"
