@@ -5,11 +5,14 @@ import com.t1membership.board.dto.createComment.CreateCommentReq;
 import com.t1membership.board.dto.createComment.CreateCommentRes;
 import com.t1membership.board.dto.deleteComment.DeleteCommentReq;
 import com.t1membership.board.dto.deleteComment.DeleteCommentRes;
+import com.t1membership.board.dto.my.MyCommentRes;
 import com.t1membership.board.dto.readComment.ReadCommentReq;
 import com.t1membership.board.dto.readComment.ReadCommentRes;
 import com.t1membership.board.dto.updateComment.UpdateCommentReq;
 import com.t1membership.board.dto.updateComment.UpdateCommentRes;
 import com.t1membership.board.service.CommentService;
+import com.t1membership.config.SecurityUtil;
+import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -60,5 +63,21 @@ public class CommentController {
         var readAllRes = commentService.readComments(readReq);
         return new ApiResult<>(readAllRes);
     }
+
+    @GetMapping("/my")
+    public ApiResult<PageResponseDTO<MyCommentRes>> readMyComments(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        String email = SecurityUtil.getCurrentMemberEmail();
+        PageRequestDTO pageRequestDTO = PageRequestDTO.builder()
+                .page(page)
+                .size(size)
+                .build();
+
+        PageResponseDTO<MyCommentRes> result = commentService.readMyComments(email, pageRequestDTO);
+        return new ApiResult<>(result);
+    }
+
 
 }

@@ -1,9 +1,11 @@
 package com.t1membership.board.service;
 
 import com.t1membership.board.dto.content.ContentSummaryRes;
+import com.t1membership.board.dto.my.MyPostRes;
 import com.t1membership.board.dto.story.CreateStoryReq;
 import com.t1membership.board.dto.story.StoryDetailRes;
 import com.t1membership.board.dto.story.StoryFeedRes;
+import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.board.dto.createBoard.CreateBoardReq;
 import com.t1membership.board.dto.createBoard.CreateBoardRes;
@@ -36,4 +38,5 @@ public interface BoardService {
     StoryDetailRes getStoryDetail(Long boardNo);
     void createStory(String memberEmail, CreateStoryReq req);
     Page<StoryFeedRes> getStoryFeed(String writer, Pageable pageable);
+    PageResponseDTO<MyPostRes> readMyBoards(String email, PageRequestDTO pageRequestDTO);
 }

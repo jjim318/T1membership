@@ -50,4 +50,6 @@ public interface BoardRepository extends JpaRepository<BoardEntity, Long> {
             Pageable pageable
     );
 
+    Page<BoardEntity> findByMember_MemberEmail(String memberEmail, Pageable pageable);
+
 }

@@ -7,6 +7,7 @@ import com.t1membership.board.dto.createBoard.CreateBoardReq;
 import com.t1membership.board.dto.createBoard.CreateBoardRes;
 import com.t1membership.board.dto.deleteBoard.DeleteBoardReq;
 import com.t1membership.board.dto.deleteBoard.DeleteBoardRes;
+import com.t1membership.board.dto.my.MyPostRes;
 import com.t1membership.board.dto.readAllBoard.ReadAllBoardReq;
 import com.t1membership.board.dto.readAllBoard.ReadAllBoardRes;
 import com.t1membership.board.dto.readOneBoard.ReadOneBoardReq;
@@ -14,6 +15,8 @@ import com.t1membership.board.dto.readOneBoard.ReadOneBoardRes;
 import com.t1membership.board.dto.updateBoard.UpdateBoardReq;
 import com.t1membership.board.dto.updateBoard.UpdateBoardRes;
 import com.t1membership.board.service.BoardService;
+import com.t1membership.config.SecurityUtil;
+import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.image.dto.ExistingImageDTO;
 import lombok.RequiredArgsConstructor;
@@ -163,6 +166,22 @@ public class BoardController {
     public ApiResult<PageResponseDTO<ReadAllBoardRes>> readAllBoards(@ModelAttribute ReadAllBoardReq readReq) {
         var readAllRes = boardService.readAllBoard(readReq);
         return new ApiResult<>(readAllRes);
+    }
+
+
+    @GetMapping("/my")
+    public ApiResult<PageResponseDTO<MyPostRes>> readMyBoards(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        String email = SecurityUtil.getCurrentMemberEmail(); // 형님 프로젝트 방식대로
+        PageRequestDTO pageRequestDTO = PageRequestDTO.builder()
+                .page(page)
+                .size(size)
+                .build();
+
+        PageResponseDTO<MyPostRes> result = boardService.readMyBoards(email, pageRequestDTO);
+        return new ApiResult<>(result);
     }
 
 }

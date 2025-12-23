@@ -8,12 +8,14 @@ import com.t1membership.board.dto.createComment.CreateCommentReq;
 import com.t1membership.board.dto.createComment.CreateCommentRes;
 import com.t1membership.board.dto.deleteComment.DeleteCommentReq;
 import com.t1membership.board.dto.deleteComment.DeleteCommentRes;
+import com.t1membership.board.dto.my.MyCommentRes;
 import com.t1membership.board.dto.readComment.ReadCommentReq;
 import com.t1membership.board.dto.readComment.ReadCommentRes;
 import com.t1membership.board.dto.updateComment.UpdateCommentReq;
 import com.t1membership.board.dto.updateComment.UpdateCommentRes;
 import com.t1membership.board.repository.BoardRepository;
 import com.t1membership.board.repository.CommentRepository;
+import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.member.domain.MemberEntity;
 import com.t1membership.member.repository.MemberRepository;
@@ -337,4 +339,33 @@ public class CommentServiceImpl implements CommentService {
                 .mine(mine) // ✅ 여기
                 .build();
     }
+
+
+    public PageResponseDTO<MyCommentRes> readMyComments(String email, PageRequestDTO pageRequestDTO) {
+
+        int page = Math.max(pageRequestDTO.getPage() - 1, 0);  // ✅ 1-base면 -1
+        int size = pageRequestDTO.getSize();
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "commentNo"));
+
+        Page<CommentEntity> p = commentRepository.findByMember_MemberEmail(email, pageable);
+
+        var dtoList = p.getContent().stream()
+                .map(c -> {
+                    BoardEntity b = c.getBoard();
+                    return MyCommentRes.builder()
+                            .commentNo(c.getCommentNo())
+                            .boardNo(b != null ? b.getBoardNo() : null)
+                            .category(b != null ? b.getCategoryCode() : null)
+                            .boardTitle(b != null ? b.getBoardTitle() : null)
+                            .commentContent(c.getCommentContent())
+                            .createdAt(c.getCreateDate())
+                            .build();
+                })
+                .toList();
+
+        return new PageResponseDTO<>(pageRequestDTO, dtoList, (int) p.getTotalElements());
+    }
+
+
 }

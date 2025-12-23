@@ -12,4 +12,6 @@ public interface CommentRepository extends JpaRepository<CommentEntity, Long> {
     // 필요하면: 특정 게시글 + 댓글번호 함께 조회도 가능
     // Optional<CommentEntity> findByCommentNoAndBoard_BoardNo(Long commentNo, Long boardNo);
 
+    Page<CommentEntity> findByMember_MemberEmail(String memberEmail, Pageable pageable);
+
 }

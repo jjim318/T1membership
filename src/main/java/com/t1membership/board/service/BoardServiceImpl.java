@@ -8,6 +8,7 @@ import com.t1membership.board.dto.createBoard.CreateBoardReq;
 import com.t1membership.board.dto.createBoard.CreateBoardRes;
 import com.t1membership.board.dto.deleteBoard.DeleteBoardReq;
 import com.t1membership.board.dto.deleteBoard.DeleteBoardRes;
+import com.t1membership.board.dto.my.MyPostRes;
 import com.t1membership.board.dto.readAllBoard.ReadAllBoardReq;
 import com.t1membership.board.dto.readAllBoard.ReadAllBoardRes;
 import com.t1membership.board.dto.readOneBoard.ReadOneBoardReq;
@@ -40,6 +41,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -56,6 +58,7 @@ public class BoardServiceImpl implements BoardService {
     private final MemberRepository memberRepository;
     private final StoryLikeService storyLikeService;
     private final BoardLikeRepository boardLikeRepository;
+    private final RestClient.Builder builder;
 
     /* =======================
        공통 유틸
@@ -757,4 +760,27 @@ public class BoardServiceImpl implements BoardService {
         if (img == null) return null;
         return img.getUrl();
     }
+
+
+    public PageResponseDTO<MyPostRes> readMyBoards(String email, PageRequestDTO pageRequestDTO) {
+
+        int page = Math.max(pageRequestDTO.getPage() - 1, 0);  // ✅ 1-base면 -1
+        int size = pageRequestDTO.getSize();
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "boardNo"));
+
+        Page<BoardEntity> p = boardRepository.findByMember_MemberEmail(email, pageable);
+
+        var dtoList = p.getContent().stream()
+                .map(b -> MyPostRes.builder()
+                        .boardNo(b.getBoardNo())
+                        .category(b.getCategoryCode())     // 형님 실제 필드명 맞춰서
+                        .title(b.getBoardTitle())
+                        .createdAt(b.getCreateDate())     // BaseEntity 필드명 맞춰서
+                        .build())
+                .toList();
+
+        return new PageResponseDTO<>(pageRequestDTO, dtoList, (int) p.getTotalElements());
+    }
+
 }

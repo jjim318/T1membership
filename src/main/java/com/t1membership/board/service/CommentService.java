@@ -1,5 +1,7 @@
 package com.t1membership.board.service;
 
+import com.t1membership.board.dto.my.MyCommentRes;
+import com.t1membership.coreDto.PageRequestDTO;
 import com.t1membership.coreDto.PageResponseDTO;
 import com.t1membership.board.dto.createComment.CreateCommentReq;
 import com.t1membership.board.dto.createComment.CreateCommentRes;
@@ -19,4 +21,6 @@ public interface CommentService {
     DeleteCommentRes deleteComment(DeleteCommentReq req);
 
     PageResponseDTO<ReadCommentRes> readComments(ReadCommentReq req);
+
+    PageResponseDTO<MyCommentRes> readMyComments(String email, PageRequestDTO pageRequestDTO);
 }
