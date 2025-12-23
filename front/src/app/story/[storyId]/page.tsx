@@ -59,10 +59,17 @@ interface PageResponseDTO<T> {
     total: number;
 }
 
+// ✅ "특권" (잠금 해제 등 멤버십 대체 권한) - 선수 포함
 function isPrivilegedRole(role?: string | null) {
     if (!role) return false;
     if (role === "ADMIN" || role === "ADMIN_CONTENT" || role === "T1") return true;
     return role.startsWith("PLAYER_");
+}
+
+// ✅ "관리자만" (댓글 남의 것 수정/삭제 UI 노출용) - 선수 제외
+function isAdminOnlyRole(role?: string | null) {
+    if (!role) return false;
+    return role === "ADMIN" || role === "ADMIN_CONTENT" || role === "T1";
 }
 
 function cx(...arr: Array<string | false | null | undefined>) {
@@ -173,9 +180,16 @@ export default function StoryDetailPage() {
 
     const { loading: gateLoading, canViewProtected, me } = useAccessGate(token);
 
-    const isAdminLike = useMemo(() => {
+    // ✅ 선수 포함 "특권" (잠금 해제 등)
+    const isPrivileged = useMemo(() => {
         const role = (me?.memberRole ?? "").toString();
         return isPrivilegedRole(role);
+    }, [me?.memberRole]);
+
+    // ✅ 선수 제외 "관리자만" (댓글 남의 것 수정/삭제 UI 노출용)
+    const isAdminOnly = useMemo(() => {
+        const role = (me?.memberRole ?? "").toString();
+        return isAdminOnlyRole(role);
     }, [me?.memberRole]);
 
     const [data, setData] = useState<StoryDetailRes | null>(null);
@@ -228,9 +242,7 @@ export default function StoryDetailPage() {
             setErr(null);
 
             try {
-                const res = await apiClient.get<ApiResult<StoryDetailRes>>(
-                    `/boards/story/${storyId}`
-                );
+                const res = await apiClient.get<ApiResult<StoryDetailRes>>(`/boards/story/${storyId}`);
 
                 if (!alive) return;
 
@@ -280,9 +292,7 @@ export default function StoryDetailPage() {
             );
 
             if (res.data?.isSuccess && res.data.result) {
-                setComments(
-                    Array.isArray(res.data.result.dtoList) ? res.data.result.dtoList : []
-                );
+                setComments(Array.isArray(res.data.result.dtoList) ? res.data.result.dtoList : []);
             } else {
                 setComments([]);
                 setCommentErr(res.data?.resMessage ?? "댓글을 불러오지 못했습니다.");
@@ -375,7 +385,9 @@ export default function StoryDetailPage() {
         if (!data) return;
 
         const target = comments.find((x) => x.commentNo === commentNo);
-        const can = !!target && (target.isMine || isAdminLike);
+
+        // ✅ 권한 체크도 "관리자만"으로 변경 (선수는 남 댓글 삭제 불가)
+        const can = !!target && (target.isMine || isAdminOnly);
         if (!can) {
             alert("댓글 삭제 권한이 없습니다.");
             return;
@@ -391,10 +403,7 @@ export default function StoryDetailPage() {
                 alert(res.data?.resMessage ?? "댓글 삭제 실패");
             }
         } catch (e: any) {
-            const msg =
-                e?.response?.status === 403
-                    ? "댓글 삭제 권한이 없습니다."
-                    : "댓글 삭제 통신 오류";
+            const msg = e?.response?.status === 403 ? "댓글 삭제 권한이 없습니다." : "댓글 삭제 통신 오류";
             alert(msg);
         }
     };
@@ -404,7 +413,9 @@ export default function StoryDetailPage() {
         if (!data) return;
 
         const target = comments.find((x) => x.commentNo === commentNo);
-        const can = !!target && (target.isMine || isAdminLike);
+
+        // ✅ 권한 체크도 "관리자만"으로 변경
+        const can = !!target && (target.isMine || isAdminOnly);
         if (!can) {
             alert("댓글 수정 권한이 없습니다.");
             return;
@@ -427,10 +438,7 @@ export default function StoryDetailPage() {
                 alert(res.data?.resMessage ?? "댓글 수정 실패");
             }
         } catch (e: any) {
-            const msg =
-                e?.response?.status === 403
-                    ? "댓글 수정 권한이 없습니다."
-                    : "댓글 수정 통신 오류";
+            const msg = e?.response?.status === 403 ? "댓글 수정 권한이 없습니다." : "댓글 수정 통신 오류";
             alert(msg);
         }
     };
@@ -443,9 +451,7 @@ export default function StoryDetailPage() {
     if (!mounted) {
         return (
             <main className="min-h-screen bg-black text-white">
-                <div className="mx-auto max-w-3xl px-4 py-8 text-white/60 text-sm">
-                    불러오는 중…
-                </div>
+                <div className="mx-auto max-w-3xl px-4 py-8 text-white/60 text-sm">불러오는 중…</div>
             </main>
         );
     }
@@ -458,9 +464,7 @@ export default function StoryDetailPage() {
                     <div className="rounded-3xl bg-white/5 border border-white/10 p-8 text-center">
                         <div className="text-3xl">🔒</div>
                         <div className="mt-3 text-sm font-semibold">로그인이 필요합니다.</div>
-                        <div className="mt-2 text-xs text-white/60">
-                            스토리는 로그인 후 이용할 수 있어요.
-                        </div>
+                        <div className="mt-2 text-xs text-white/60">스토리는 로그인 후 이용할 수 있어요.</div>
 
                         <div className="mt-6 flex items-center justify-center gap-2">
                             <Link
@@ -492,9 +496,7 @@ export default function StoryDetailPage() {
     if (loading || gateLoading) {
         return (
             <main className="min-h-screen bg-black text-white">
-                <div className="mx-auto max-w-3xl px-4 py-8 text-white/60 text-sm">
-                    불러오는 중…
-                </div>
+                <div className="mx-auto max-w-3xl px-4 py-8 text-white/60 text-sm">불러오는 중…</div>
             </main>
         );
     }
@@ -555,9 +557,7 @@ export default function StoryDetailPage() {
                         {locked ? (
                             <div className="rounded-2xl bg-white/5 border border-white/10 p-10 text-center">
                                 <div className="text-3xl">🔒</div>
-                                <div className="mt-3 text-sm font-semibold">
-                                    멤버십 회원 전용 콘텐츠입니다.
-                                </div>
+                                <div className="mt-3 text-sm font-semibold">멤버십 회원 전용 콘텐츠입니다.</div>
                                 <div className="mt-2 text-xs text-white/60">
                                     좋아요는 가능하지만, 댓글/내용은 멤버십 전용입니다.
                                 </div>
@@ -641,46 +641,52 @@ export default function StoryDetailPage() {
                                             아직 댓글이 없습니다.
                                         </div>
                                     ) : (
-                                        comments.map((c) => (
-                                            <div
-                                                key={c.commentNo}
-                                                className="rounded-2xl bg-white/5 border border-white/10 p-4"
-                                            >
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <div className="text-xs text-white/70 font-semibold">
-                                                            {c.commentWriter}
-                                                        </div>
-                                                        <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
-                                                            {c.commentContent}
-                                                        </div>
-                                                        <div className="mt-2 text-[11px] text-white/40">
-                                                            {formatKoreanDateTime(c.createdAt)}
-                                                        </div>
-                                                    </div>
+                                        comments.map((c) => {
+                                            // ✅ 최종 UI 노출 조건:
+                                            // - 본인 댓글이면 무조건 노출
+                                            // - 남 댓글이면 관리자(ADMIN/ADMIN_CONTENT/T1)만 노출
+                                            const showActions = c.isMine || isAdminOnly;
 
-                                                    {/* ✅ 본인/관리자만 */}
-                                                    {c.isMine || isAdminLike ? (
-                                                        <div className="flex gap-2">
-                                                            <button
-                                                                type="button"
-                                                                className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
-                                                                onClick={() => onUpdateComment(c.commentNo, c.commentContent)}
-                                                            >
-                                                                수정
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
-                                                                onClick={() => onDeleteComment(c.commentNo)}
-                                                            >
-                                                                삭제
-                                                            </button>
+                                            return (
+                                                <div
+                                                    key={c.commentNo}
+                                                    className="rounded-2xl bg-white/5 border border-white/10 p-4"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="text-xs text-white/70 font-semibold">
+                                                                {c.commentWriter}
+                                                            </div>
+                                                            <div className="mt-2 whitespace-pre-wrap text-sm text-white/80">
+                                                                {c.commentContent}
+                                                            </div>
+                                                            <div className="mt-2 text-[11px] text-white/40">
+                                                                {formatKoreanDateTime(c.createdAt)}
+                                                            </div>
                                                         </div>
-                                                    ) : null}
+
+                                                        {showActions ? (
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
+                                                                    onClick={() => onUpdateComment(c.commentNo, c.commentContent)}
+                                                                >
+                                                                    수정
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-1 text-[11px]"
+                                                                    onClick={() => onDeleteComment(c.commentNo)}
+                                                                >
+                                                                    삭제
+                                                                </button>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </div>
                             </>

@@ -155,7 +155,7 @@ export default function MyPageHome() {
                 <section className="mt-8 bg-zinc-900 rounded-2xl p-2 text-sm">
                     {menuItem("멤버십 가입하기", go("/membership/all"))}
                     {menuItem("주문 내역", go("/mypage/orders"))}
-                    {menuItem("내가 쓴 글", go("/community/my-posts"))}
+                    {menuItem("내가 쓴 글", go("/community/my/post"))}
                     {menuItem("내 정보 관리", go("/mypage"))}
                     {menuItem("내 리워드")}
                     {menuItem("언어")}
