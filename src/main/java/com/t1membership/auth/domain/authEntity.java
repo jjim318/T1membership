@@ -9,8 +9,8 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "t1_auth" , uniqueConstraints = {
-@UniqueConstraint(name = "uk_token_member", columnNames = "member_email")
-        })//@UniqueConstraint("member_id")로 1:1 제약을 보장
+        @UniqueConstraint(name = "uk_token_member", columnNames = "member_email")
+})//@UniqueConstraint("member_id")로 1:1 제약을 보장
 @Getter
 @Setter
 @Builder

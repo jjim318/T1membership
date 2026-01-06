@@ -211,8 +211,7 @@ public class SecurityConfig {
 
         cfg.setAllowedOrigins(List.of(
                 "http://localhost:3000",
-                "http://localhost:3001",
-                "http://192.168.0.180:3000"
+                "http://192.168.219.185:3000"
         ));
         cfg.setAllowedMethods(List.of(
                 "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"
