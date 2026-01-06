@@ -7,7 +7,7 @@ import axios, {
 } from "axios";
 
 const BASE_URL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://192.168.0.180:8080"; // ✅ fallback도 서버로
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://192.168.219.185:8080"; // ✅ fallback도 서버로
 
 interface TokenPayload {
     accessToken: string;
