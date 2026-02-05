@@ -1,22 +1,19 @@
+// src/app/community/[category]/write/page.tsx
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useMemo, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 
 type RouteCategory = "about" | "lounge" | "to-t1";
-
-// ✅ 백엔드 enum과 100% 일치
 type BoardType = "COMMUNITY";
-
-// ✅ categoryCode 컬럼 재사용 (COMMUNITY일 때만 의미가 이거)
 type CommunityCategoryCode = "ABOUT" | "LOUNGE" | "TO_T1";
 
 interface MemberReadOneRes {
     memberEmail: string;
-    memberRole: string; // "USER" | "ADMIN" | "PLAYER_..." ...
-    membershipPayType?: string; // "NO_MEMBERSHIP" | "ONE_TIME" | "YEARLY" | "RECURRING"
+    memberRole: string;
+    membershipPayType?: string;
 }
 
 interface ApiResult<T> {
@@ -25,23 +22,10 @@ interface ApiResult<T> {
     resMessage: string | null;
     result: T;
     message?: string;
-    path?: string;
-    timestamp?: string;
 }
 
-// ✅ 목록 응답(백엔드 ReadAllBoardRes 기준)
-interface BoardSummary {
+interface CreateBoardRes {
     boardNo: number;
-    boardTitle: string;
-    boardWriter: string;
-
-    // 목록에서 작성자 판별하려면 이메일이 필요합니다.
-    // ✅ 백엔드에 있으면 내려오게 하는 게 베스트인데,
-    // 형님이 이미 상세에서는 boardWriterEmail을 쓰고 있으니 목록도 가능하면 추가 추천.
-    boardWriterEmail?: string | null;
-
-    createDate?: string;
-    latestDate?: string;
 }
 
 function isPlayerRole(role?: string) {
@@ -51,8 +35,7 @@ function isAdminRole(role?: string) {
     return role === "ADMIN" || role === "MANAGER";
 }
 function isMembershipActive(m: MemberReadOneRes | null) {
-    if (!m) return false;
-    return (m.membershipPayType ?? "NO_MEMBERSHIP") !== "NO_MEMBERSHIP";
+    return !!m && (m.membershipPayType ?? "NO_MEMBERSHIP") !== "NO_MEMBERSHIP";
 }
 
 // ✅ 핵심: 멤버십 권한(멤버십 OR 선수 OR 관리자)
@@ -63,151 +46,98 @@ function hasMembershipPrivilege(m: MemberReadOneRes | null) {
     return isMembershipActive(m);
 }
 
-function categoryMeta(route: RouteCategory) {
+function meta(route: RouteCategory) {
     const map: Record<
         RouteCategory,
         {
             title: string;
+            badgeLabel: string;
+            badgeTone: "blue" | "purple" | "orange";
             boardType: BoardType;
             categoryCode: CommunityCategoryCode;
-            hint: string;
-            privateNotice?: string;
         }
     > = {
         about: {
             title: "About T1",
+            badgeLabel: "About T1",
+            badgeTone: "blue",
             boardType: "COMMUNITY",
             categoryCode: "ABOUT",
-            hint: "멤버십 회원들끼리 이야기하는 커뮤니티에요.",
         },
         lounge: {
             title: "T1 Lounge",
+            badgeLabel: "T1 Lounge",
+            badgeTone: "purple",
             boardType: "COMMUNITY",
             categoryCode: "LOUNGE",
-            hint: "멤버십 회원들만 이용 가능한 공간이에요.",
-            privateNotice: "스타에게 노출되지 않는 비공개 보드에요.",
         },
         "to-t1": {
             title: "To. T1",
+            badgeLabel: "To. T1",
+            badgeTone: "orange",
             boardType: "COMMUNITY",
             categoryCode: "TO_T1",
-            hint: "멤버십 회원이 작성하고, 매니저(관리자) / 본인만 열람하는 공간이에요.",
-            privateNotice: "매니저만 열람할 수 있는 비공개 보드에요.",
         },
     };
     return map[route];
 }
 
-/**
- * ✅ 변경된 TO_T1 정책(형님 요구사항)
- * - 목록은 "전체 글"을 다 띄운다 (관리자/유저/선수 모두)
- * - 하지만 "관리자"가 아니고 "내 글"도 아니면:
- *    - 제목/작성자/날짜 대신 "비밀글입니다."만 보여준다
- *    - 클릭도 안되게 막는다
- *
- * 즉, TO_T1에서 mineOnly는 더 이상 쓰지 않는다.
- */
-function getAccess(route: RouteCategory, me: MemberReadOneRes | null) {
-    const role = me?.memberRole;
-    const admin = isAdminRole(role);
-    const player = isPlayerRole(role);
+function canWrite(route: RouteCategory, me: MemberReadOneRes | null) {
+    const admin = isAdminRole(me?.memberRole);
+    if (admin) return { ok: true, reason: "" };
 
-    // 관리자: 다 가능
-    if (admin) {
-        return { canReadList: true, canWrite: true, reason: "" };
-    }
-
-    // ✅ 멤버십 권한(멤버십 OR 선수)
+    // ✅ 선수도 멤버십 권한 처리
     const privileged = hasMembershipPrivilege(me);
+    if (!privileged) return { ok: false, reason: "멤버십 회원에게 공개된 페이지예요." };
 
-    // 권한 없으면 차단
-    if (!privileged) {
-        return {
-            canReadList: false,
-            canWrite: false,
-            reason: "멤버십 회원에게 공개된 페이지예요.",
-        };
+    // ✅ Lounge는 선수 차단 유지(형님 기존 정책)
+    if (route === "lounge" && isPlayerRole(me?.memberRole)) {
+        return { ok: false, reason: "스타에게 노출되지 않는 비공개 보드에요." };
     }
 
-    // Lounge는 선수 차단 유지
-    if (route === "lounge") {
-        if (player) {
-            return {
-                canReadList: false,
-                canWrite: false,
-                reason: "스타에게 노출되지 않는 비공개 보드에요.",
-            };
-        }
-        return { canReadList: true, canWrite: true, reason: "" };
+    return { ok: true, reason: "" };
+}
+
+function badgeClass(tone: "blue" | "purple" | "orange") {
+    switch (tone) {
+        case "blue":
+            return "bg-sky-500/15 text-sky-200 ring-sky-400/30";
+        case "purple":
+            return "bg-fuchsia-500/15 text-fuchsia-200 ring-fuchsia-400/30";
+        case "orange":
+            return "bg-orange-500/15 text-orange-200 ring-orange-400/30";
+        default:
+            return "bg-white/10 text-white/80 ring-white/10";
     }
-
-    // to-t1: 목록은 전체 허용(단, 마스킹은 렌더링에서 처리)
-    if (route === "to-t1") {
-        return { canReadList: true, canWrite: true, reason: "" };
-    }
-
-    // about
-    return { canReadList: true, canWrite: true, reason: "" };
 }
 
-function TopPrivateNoticeBar({ text }: { text: string }) {
-    return (
-        <div className="mb-4 rounded-xl bg-black/30 ring-1 ring-white/10 px-4 py-3">
-            <div className="flex items-center justify-center gap-2 text-sm text-white/70">
-                <span className="text-base">🔒</span>
-                <span>{text}</span>
-            </div>
-        </div>
-    );
-}
+type PreviewItem = {
+    file: File;
+    url: string;
+};
 
-// ✅ 서버 LocalDateTime → JS Date 안전 변환
-function parseServerDate(raw?: string | null): Date | null {
-    if (!raw) return null;
-
-    let s = raw.trim();
-    if (!s) return null;
-
-    // 마이크로초(6자리) → 밀리초(3자리)
-    s = s.replace(/(\.\d{3})\d+/, "$1");
-
-    // 타임존 없으면 KST 보정
-    if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(s)) {
-        s += "+09:00";
-    }
-
-    const d = new Date(s);
-    return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function formatDateTime(raw?: string | null): string {
-    const d = parseServerDate(raw);
-    if (!d) return "";
-    return d.toLocaleString("ko-KR", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-    });
-}
-
-export default function CommunityCategoryPage() {
+export default function CommunityWritePage() {
+    const router = useRouter();
     const params = useParams();
     const raw = (params?.category as string | undefined) ?? "about";
 
     const route: RouteCategory =
         raw === "about" || raw === "lounge" || raw === "to-t1" ? raw : "about";
 
-    const meta = useMemo(() => categoryMeta(route), [route]);
+    const m = useMemo(() => meta(route), [route]);
 
     const [me, setMe] = useState<MemberReadOneRes | null>(null);
     const [loadingMe, setLoadingMe] = useState(true);
 
-    const [posts, setPosts] = useState<BoardSummary[]>([]);
-    const [loadingPosts, setLoadingPosts] = useState(true);
+    const [title, setTitle] = useState("");
+    const [content, setContent] = useState("");
 
-    const access = useMemo(() => getAccess(route, me), [route, me]);
+    const [files, setFiles] = useState<File[]>([]);
+    const [previews, setPreviews] = useState<PreviewItem[]>([]);
+
+    const [submitting, setSubmitting] = useState(false);
+
+    const access = useMemo(() => canWrite(route, me), [route, me]);
 
     useEffect(() => {
         const run = async () => {
@@ -224,145 +154,244 @@ export default function CommunityCategoryPage() {
     }, []);
 
     useEffect(() => {
-        if (loadingMe) return;
+        for (const p of previews) {
+            try {
+                URL.revokeObjectURL(p.url);
+            } catch {}
+        }
 
-        if (!access.canReadList) {
-            setPosts([]);
-            setLoadingPosts(false);
+        const next = files
+            .filter((f) => f.type?.startsWith("image/"))
+            .map((f) => ({
+                file: f,
+                url: URL.createObjectURL(f),
+            }));
+
+        setPreviews(next);
+
+        return () => {
+            for (const p of next) {
+                try {
+                    URL.revokeObjectURL(p.url);
+                } catch {}
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [files]);
+
+    const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const list = e.target.files;
+        if (!list) return;
+
+        const arr = Array.from(list);
+        setFiles(arr);
+        e.target.value = "";
+    };
+
+    const removeFileAt = (idx: number) => {
+        setFiles((prev) => prev.filter((_, i) => i !== idx));
+    };
+
+    const clearFiles = () => {
+        setFiles([]);
+    };
+
+    const onSubmit = async () => {
+        if (submitting) return;
+
+        if (!access.ok) {
+            alert(access.reason || "권한이 없습니다.");
+            return;
+        }
+        if (!title.trim()) {
+            alert("제목은 필수입니다.");
             return;
         }
 
-        const run = async () => {
-            setLoadingPosts(true);
-            try {
-                // ✅ TO_T1도 이제 mineOnly로 자르지 않고 전체 목록 요청
-                const qs = new URLSearchParams({
-                    boardType: meta.boardType,
-                    categoryCode: meta.categoryCode,
-                    mineOnly: "false",
-                });
+        setSubmitting(true);
+        try {
+            const fd = new FormData();
 
-                const res = await apiClient.get<ApiResult<any>>(`/board?${qs.toString()}`);
-                const r = res.data.result as any;
+            fd.append("boardTitle", title.trim());
+            fd.append("boardContent", content ?? "");
+            fd.append("boardType", m.boardType);
+            fd.append("categoryCode", m.categoryCode);
 
-                const list: BoardSummary[] =
-                    Array.isArray(r) ? r
-                        : Array.isArray(r?.dtoList) ? r.dtoList
-                            : Array.isArray(r?.content) ? r.content
-                                : [];
+            fd.append("notice", "false");
+            fd.append("isSecret", "false");
 
-                setPosts(list);
-            } catch (e) {
-                console.error("LIST ERROR", e);
-                setPosts([]);
-            } finally {
-                setLoadingPosts(false);
+            for (const f of files) fd.append("images", f);
+
+            const res = await apiClient.post<ApiResult<CreateBoardRes>>("/board", fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+
+            const boardNo = res.data?.result?.boardNo;
+            if (!boardNo) {
+                alert("등록은 완료되었으나 게시글 번호를 확인할 수 없습니다.");
+                router.replace(`/community/${route}`);
+                return;
             }
-        };
 
-        run();
-    }, [loadingMe, meta.boardType, meta.categoryCode, access.canReadList]);
+            router.replace(`/community/${route}/${boardNo}`);
+        } catch (err: any) {
+            const msg =
+                err?.response?.data?.resMessage ||
+                err?.response?.data?.message ||
+                err?.message ||
+                "서버 오류가 발생했습니다.";
+            console.error("CREATE ERROR", err?.response?.data || err);
+            alert(msg);
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
     if (loadingMe) return <div className="text-white/70">불러오는 중...</div>;
 
-    const shouldShowTopNotice = !!meta.privateNotice;
-
-    if (!access.canReadList) {
+    if (!access.ok) {
         return (
-            <div className="flex flex-col">
-                {shouldShowTopNotice && meta.privateNotice && (
-                    <TopPrivateNoticeBar text={meta.privateNotice} />
-                )}
+            <div className="flex min-h-[520px] flex-col items-center justify-center gap-4">
+                <div className="text-4xl">🔒</div>
+                <div className="text-white/80">{access.reason}</div>
 
-                <div className="flex min-h-[520px] flex-col items-center justify-center gap-4">
-                    <div className="text-4xl">🔒</div>
-                    <div className="text-white/80">{access.reason}</div>
+                <Link
+                    href="/membership/all"
+                    className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white hover:bg-orange-500"
+                >
+                    멤버십 가입하기
+                </Link>
 
-                    <Link
-                        href="/membership/all"
-                        className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white hover:bg-orange-500"
-                    >
-                        멤버십 가입하기
-                    </Link>
-                </div>
+                <Link
+                    href={`/community/${route}`}
+                    className="rounded-xl bg-white/10 px-6 py-3 text-sm font-semibold text-white hover:bg-white/15"
+                >
+                    목록으로
+                </Link>
             </div>
         );
     }
 
-    const myEmailLower = (me?.memberEmail ?? "").toLowerCase();
-    const isAdmin = isAdminRole(me?.memberRole);
-
     return (
-        <div className="flex flex-col gap-4">
-            {/* 헤더 */}
-            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
-                <div>
-                    <div className="text-lg font-bold text-white">{meta.title}</div>
-                    <div className="mt-1 text-sm text-white/50">{meta.hint}</div>
-                </div>
+        <div className="flex flex-col gap-6">
+            <div className="border-b border-white/10 pb-4">
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="text-lg font-bold text-white">글 작성하기</div>
+                        <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ring-1 ${badgeClass(
+                                m.badgeTone
+                            )}`}
+                            title={m.title}
+                        >
+                            {m.badgeLabel}
+                        </span>
+                    </div>
 
-                {access.canWrite && (
                     <Link
-                        href={`/community/${route}/write`}
+                        href={`/community/${route}`}
                         className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
                     >
-                        글쓰기
+                        목록
                     </Link>
-                )}
+                </div>
             </div>
 
-            {shouldShowTopNotice && meta.privateNotice && (
-                <TopPrivateNoticeBar text={meta.privateNotice} />
-            )}
+            <div className="flex flex-col gap-4">
+                <label className="flex flex-col gap-2">
+                    <span className="text-sm font-semibold text-white/80">제목</span>
+                    <input
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        className="rounded-2xl bg-black/25 px-4 py-3 text-white outline-none ring-1 ring-white/10 focus:ring-white/20"
+                        placeholder="제목을 입력해주세요."
+                    />
+                </label>
 
-            {/* 목록 */}
-            {loadingPosts ? (
-                <div className="text-white/60">게시글 불러오는 중...</div>
-            ) : posts.length === 0 ? (
-                <div className="rounded-2xl bg-black/20 p-6 text-white/60">아직 글이 없습니다.</div>
-            ) : (
-                <ul className="flex flex-col gap-2">
-                    {posts.map((p) => {
-                        // ✅ TO_T1에서만: 내 글/관리자만 정상 노출, 그 외는 마스킹 + 클릭 금지
-                        const writerEmailLower = (p.boardWriterEmail ?? "").toLowerCase();
-                        const isOwner =
-                            !!myEmailLower &&
-                            !!writerEmailLower &&
-                            myEmailLower === writerEmailLower;
+                <label className="flex flex-col gap-2">
+                    <span className="text-sm font-semibold text-white/80">내용</span>
+                    <textarea
+                        value={content}
+                        onChange={(e) => setContent(e.target.value)}
+                        rows={10}
+                        className="rounded-2xl bg-black/25 px-4 py-3 text-white outline-none ring-1 ring-white/10 focus:ring-white/20"
+                        placeholder="내용을 입력해주세요."
+                    />
+                </label>
 
-                        const shouldMask = route === "to-t1" && !isAdmin && !isOwner;
+                <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-white/80">이미지 (선택)</span>
 
-                        if (shouldMask) {
-                            // 🔥 클릭 불가 + "비밀글입니다."
-                            return (
-                                <li key={p.boardNo}>
-                                    <div
-                                        className="block cursor-not-allowed rounded-2xl bg-black/20 p-4 opacity-80"
-                                        title="비밀글은 열람할 수 없습니다."
-                                    >
-                                        <div className="text-white/70 font-semibold">비밀글입니다.</div>
-                                    </div>
-                                </li>
-                            );
-                        }
+                        {files.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={clearFiles}
+                                className="text-xs font-semibold text-white/50 hover:text-white/70"
+                            >
+                                전체 제거
+                            </button>
+                        )}
+                    </div>
 
-                        // ✅ 정상 노출(관리자 or 내 글 or TO_T1 아닌 경우)
-                        return (
-                            <li key={p.boardNo}>
-                                <Link
-                                    href={`/community/${route}/${p.boardNo}`}
-                                    className="block rounded-2xl bg-black/20 p-4 hover:bg-black/30"
+                    <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={onPickFiles}
+                        className="text-white/70"
+                    />
+
+                    {files.length > 0 && (
+                        <div className="text-xs text-white/50">선택됨: {files.length}개</div>
+                    )}
+
+                    {previews.length > 0 && (
+                        <div className="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">
+                            {previews.map((p, idx) => (
+                                <div
+                                    key={`${p.file.name}-${p.file.size}-${idx}`}
+                                    className="group relative overflow-hidden rounded-2xl bg-black/25 ring-1 ring-white/10"
                                 >
-                                    <div className="text-white font-semibold">{p.boardTitle}</div>
-                                    <div className="mt-1 text-xs text-white/50">
-                                        {p.boardWriter} · {formatDateTime(p.createDate ?? p.latestDate)}
+                                    <img src={p.url} alt={p.file.name} className="h-32 w-full object-cover" />
+
+                                    <div className="absolute bottom-0 left-0 right-0 bg-black/55 px-2 py-1">
+                                        <div className="truncate text-[11px] text-white/80">
+                                            {p.file.name}
+                                        </div>
                                     </div>
-                                </Link>
-                            </li>
-                        );
-                    })}
-                </ul>
-            )}
+
+                                    <button
+                                        type="button"
+                                        onClick={() => removeFileAt(idx)}
+                                        className="absolute right-2 top-2 rounded-lg bg-black/60 px-2 py-1 text-xs font-bold text-white/80 ring-1 ring-white/10 opacity-0 transition group-hover:opacity-100 hover:bg-black/75"
+                                        title="이 이미지 제거"
+                                    >
+                                        삭제
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="flex gap-2">
+                <button
+                    onClick={onSubmit}
+                    disabled={submitting}
+                    className="rounded-xl bg-white/10 px-6 py-3 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-50"
+                >
+                    {submitting ? "등록 중..." : "등록"}
+                </button>
+
+                <Link
+                    href={`/community/${route}`}
+                    className="rounded-xl bg-black/25 px-6 py-3 text-sm font-semibold text-white hover:bg-black/35"
+                >
+                    취소
+                </Link>
+            </div>
         </div>
     );
 }

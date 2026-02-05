@@ -8,6 +8,52 @@ import { apiClient } from "@/lib/apiClient";
 
 type OrderStatus = string;
 
+// =========================
+// 🔥 백엔드 API BASE
+// =========================
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+
+/**
+ * =========================
+ * 🔥 주문/스냅샷 이미지 URL 정규화
+ * =========================
+ */
+function toImageSrc(raw?: string | null): string {
+    if (!raw) return "";
+
+    const url = raw.trim();
+    if (!url) return "";
+
+    // 1️⃣ 절대 URL
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+        return url;
+    }
+
+    // 2️⃣ /files/xxx
+    if (url.startsWith("/files/")) {
+        const fileName = url.replace("/files/", "");
+        return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
+    }
+
+    // 3️⃣ files/xxx
+    if (url.startsWith("files/")) {
+        const fileName = url.replace("files/", "");
+        return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
+    }
+
+    // 4️⃣ 파일명만 오는 경우
+    if (!url.includes("/")) {
+        return `${API_BASE}/files/${encodeURIComponent(url)}`;
+    }
+
+    // 5️⃣ 그 외 이상한 경로 → 파일명만 추출해서 /files로 보정
+    console.warn("[OrderDetail] 예상치 못한 이미지 경로 → 보정 처리:", url);
+    const fileName = url.split("/").pop();
+    if (!fileName) return "";
+
+    return `${API_BASE}/files/${encodeURIComponent(fileName)}`;
+}
+
 // 🔥 라인 정보 (백엔드 UserDetailOrderRes에 맞춰야 함)
 interface OrderItemRes {
     orderItemNo: number; // 부분 취소용 PK
@@ -64,11 +110,20 @@ interface CancelOrderRes {
 
 // ✅ (권장) orderNo로 결제 재시도 prepare 응답(백엔드가 만들어줘야 함)
 interface PrepareByOrderRes {
-    // ApiResult 래핑이든 그냥 data든, 아래 2가지 케이스 모두 처리하도록 코드에 방어 넣음
     orderNo?: number;
     orderId: string;
     amount: number;
     orderName: string;
+}
+
+// ✅ 상품 상세 응답에서 우리가 필요한 최소 타입
+// (샵 상세 페이지에서 data.images[0].fileName을 쓰고 있으므로 동일하게 가져옴)
+interface ItemReadOneRes {
+    images?: Array<{
+        fileName?: string | null;
+        sortOrder?: number | null;
+        url?: string | null;
+    }>;
 }
 
 // ========= 헬퍼 =========
@@ -99,11 +154,10 @@ function formatMoney(value: number): string {
     return value.toLocaleString("ko-KR");
 }
 
-// 🔥 상태 한글 라벨 (백엔드 enum 이름에 맞춰 사용)
+// 🔥 상태 한글 라벨
 function getStatusLabel(status: OrderStatus): string {
     const upper = (status ?? "").toUpperCase();
 
-    // 🔥 부분 취소 우선 처리
     if (
         upper === "PARTIALLY_CANCELED" ||
         upper === "PARTIAL_CANCEL" ||
@@ -112,11 +166,9 @@ function getStatusLabel(status: OrderStatus): string {
         return "부분 취소";
     }
 
-    // 정확 매칭 우선
     if (upper === "ORDERED") return "결제 대기";
     if (upper === "PAID") return "결제 완료";
 
-    // 그 외 보조 매칭
     if (upper.includes("PENDING") || upper.includes("WAIT")) return "결제 대기";
     if (upper.includes("PREPARE")) return "상품 준비중";
     if (upper.includes("CONFIRM") || upper.includes("COMPLETE")) return "구매확정";
@@ -128,7 +180,6 @@ function getStatusLabel(status: OrderStatus): string {
     return status;
 }
 
-// 🔥 부분 취소 상태인지 체크 (UI 용)
 function isPartiallyCanceled(status: OrderStatus): boolean {
     const upper = (status ?? "").toUpperCase();
     return (
@@ -138,25 +189,20 @@ function isPartiallyCanceled(status: OrderStatus): boolean {
     );
 }
 
-// 🔥 백엔드 OrderStatus.isCancelableByUser()와 맞추기
-//  - enum: ORDERED / PAID 에서만 true
 function isUserCancelableStatus(status: OrderStatus): boolean {
     const upper = (status ?? "").toUpperCase();
     return upper === "ORDERED" || upper === "PAID";
 }
 
-// 🔥 MD 라인인지 체크
 function isMdItem(item: OrderItemRes): boolean {
     const cat = (item.itemCategorySnapshot ?? "").toUpperCase();
     return cat === "MD";
 }
 
-// ✅ 결제 대기(ORDERED)인지
 function isOrdered(status: OrderStatus): boolean {
     return (status ?? "").toUpperCase() === "ORDERED";
 }
 
-// 멤버십 planCode → 화면용 이름
 function getMembershipDisplayName(planCode?: string | null): string {
     if (!planCode) return "멤버십 상품";
 
@@ -185,7 +231,10 @@ export default function OrderDetailPage() {
     // ✅ 결제 진행(재시도) 로딩
     const [payNowLoading, setPayNowLoading] = useState(false);
 
-    // ✅ 상세 재로딩 함수 (취소 후/결제 후 새로고침용)
+    // ✅✅✅ 우회용: itemNo -> 썸네일 URL 맵
+    const [thumbMap, setThumbMap] = useState<Record<number, string>>({});
+    const [thumbLoadingSet, setThumbLoadingSet] = useState<Set<number>>(new Set());
+
     const reloadDetail = async (orderNo: string | string[]) => {
         const res = await apiClient.get<UserDetailOrderRes>(`/order/${orderNo}`);
         setData(res.data);
@@ -227,6 +276,74 @@ export default function OrderDetailPage() {
 
     const items = data?.items ?? [];
 
+    // ✅✅✅ 주문 상세가 뜬 뒤, itemNo로 상품 상세를 불러와 썸네일을 맵에 채움
+    useEffect(() => {
+        const loadThumbs = async () => {
+            if (!data) return;
+            if (!data.items || data.items.length === 0) return;
+
+            // itemNo 있는 것만
+            const itemNos = data.items
+                .map((it) => it.itemNo)
+                .filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+
+            // 중복 제거
+            const unique = Array.from(new Set(itemNos));
+
+            // 이미 thumbMap에 있거나, 이미 로딩 시도 중인 것은 제외
+            const need = unique.filter((no) => !thumbMap[no] && !thumbLoadingSet.has(no));
+            if (need.length === 0) return;
+
+            // 로딩 중 표시
+            setThumbLoadingSet((prev) => {
+                const next = new Set(prev);
+                need.forEach((n) => next.add(n));
+                return next;
+            });
+
+            try {
+                const entries = await Promise.all(
+                    need.map(async (no) => {
+                        // ✅ 형님 프로젝트에서 상품 상세는 이미 여기로 쓰고 있음
+                        const res = await apiClient.get<any>(`/item/${no}`);
+
+                        // ApiResult 래핑/비래핑 모두 커버 (샵 페이지는 ApiResult로 받음)
+                        const payload: ItemReadOneRes = res.data?.result ?? res.data;
+
+                        const imgs = payload.images ?? [];
+                        const sorted = [...imgs].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
+                        const rawThumb = sorted[0]?.fileName ?? sorted[0]?.url ?? null;
+                        const fixed = toImageSrc(rawThumb);
+
+                        return [no, fixed] as const;
+                    }),
+                );
+
+                setThumbMap((prev) => {
+                    const next = { ...prev };
+                    for (const [no, url] of entries) {
+                        if (url) next[no] = url;
+                    }
+                    return next;
+                });
+            } catch (e) {
+                console.error("[OrderDetail] thumb load error", e);
+            } finally {
+                // 로딩 중 해제
+                setThumbLoadingSet((prev) => {
+                    const next = new Set(prev);
+                    need.forEach((n) => next.delete(n));
+                    return next;
+                });
+            }
+        };
+
+        void loadThumbs();
+        // data가 바뀌면 다시 시도(취소 후 reloadDetail 등)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data]);
+
     const isMembershipOrder = useMemo(() => {
         if (!data) return false;
         return !!data.membershipPlanCode && items.length === 0;
@@ -237,7 +354,6 @@ export default function OrderDetailPage() {
         return isPartiallyCanceled(data.orderStatus);
     }, [data]);
 
-    // 🔥 전체 취소 가능 여부 (ORDERED/PAID + 전부 MD + 부분취소 상태 아님)
     const canCancelAll = useMemo(() => {
         if (!data) return false;
         return (
@@ -249,7 +365,6 @@ export default function OrderDetailPage() {
         );
     }, [data, isMembershipOrder, partiallyCanceled, items]);
 
-    // 🔥 개별 라인 취소 가능 여부
     const canCancelItem = (item: OrderItemRes): boolean => {
         if (!data) return false;
         if (isMembershipOrder) return false;
@@ -257,12 +372,6 @@ export default function OrderDetailPage() {
         return isMdItem(item);
     };
 
-    // ✅ 결제 재시도 버튼 노출 조건
-    // - 결제대기(ORDERED)
-    // - 멤버십 주문 아니고
-    // - 라인이 있고
-    // - 전부 MD
-    // - 부분취소 상태면 결제 재시도 막는 게 안전(정책상)
     const canPayNow = useMemo(() => {
         if (!data) return false;
         return (
@@ -274,7 +383,6 @@ export default function OrderDetailPage() {
         );
     }, [data, isMembershipOrder, partiallyCanceled, items]);
 
-    // ✅ 결제 재시도 (ORDERED + MD only)
     const handlePayNow = async () => {
         if (!data) return;
         if (!canPayNow) {
@@ -282,42 +390,26 @@ export default function OrderDetailPage() {
             return;
         }
 
-        const ok = window.confirm(
-            "결제 대기 중인 주문입니다.\n지금 결제를 진행하시겠습니까?",
-        );
+        const ok = window.confirm("결제 대기 중인 주문입니다.\n지금 결제를 진행하시겠습니까?");
         if (!ok) return;
 
         setPayNowLoading(true);
         try {
-            // =========================
-            // A모드(권장): 서버가 orderNo로 다시 prepare 만들어주는 API
-            // =========================
-            // 🔥 형님 서버 실제 엔드포인트명으로 여기만 바꾸면 됩니다.
             const prepareRes = await apiClient.post<any>("/pay/toss/prepare-by-order", {
                 orderNo: data.orderNo,
             });
 
-            // ApiResult 래핑/비래핑 모두 커버
-            const payload: PrepareByOrderRes =
-                prepareRes.data?.result ??
-                prepareRes.data?.data ??
-                prepareRes.data;
+            const payload: PrepareByOrderRes = prepareRes.data?.result ?? prepareRes.data?.data ?? prepareRes.data;
 
             const orderId = payload?.orderId;
             const amount = payload?.amount;
             const orderName = payload?.orderName;
 
             if (!orderId || !amount || !orderName) {
-                // =========================
-                // B모드(우회): prepare-by-order가 없거나 형식이 다르면
-                // checkout에서 orderNo로 다시 prepare 하게 넘김
-                // (checkout 페이지가 orderNo 처리 가능해야 함)
-                // =========================
                 router.push(`/order/goods/checkout?orderNo=${data.orderNo}`);
                 return;
             }
 
-            // ✅ 결제 페이지로 이동 (형님 결제 플로우 라우트에 맞게)
             router.push(
                 `/order/goods/checkout?orderNo=${data.orderNo}&orderId=${encodeURIComponent(
                     orderId,
@@ -326,10 +418,7 @@ export default function OrderDetailPage() {
         } catch (e) {
             console.error("[OrderDetail] pay now error", e);
             if (axios.isAxiosError(e)) {
-                const msg =
-                    (e.response?.data as any)?.resMessage ||
-                    (e.response?.data as any)?.message ||
-                    "결제 진행에 실패했습니다.";
+                const msg = (e.response?.data as any)?.resMessage || (e.response?.data as any)?.message || "결제 진행에 실패했습니다.";
                 alert(msg);
             } else {
                 alert("결제 진행에 실패했습니다.");
@@ -339,7 +428,6 @@ export default function OrderDetailPage() {
         }
     };
 
-    // 🔥 주문 전체 취소
     const handleCancelAll = async () => {
         if (!data) return;
         if (!canCancelAll) {
@@ -347,9 +435,7 @@ export default function OrderDetailPage() {
             return;
         }
 
-        const ok = window.confirm(
-            "주문을 전체 취소하시겠습니까?\n(멤버십/POP 주문은 여기서 취소되지 않습니다.)",
-        );
+        const ok = window.confirm("주문을 전체 취소하시겠습니까?\n(멤버십/POP 주문은 여기서 취소되지 않습니다.)");
         if (!ok) return;
 
         const reason = window.prompt("취소 사유를 입력해 주세요.");
@@ -373,10 +459,7 @@ export default function OrderDetailPage() {
         } catch (e) {
             console.error("[OrderDetail] cancel all error", e);
             if (axios.isAxiosError(e)) {
-                const msg =
-                    (e.response?.data as any)?.resMessage ||
-                    (e.response?.data as any)?.message ||
-                    "주문 전체 취소에 실패했습니다.";
+                const msg = (e.response?.data as any)?.resMessage || (e.response?.data as any)?.message || "주문 전체 취소에 실패했습니다.";
                 alert(msg);
             } else {
                 alert("주문 전체 취소에 실패했습니다.");
@@ -386,7 +469,6 @@ export default function OrderDetailPage() {
         }
     };
 
-    // 🔥 개별 라인 취소
     const handleCancelItem = async (item: OrderItemRes) => {
         if (!data) return;
         if (!canCancelItem(item)) {
@@ -421,10 +503,7 @@ export default function OrderDetailPage() {
         } catch (e) {
             console.error("[OrderDetail] cancel item error", e);
             if (axios.isAxiosError(e)) {
-                const msg =
-                    (e.response?.data as any)?.resMessage ||
-                    (e.response?.data as any)?.message ||
-                    "상품 취소에 실패했습니다.";
+                const msg = (e.response?.data as any)?.resMessage || (e.response?.data as any)?.message || "상품 취소에 실패했습니다.";
                 alert(msg);
             } else {
                 alert("상품 취소에 실패했습니다.");
@@ -433,10 +512,6 @@ export default function OrderDetailPage() {
             setCancelItemLoading(null);
         }
     };
-
-    // =====================
-    //   렌더링
-    // =====================
 
     if (loading) {
         return (
@@ -461,22 +536,16 @@ export default function OrderDetailPage() {
                 <section className="mb-4">
                     <h1 className="text-xl md:text-2xl font-bold">{formatDate(data.createdAt)} 주문</h1>
                     <p className="mt-1 text-xs md:text-sm text-zinc-400">주문 번호 {data.orderNo}</p>
-                    <p className="mt-1 text-xs md:text-sm text-zinc-300">
-                        현재 상태: {getStatusLabel(data.orderStatus)}
-                    </p>
+                    <p className="mt-1 text-xs md:text-sm text-zinc-300">현재 상태: {getStatusLabel(data.orderStatus)}</p>
                 </section>
 
                 {/* 안내 바 */}
                 <section className="space-y-2 mb-4 text-[11px] md:text-xs text-zinc-300">
-                    {partiallyCanceled && (
-                        <div className="rounded-md bg-zinc-800 px-3 py-2">일부 상품이 취소된 주문입니다.</div>
-                    )}
+                    {partiallyCanceled && <div className="rounded-md bg-zinc-800 px-3 py-2">일부 상품이 취소된 주문입니다.</div>}
 
-                    {/* ✅ 결제 대기 + MD only면 결제 안내를 추가 */}
                     {canPayNow && (
                         <div className="rounded-md bg-zinc-800 px-3 py-2">
-                            결제 대기 중인 MD 주문입니다. 아래 <b className="text-white">결제하기</b> 버튼으로 결제를
-                            완료할 수 있습니다.
+                            결제 대기 중인 MD 주문입니다. 아래 <b className="text-white">결제하기</b> 버튼으로 결제를 완료할 수 있습니다.
                         </div>
                     )}
 
@@ -491,8 +560,8 @@ export default function OrderDetailPage() {
                         </>
                     ) : (
                         <div className="rounded-md bg-zinc-800 px-3 py-2">
-                            MD 상품은 결제 대기/결제 완료 상태에서 취소/환불 신청이 가능합니다. POP 및 멤버십 상품은
-                            고객센터를 통해 문의해 주세요.
+                            MD 상품은 결제 대기/결제 완료 상태에서 취소/환불 신청이 가능합니다. POP 및 멤버십 상품은 고객센터를 통해 문의해
+                            주세요.
                         </div>
                     )}
                 </section>
@@ -506,6 +575,16 @@ export default function OrderDetailPage() {
                                 const md = isMdItem(item);
                                 const itemCancelable = canCancelItem(item);
 
+                                // 1) 스냅샷이 있으면 그걸 우선 (현재는 null이라 대부분 비어있을 것)
+                                const snapThumb = toImageSrc(item.itemImageSnapshot);
+
+                                // 2) 우회: itemNo로 가져온 썸네일
+                                const liveThumb =
+                                    typeof item.itemNo === "number" ? (thumbMap[item.itemNo] ?? "") : "";
+
+                                // 최종 썸네일
+                                const finalThumb = snapThumb || liveThumb || "/icons/t1.png";
+
                                 return (
                                     <li
                                         key={`${item.orderItemNo}-${idx}`}
@@ -515,9 +594,14 @@ export default function OrderDetailPage() {
                                         <div className="w-16 h-16 rounded-lg bg-zinc-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
                                             <img
-                                                src={item.itemImageSnapshot || "/icons/t1.png"}
+                                                src={finalThumb}
                                                 alt={item.itemNameSnapshot}
                                                 className="w-full h-full object-cover"
+                                                onError={(e) => {
+                                                    const el = e.currentTarget;
+                                                    if (el.src.includes("/icons/t1.png")) return;
+                                                    el.src = "/icons/t1.png";
+                                                }}
                                             />
                                         </div>
 
@@ -526,28 +610,19 @@ export default function OrderDetailPage() {
                                             <div className="font-semibold truncate">{item.itemNameSnapshot}</div>
 
                                             {item.itemOptionSnapshot && (
-                                                <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">
-                                                    {item.itemOptionSnapshot}
-                                                </div>
+                                                <div className="mt-0.5 text-[11px] md:text-xs text-zinc-400">{item.itemOptionSnapshot}</div>
                                             )}
 
                                             <div className="mt-1 text-[11px] md:text-xs text-zinc-400">
                                                 개당 {formatMoney(item.priceAtOrder)}원 · 수량 {item.quantity}개
                                             </div>
 
-                                            {/* 🔥 MD 뱃지만 표시 */}
-                                            {md && (
-                                                <div className="mt-1 text-[11px] md:text-xs text-emerald-400">
-                                                    MD 상품
-                                                </div>
-                                            )}
+                                            {md && <div className="mt-1 text-[11px] md:text-xs text-emerald-400">MD 상품</div>}
                                         </div>
 
                                         {/* 금액 + 취소 버튼/문구 */}
                                         <div className="text-right flex flex-col justify-between items-end gap-2">
-                                            <div className="text-sm md:text-base font-semibold">
-                                                {formatMoney(item.lineTotal)}원
-                                            </div>
+                                            <div className="text-sm md:text-base font-semibold">{formatMoney(item.lineTotal)}원</div>
 
                                             {itemCancelable ? (
                                                 <button
@@ -559,9 +634,7 @@ export default function OrderDetailPage() {
                                                     {cancelItemLoading === item.orderItemNo ? "취소 처리 중…" : "이 상품 취소"}
                                                 </button>
                                             ) : (
-                                                <span className="text-[11px] md:text-xs text-zinc-500">
-                          취소/환불 불가
-                        </span>
+                                                <span className="text-[11px] md:text-xs text-zinc-500">취소/환불 불가</span>
                                             )}
                                         </div>
                                     </li>
@@ -578,9 +651,7 @@ export default function OrderDetailPage() {
                         <dl className="space-y-2 text-xs md:text-sm">
                             <div className="flex justify-between">
                                 <dt className="text-zinc-500">이용권</dt>
-                                <dd className="text-zinc-100">
-                                    {getMembershipDisplayName(data.membershipPlanCode)}
-                                </dd>
+                                <dd className="text-zinc-100">{getMembershipDisplayName(data.membershipPlanCode)}</dd>
                             </div>
                             <div className="flex justify-between">
                                 <dt className="text-zinc-500">결제 방식</dt>
@@ -598,7 +669,6 @@ export default function OrderDetailPage() {
                     </section>
                 )}
 
-                {/* 구분선 */}
                 <hr className="border-zinc-800 mb-6" />
 
                 {/* 결제 정보 */}
@@ -657,9 +727,8 @@ export default function OrderDetailPage() {
                     </div>
                 </section>
 
-                {/* 하단 버튼: 결제하기 + 전체 취소 + 고객센터 */}
+                {/* 하단 버튼 */}
                 <section className="mb-4 space-y-2">
-                    {/* ✅ 결제하기(ORDERED + MD only) */}
                     {canPayNow && (
                         <button
                             type="button"
