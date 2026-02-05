@@ -45,6 +45,9 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     implementation 'nz.net.ultraq.thymeleaf:thymeleaf-layout-dialect:3.1.0'
 
+    implementation "org.hibernate.common:hibernate-commons-annotations:6.0.6.Final"
+
+
     compileOnly 'org.projectlombok:lombok'                                  /* 롬북 */
     annotationProcessor 'org.projectlombok:lombok'                          /* 롬북 */
     testCompileOnly 'org.projectlombok:lombok'                              /* 롬북 */
