@@ -1,346 +1,368 @@
-// src/app/community/(no-sidebar)/my/post/page.tsx
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { apiClient } from "@/lib/apiClient";
 
-// =========================
-// 타입
-// =========================
+type RouteCategory = "about" | "lounge" | "to-t1";
+
+// ✅ 백엔드 enum과 100% 일치
+type BoardType = "COMMUNITY";
+
+// ✅ categoryCode 컬럼 재사용 (COMMUNITY일 때만 의미가 이거)
+type CommunityCategoryCode = "ABOUT" | "LOUNGE" | "TO_T1";
+
+interface MemberReadOneRes {
+    memberEmail: string;
+    memberRole: string; // "USER" | "ADMIN" | "PLAYER_..." ...
+    membershipPayType?: string; // "NO_MEMBERSHIP" | "ONE_TIME" | "YEARLY" | "RECURRING"
+}
+
 interface ApiResult<T> {
     isSuccess: boolean;
-    resCode: number;
-    resMessage: string;
+    resCode: number | string;
+    resMessage: string | null;
     result: T;
+    message?: string;
+    path?: string;
+    timestamp?: string;
 }
 
-type TabKey = "post" | "comment" | "reply";
-
-interface PageResponseDTO<T> {
-    dtoList: T[];
-    total: number;
-}
-
-// ✅ 내가 쓴 글(포스트) DTO (필요하면 필드명 맞춰서 변경)
-interface MyPostItem {
+// ✅ 목록 응답(백엔드 ReadAllBoardRes 기준)
+interface BoardSummary {
     boardNo: number;
-    category?: string | null;
-    title: string;
-    createdAt?: string | null; // createdDate/latestDate 등 실제 필드로 바꿔도 됨
+    boardTitle: string;
+    boardWriter: string;
+
+    // 목록에서 작성자 판별하려면 이메일이 필요합니다.
+    // ✅ 백엔드에 있으면 내려오게 하는 게 베스트인데,
+    // 형님이 이미 상세에서는 boardWriterEmail을 쓰고 있으니 목록도 가능하면 추가 추천.
+    boardWriterEmail?: string | null;
+
+    createDate?: string;
+    latestDate?: string;
 }
 
-// ✅ 내가 쓴 댓글 DTO (필요하면 필드명 맞춰서 변경)
-interface MyCommentItem {
-    commentNo: number;
-    boardNo: number;
-    boardTitle?: string | null; // 있으면 표시
-    commentContent: string;
-    createdAt?: string | null;
+function isPlayerRole(role?: string) {
+    return !!role && role.startsWith("PLAYER");
+}
+function isAdminRole(role?: string) {
+    return role === "ADMIN" || role === "MANAGER";
+}
+function isMembershipActive(m: MemberReadOneRes | null) {
+    if (!m) return false;
+    return (m.membershipPayType ?? "NO_MEMBERSHIP") !== "NO_MEMBERSHIP";
 }
 
-function cx(...arr: Array<string | false | null | undefined>) {
-    return arr.filter(Boolean).join(" ");
+// ✅ 핵심: 멤버십 권한(멤버십 OR 선수 OR 관리자)
+function hasMembershipPrivilege(m: MemberReadOneRes | null) {
+    if (!m) return false;
+    if (isAdminRole(m.memberRole)) return true;
+    if (isPlayerRole(m.memberRole)) return true; // 🔥 선수 특권
+    return isMembershipActive(m);
 }
 
-// "2025-12-19T14:22:30.396359" → "2025.12.19 14:22"
-function formatKoreanDateTime(raw?: string | null): string {
-    if (!raw) return "";
-    const s = raw.trim();
-    if (!s) return "";
-    const normalized = s.replace(" ", "T");
+function categoryMeta(route: RouteCategory) {
+    const map: Record<
+        RouteCategory,
+        {
+            title: string;
+            boardType: BoardType;
+            categoryCode: CommunityCategoryCode;
+            hint: string;
+            privateNotice?: string;
+        }
+    > = {
+        about: {
+            title: "About T1",
+            boardType: "COMMUNITY",
+            categoryCode: "ABOUT",
+            hint: "멤버십 회원들끼리 이야기하는 커뮤니티에요.",
+        },
+        lounge: {
+            title: "T1 Lounge",
+            boardType: "COMMUNITY",
+            categoryCode: "LOUNGE",
+            hint: "멤버십 회원들만 이용 가능한 공간이에요.",
+            privateNotice: "스타에게 노출되지 않는 비공개 보드에요.",
+        },
+        "to-t1": {
+            title: "To. T1",
+            boardType: "COMMUNITY",
+            categoryCode: "TO_T1",
+            hint: "멤버십 회원이 작성하고, 매니저(관리자) / 본인만 열람하는 공간이에요.",
+            privateNotice: "매니저만 열람할 수 있는 비공개 보드에요.",
+        },
+    };
+    return map[route];
+}
 
-    const d = new Date(normalized);
-    if (!Number.isNaN(d.getTime())) {
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mi = String(d.getMinutes()).padStart(2, "0");
-        return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
+/**
+ * ✅ 변경된 TO_T1 정책(형님 요구사항)
+ * - 목록은 "전체 글"을 다 띄운다 (관리자/유저/선수 모두)
+ * - 하지만 "관리자"가 아니고 "내 글"도 아니면:
+ *    - 제목/작성자/날짜 대신 "비밀글입니다."만 보여준다
+ *    - 클릭도 안되게 막는다
+ *
+ * 즉, TO_T1에서 mineOnly는 더 이상 쓰지 않는다.
+ */
+function getAccess(route: RouteCategory, me: MemberReadOneRes | null) {
+    const role = me?.memberRole;
+    const admin = isAdminRole(role);
+    const player = isPlayerRole(role);
+
+    // 관리자: 다 가능
+    if (admin) {
+        return { canReadList: true, canWrite: true, reason: "" };
     }
 
-    const m = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-    if (m) {
-        const [, yyyy, mm, dd, hh, mi] = m;
-        return `${yyyy}.${mm}.${dd} ${hh}:${mi}`;
+    // ✅ 멤버십 권한(멤버십 OR 선수)
+    const privileged = hasMembershipPrivilege(me);
+
+    // 권한 없으면 차단
+    if (!privileged) {
+        return {
+            canReadList: false,
+            canWrite: false,
+            reason: "멤버십 회원에게 공개된 페이지예요.",
+        };
     }
 
-    return s;
+    // Lounge는 선수 차단 유지
+    if (route === "lounge") {
+        if (player) {
+            return {
+                canReadList: false,
+                canWrite: false,
+                reason: "스타에게 노출되지 않는 비공개 보드에요.",
+            };
+        }
+        return { canReadList: true, canWrite: true, reason: "" };
+    }
+
+    // to-t1: 목록은 전체 허용(단, 마스킹은 렌더링에서 처리)
+    if (route === "to-t1") {
+        return { canReadList: true, canWrite: true, reason: "" };
+    }
+
+    // about
+    return { canReadList: true, canWrite: true, reason: "" };
 }
 
-// =========================
-// ✅ API 호출 (여기 엔드포인트만 형님 백엔드에 맞게)
-// =========================
-async function fetchMyPosts(page: number, size: number) {
-    const qs = new URLSearchParams();
-    qs.set("page", String(page));
-    qs.set("size", String(size));
-    qs.set("sortBy", "boardNo"); // 필요 시 수정
-
-    // ✅ 형님 백엔드에 맞게 바꿔도 되는 부분
-    const res = await apiClient.get<ApiResult<PageResponseDTO<MyPostItem>>>(`/boards/my?${qs.toString()}`);
-    return res.data;
+function TopPrivateNoticeBar({ text }: { text: string }) {
+    return (
+        <div className="mb-4 rounded-xl bg-black/30 ring-1 ring-white/10 px-4 py-3">
+            <div className="flex items-center justify-center gap-2 text-sm text-white/70">
+                <span className="text-base">🔒</span>
+                <span>{text}</span>
+            </div>
+        </div>
+    );
 }
 
-async function fetchMyComments(page: number, size: number) {
-    const qs = new URLSearchParams();
-    qs.set("page", String(page));
-    qs.set("size", String(size));
-    qs.set("sortBy", "commentNo");
+// ✅ 서버 LocalDateTime → JS Date 안전 변환
+function parseServerDate(raw?: string | null): Date | null {
+    if (!raw) return null;
 
-    // ✅ 형님 백엔드에 맞게 바꿔도 되는 부분
-    const res = await apiClient.get<ApiResult<PageResponseDTO<MyCommentItem>>>(`/comment/my?${qs.toString()}`);
-    return res.data;
+    let s = raw.trim();
+    if (!s) return null;
+
+    // 마이크로초(6자리) → 밀리초(3자리)
+    s = s.replace(/(\.\d{3})\d+/, "$1");
+
+    // 타임존 없으면 KST 보정
+    if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(s)) {
+        s += "+09:00";
+    }
+
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export default function CommunityMyPostPage() {
-    const router = useRouter();
-    const sp = useSearchParams();
+function formatDateTime(raw?: string | null): string {
+    const d = parseServerDate(raw);
+    if (!d) return "";
+    return d.toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
 
-    // ✅ hydration 안전
-    const [mounted, setMounted] = useState(false);
-    const [token, setToken] = useState<string | null>(null);
+export default function CommunityCategoryPage() {
+    const params = useParams();
+    const raw = (params?.category as string | undefined) ?? "about";
+
+    const route: RouteCategory =
+        raw === "about" || raw === "lounge" || raw === "to-t1" ? raw : "about";
+
+    const meta = useMemo(() => categoryMeta(route), [route]);
+
+    const [me, setMe] = useState<MemberReadOneRes | null>(null);
+    const [loadingMe, setLoadingMe] = useState(true);
+
+    const [posts, setPosts] = useState<BoardSummary[]>([]);
+    const [loadingPosts, setLoadingPosts] = useState(true);
+
+    const access = useMemo(() => getAccess(route, me), [route, me]);
 
     useEffect(() => {
-        setMounted(true);
-        setToken(localStorage.getItem("accessToken"));
+        const run = async () => {
+            try {
+                const res = await apiClient.get<ApiResult<MemberReadOneRes>>("/member/readOne");
+                setMe(res.data.result);
+            } catch {
+                setMe(null);
+            } finally {
+                setLoadingMe(false);
+            }
+        };
+        run();
     }, []);
 
-    // 탭
-    const tab = useMemo<TabKey>(() => {
-        const t = (sp.get("tab") ?? "post").toLowerCase();
-        if (t === "comment") return "comment";
-        if (t === "reply") return "reply";
-        return "post";
-    }, [sp]);
-
-    const setTab = (next: TabKey) => {
-        const params = new URLSearchParams(sp.toString());
-        params.set("tab", next);
-        router.replace(`/community/my/post?${params.toString()}`);
-    };
-
-    // 페이지네이션(형님 필요 없으면 나중에 없애도 됨)
-    const [page] = useState(0);
-    const [size] = useState(30);
-
-    // 데이터 상태
-    const [loading, setLoading] = useState(true);
-    const [err, setErr] = useState<string | null>(null);
-
-    const [posts, setPosts] = useState<MyPostItem[]>([]);
-    const [comments, setComments] = useState<MyCommentItem[]>([]);
-
     useEffect(() => {
-        let alive = true;
+        if (loadingMe) return;
+
+        if (!access.canReadList) {
+            setPosts([]);
+            setLoadingPosts(false);
+            return;
+        }
 
         const run = async () => {
-            if (!mounted) return;
-
-            if (!token) {
-                if (!alive) return;
-                setLoading(false);
-                setErr(null);
-                setPosts([]);
-                setComments([]);
-                return;
-            }
-
-            setLoading(true);
-            setErr(null);
-
+            setLoadingPosts(true);
             try {
-                // ✅ 답글은 아직 안 함 → 탭 눌러도 빈 상태만 보여주기
-                if (tab === "post") {
-                    const data = await fetchMyPosts(page, size);
-                    if (!alive) return;
+                // ✅ TO_T1도 이제 mineOnly로 자르지 않고 전체 목록 요청
+                const qs = new URLSearchParams({
+                    boardType: meta.boardType,
+                    categoryCode: meta.categoryCode,
+                    mineOnly: "false",
+                });
 
-                    if (!data?.isSuccess || !data?.result) {
-                        setErr(data?.resMessage ?? "내가 쓴 글을 불러오지 못했습니다.");
-                        setPosts([]);
-                        return;
-                    }
+                const res = await apiClient.get<ApiResult<any>>(`/board?${qs.toString()}`);
+                const r = res.data.result as any;
 
-                    setPosts(Array.isArray(data.result.dtoList) ? data.result.dtoList : []);
-                } else if (tab === "comment") {
-                    const data = await fetchMyComments(page, size);
-                    if (!alive) return;
+                const list: BoardSummary[] =
+                    Array.isArray(r) ? r
+                        : Array.isArray(r?.dtoList) ? r.dtoList
+                            : Array.isArray(r?.content) ? r.content
+                                : [];
 
-                    if (!data?.isSuccess || !data?.result) {
-                        setErr(data?.resMessage ?? "내가 쓴 댓글을 불러오지 못했습니다.");
-                        setComments([]);
-                        return;
-                    }
-
-                    setComments(Array.isArray(data.result.dtoList) ? data.result.dtoList : []);
-                } else {
-                    // reply
-                    setErr(null);
-                }
-            } catch {
-                if (!alive) return;
-                setErr("통신 오류");
-                if (tab === "post") setPosts([]);
-                if (tab === "comment") setComments([]);
+                setPosts(list);
+            } catch (e) {
+                console.error("LIST ERROR", e);
+                setPosts([]);
             } finally {
-                if (!alive) return;
-                setLoading(false);
+                setLoadingPosts(false);
             }
         };
 
         run();
-        return () => {
-            alive = false;
-        };
-    }, [mounted, token, tab, page, size]);
+    }, [loadingMe, meta.boardType, meta.categoryCode, access.canReadList]);
 
-    // =========================
-    // 렌더
-    // =========================
-    if (!mounted) {
+    if (loadingMe) return <div className="text-white/70">불러오는 중...</div>;
+
+    const shouldShowTopNotice = !!meta.privateNotice;
+
+    if (!access.canReadList) {
         return (
-            <main className="min-h-screen bg-black text-white">
-                <div className="mx-auto max-w-[720px] px-6 py-14">
-                    <div className="text-left text-sm text-white/60">불러오는 중…</div>
+            <div className="flex flex-col">
+                {shouldShowTopNotice && meta.privateNotice && (
+                    <TopPrivateNoticeBar text={meta.privateNotice} />
+                )}
+
+                <div className="flex min-h-[520px] flex-col items-center justify-center gap-4">
+                    <div className="text-4xl">🔒</div>
+                    <div className="text-white/80">{access.reason}</div>
+
+                    <Link
+                        href="/membership/all"
+                        className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white hover:bg-orange-500"
+                    >
+                        멤버십 가입하기
+                    </Link>
                 </div>
-            </main>
+            </div>
         );
     }
 
-    if (!token) {
-        return (
-            <main className="min-h-screen bg-black text-white">
-                <div className="mx-auto max-w-[720px] px-6 py-14">
-                    <h1 className="text-left text-2xl font-semibold">내가 쓴 글</h1>
-
-                    <div className="mt-10 text-left">
-                        <div className="text-sm font-semibold text-white/90">로그인이 필요합니다.</div>
-                        <div className="mt-2 text-xs text-white/60">
-                            내가 쓴 글/댓글은 로그인 후 확인할 수 있습니다.
-                        </div>
-
-                        <div className="mt-6 flex items-center gap-2">
-                            <Link
-                                href="/login"
-                                className="rounded-full bg-white px-6 py-2 text-xs font-bold text-black hover:bg-white/90"
-                            >
-                                로그인
-                            </Link>
-                            <button
-                                onClick={() => router.back()}
-                                className="rounded-full border border-white/10 bg-white/10 px-6 py-2 text-xs font-bold text-white hover:bg-white/15"
-                            >
-                                뒤로
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </main>
-        );
-    }
-
-    const tabLabel: Record<TabKey, string> = {
-        post: "포스트",
-        comment: "댓글",
-        reply: "답글",
-    };
+    const myEmailLower = (me?.memberEmail ?? "").toLowerCase();
+    const isAdmin = isAdminRole(me?.memberRole);
 
     return (
-        <main className="min-h-screen bg-black text-white">
-            <div className="mx-auto max-w-[720px] px-6 py-14">
-                <h1 className="text-left text-2xl font-semibold">내가 쓴 글</h1>
+        <div className="flex flex-col gap-4">
+            {/* 헤더 */}
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+                <div>
+                    <div className="text-lg font-bold text-white">{meta.title}</div>
+                    <div className="mt-1 text-sm text-white/50">{meta.hint}</div>
+                </div>
 
-                {/* 탭 */}
-                <div className="mt-6 flex items-end gap-6 text-sm text-white/60">
-                    {(["post", "comment", "reply"] as TabKey[]).map((k) => {
-                        const active = tab === k;
+                {access.canWrite && (
+                    <Link
+                        href={`/community/${route}/write`}
+                        className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15"
+                    >
+                        글쓰기
+                    </Link>
+                )}
+            </div>
+
+            {shouldShowTopNotice && meta.privateNotice && (
+                <TopPrivateNoticeBar text={meta.privateNotice} />
+            )}
+
+            {/* 목록 */}
+            {loadingPosts ? (
+                <div className="text-white/60">게시글 불러오는 중...</div>
+            ) : posts.length === 0 ? (
+                <div className="rounded-2xl bg-black/20 p-6 text-white/60">아직 글이 없습니다.</div>
+            ) : (
+                <ul className="flex flex-col gap-2">
+                    {posts.map((p) => {
+                        // ✅ TO_T1에서만: 내 글/관리자만 정상 노출, 그 외는 마스킹 + 클릭 금지
+                        const writerEmailLower = (p.boardWriterEmail ?? "").toLowerCase();
+                        const isOwner =
+                            !!myEmailLower &&
+                            !!writerEmailLower &&
+                            myEmailLower === writerEmailLower;
+
+                        const shouldMask = route === "to-t1" && !isAdmin && !isOwner;
+
+                        if (shouldMask) {
+                            // 🔥 클릭 불가 + "비밀글입니다."
+                            return (
+                                <li key={p.boardNo}>
+                                    <div
+                                        className="block cursor-not-allowed rounded-2xl bg-black/20 p-4 opacity-80"
+                                        title="비밀글은 열람할 수 없습니다."
+                                    >
+                                        <div className="text-white/70 font-semibold">비밀글입니다.</div>
+                                    </div>
+                                </li>
+                            );
+                        }
+
+                        // ✅ 정상 노출(관리자 or 내 글 or TO_T1 아닌 경우)
                         return (
-                            <button
-                                key={k}
-                                onClick={() => setTab(k)}
-                                className={cx(
-                                    "relative pb-2 transition",
-                                    active ? "text-white font-medium" : "hover:text-white/90"
-                                )}
-                            >
-                                {tabLabel[k]}
-                                {active ? (
-                                    <span className="absolute left-0 -bottom-[2px] h-[2px] w-8 bg-white" />
-                                ) : null}
-                            </button>
+                            <li key={p.boardNo}>
+                                <Link
+                                    href={`/community/${route}/${p.boardNo}`}
+                                    className="block rounded-2xl bg-black/20 p-4 hover:bg-black/30"
+                                >
+                                    <div className="text-white font-semibold">{p.boardTitle}</div>
+                                    <div className="mt-1 text-xs text-white/50">
+                                        {p.boardWriter} · {formatDateTime(p.createDate ?? p.latestDate)}
+                                    </div>
+                                </Link>
+                            </li>
                         );
                     })}
-                </div>
-
-                <div className="mt-4 h-px w-full bg-white/10" />
-
-                {/* 본문 */}
-                <div className="mt-10">
-                    {loading ? (
-                        <div className="text-left text-sm text-white/60">불러오는 중…</div>
-                    ) : err ? (
-                        <div className="text-left text-sm text-red-300">{err}</div>
-                    ) : tab === "post" ? (
-                        posts.length === 0 ? (
-                            <div className="mt-24 text-center text-sm text-white/50">
-                                작성한 포스트가 없어요.
-                            </div>
-                        ) : (
-                            <div className="space-y-6">
-                                {posts.map((p) => (
-                                    <div key={p.boardNo} className="text-left">
-                                        <Link
-                                            // ✅ 형님 커뮤니티 상세 라우트에 맞게 수정 가능
-                                            href={`/community/${p.category ?? "about"}/${p.boardNo}`}
-                                            className="text-sm font-semibold text-white/90 hover:text-white underline-offset-4 hover:underline"
-                                        >
-                                            {p.title}
-                                        </Link>
-                                        <div className="mt-2 text-xs text-white/50">
-                                            {formatKoreanDateTime(p.createdAt)}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )
-                    ) : tab === "comment" ? (
-                        comments.length === 0 ? (
-                            <div className="mt-24 text-center text-sm text-white/50">
-                                작성한 댓글이 없어요.
-                            </div>
-                        ) : (
-                            <div className="space-y-6">
-                                {comments.map((c) => (
-                                    <div key={c.commentNo} className="text-left">
-                                        <Link
-                                            href={`/community/about/${c.boardNo}`}
-                                            className="text-sm font-semibold text-white/90 hover:text-white underline-offset-4 hover:underline"
-                                            title="댓글이 달린 글로 이동"
-                                        >
-                                            {c.boardTitle ? c.boardTitle : `글 #${c.boardNo}`}
-                                        </Link>
-                                        <div className="mt-2 whitespace-pre-wrap text-sm text-white/75 leading-6">
-                                            {c.commentContent}
-                                        </div>
-                                        <div className="mt-2 text-xs text-white/50">
-                                            {formatKoreanDateTime(c.createdAt)}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )
-                    ) : (
-                        // ✅ 답글은 아직 미구현 → 요구대로 건드리지 않음
-                        <div className="mt-24 text-center text-sm text-white/50">
-                            답글 기능은 아직 준비 중입니다.
-                        </div>
-                    )}
-                </div>
-
-                <div className="h-10" />
-            </div>
-        </main>
+                </ul>
+            )}
+        </div>
     );
 }
